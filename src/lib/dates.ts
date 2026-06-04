@@ -76,10 +76,12 @@ export function resolveRange(
       return { start, end, ...prevByDuration(start, end) };
     }
     case 'this_month': {
+      // Month-to-date, compared against the same span of the previous month.
       const start = monthStart(z);
-      const end = monthEnd(z);
-      const prev = subMonths(z, 1);
-      return { start, end, prevStart: monthStart(prev), prevEnd: monthEnd(prev) };
+      const end = dayEnd(z);
+      const prevStart = monthStart(subMonths(z, 1));
+      const prevEnd = new Date(prevStart.getTime() + (end.getTime() - start.getTime()));
+      return { start, end, prevStart, prevEnd };
     }
     case 'last_month': {
       const lm = subMonths(z, 1);
