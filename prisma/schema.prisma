@@ -1,0 +1,527 @@
+// Laheeb Operations Atlas — data model
+// Money is stored as integer minor units (IQD = whole dinar, USD = cents) + a
+// currency code. Weights are integer grams. Rates/scores are Float. Derived
+// metrics (net sales, margins, yield, coverage days, …) are computed in
+// src/lib/metrics, never persisted, so there is exactly one definition.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum Role {
+  OWNER
+  ADMIN
+  ROASTERY_OPS
+  FINANCE
+  SALES_CRM
+  BRANCH_MANAGER
+  FRANCHISEE_VIEWER
+  VIEWER
+}
+
+enum Channel {
+  ONLINE_STORE
+  POS
+  CAFE
+  WHOLESALE
+  EVENTS
+  SOCIAL
+  RESELLERS
+  CORPORATE
+}
+
+enum Governorate {
+  BAGHDAD
+  ERBIL
+  BASRA
+  NAJAF
+  MOSUL
+  SULAYMANIYAH
+  KARBALA
+  KIRKUK
+  DUHOK
+  OTHER
+}
+
+enum ProductLine {
+  TURKISH
+  ESPRESSO
+  FILTER
+  DRIP_BAGS
+  SINGLE_ORIGIN
+  BLENDS
+  ACCESSORIES
+}
+
+enum Grind {
+  WHOLE_BEAN
+  ESPRESSO
+  FILTER
+  TURKISH
+  MOKA
+  NONE
+}
+
+enum RoastLevel {
+  LIGHT
+  MEDIUM
+  MEDIUM_DARK
+  DARK
+}
+
+enum OrderStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
+  RETURNED
+  REFUNDED
+}
+
+enum FulfillmentMethod {
+  PICKUP
+  COURIER
+  INTERNAL_DELIVERY
+  B2B
+  BRANCH_SALE
+}
+
+enum CustomerSegment {
+  NEW
+  RETURNING
+  LOYAL
+  INACTIVE
+  WHOLESALE
+  CORPORATE
+  FRANCHISE
+}
+
+enum MovementReason {
+  OPENING
+  PURCHASE
+  PRODUCTION_IN
+  SOLD
+  SAMPLED
+  WASTED
+  TEST
+  GIVEAWAY
+  INTERNAL
+  ADJUSTMENT
+}
+
+enum InventoryCategory {
+  GREEN_COFFEE
+  ROASTED
+  DRIP_BAGS
+  PACKAGING
+  ACCESSORY
+}
+
+enum ExpenseCategoryType {
+  GREEN_COFFEE
+  PACKAGING
+  SHIPPING
+  SALARIES
+  RENT
+  MARKETING
+  UTILITIES
+  TECH
+  MAINTENANCE
+  EQUIPMENT
+  OVERHEAD
+}
+
+enum ShipmentStatus {
+  DISPATCHED
+  IN_TRANSIT
+  DELIVERED
+  FAILED
+  RETURNED
+}
+
+enum Currency {
+  IQD
+  USD
+}
+
+enum DiscountType {
+  PERCENT
+  FIXED
+}
+
+enum UploadStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  PARTIAL
+}
+
+enum DatasetType {
+  PRODUCTS
+  ORDERS
+  CUSTOMERS
+  BATCHES
+  INVENTORY
+  EXPENSES
+  OFFERS
+  SHIPMENTS
+}
+
+// ---------------------------------------------------------------------------
+// Identity & access
+// ---------------------------------------------------------------------------
+
+model User {
+  id             String    @id @default(cuid())
+  email          String    @unique
+  name           String
+  hashedPassword String
+  role           Role      @default(VIEWER)
+  isActive       Boolean   @default(true)
+  branchId       String?
+  createdById    String?
+  lastLoginAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  branch         Branch?      @relation(fields: [branchId], references: [id])
+  createdBy      User?        @relation("UserCreatedBy", fields: [createdById], references: [id])
+  createdUsers   User[]       @relation("UserCreatedBy")
+  operatedBatches RoastBatch[] @relation("BatchOperator")
+  auditLogs      AuditLog[]
+
+  @@index([role])
+  @@index([branchId])
+}
+
+model Branch {
+  id          String      @id @default(cuid())
+  code        String      @unique
+  nameEn      String
+  nameAr      String
+  governorate Governorate @default(BAGHDAD)
+  isFranchise Boolean     @default(false)
+  isActive    Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+
+  users          User[]
+  orders         Order[]
+  stockMovements StockMovement[]
+  expenses       Expense[]
+  batches        RoastBatch[]
+  inventoryItems InventoryItem[]
+}
+
+// ---------------------------------------------------------------------------
+// Catalog
+// ---------------------------------------------------------------------------
+
+model Product {
+  id              String      @id @default(cuid())
+  sku             String      @unique
+  nameEn          String
+  nameAr          String
+  productLine     ProductLine
+  sizeGrams       Int?
+  sizeLabel       String
+  grind           Grind       @default(NONE)
+  roastLevel      RoastLevel?
+  origin          String?
+  isBlend         Boolean     @default(false)
+  sellingPrice    Int // minor units of sellingCurrency
+  sellingCurrency Currency    @default(IQD)
+  cogsPerUnit     Int // minor units of sellingCurrency
+  isActive        Boolean     @default(true)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  orderLines     OrderLine[]
+  batchLinks     BatchSkuLink[]
+  inventoryItems InventoryItem[]
+
+  @@index([productLine])
+  @@index([grind])
+  @@index([isActive])
+}
+
+// ---------------------------------------------------------------------------
+// Customers
+// ---------------------------------------------------------------------------
+
+model Customer {
+  id             String          @id @default(cuid())
+  externalId     String?         @unique
+  phone          String?
+  email          String?
+  nameEn         String?
+  nameAr         String?
+  governorate    Governorate?
+  segment        CustomerSegment @default(NEW)
+  campaignSource String?
+  firstOrderAt   DateTime?
+  lastOrderAt    DateTime?
+  ordersCount    Int             @default(0)
+  createdAt      DateTime        @default(now())
+
+  orders Order[]
+
+  @@index([segment])
+  @@index([governorate])
+}
+
+// ---------------------------------------------------------------------------
+// Sales
+// ---------------------------------------------------------------------------
+
+model Order {
+  id                String            @id @default(cuid())
+  orderNumber       String            @unique
+  placedAt          DateTime
+  customerId        String?
+  branchId          String?
+  channel           Channel
+  governorate       Governorate
+  fulfillmentMethod FulfillmentMethod
+  status            OrderStatus       @default(COMPLETED)
+  currency          Currency          @default(IQD)
+  grossAmount       Int               @default(0)
+  discountAmount    Int               @default(0)
+  refundAmount      Int               @default(0)
+  deliveryFee       Int               @default(0)
+  deliveryCost      Int               @default(0)
+  offerId           String?
+  uploadBatchId     String?
+  createdAt         DateTime          @default(now())
+
+  lines    OrderLine[]
+  customer Customer?   @relation(fields: [customerId], references: [id])
+  branch   Branch?     @relation(fields: [branchId], references: [id])
+  offer    Offer?      @relation(fields: [offerId], references: [id])
+  shipment Shipment?
+
+  @@index([placedAt])
+  @@index([channel])
+  @@index([governorate])
+  @@index([status])
+  @@index([customerId])
+  @@index([offerId])
+}
+
+model OrderLine {
+  id               String @id @default(cuid())
+  orderId          String
+  productId        String
+  sku              String // denormalized snapshot
+  quantity         Int
+  unitGrossPrice   Int
+  lineDiscount     Int    @default(0)
+  lineNet          Int
+  unitCogsSnapshot Int
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  @@index([orderId])
+  @@index([productId])
+}
+
+// ---------------------------------------------------------------------------
+// Production
+// ---------------------------------------------------------------------------
+
+model RoastBatch {
+  id                 String     @id @default(cuid())
+  batchNumber        String     @unique
+  roastDate          DateTime
+  packagingDate      DateTime?
+  origin             String
+  roastLevel         RoastLevel
+  profileNotes       String?
+  greenInputGrams    Int
+  roastedOutputGrams Int
+  qcScore            Float?
+  qcNotes            String?
+  operatorId         String?
+  branchId           String?
+  uploadBatchId      String?
+  createdAt          DateTime   @default(now())
+
+  operator User?          @relation("BatchOperator", fields: [operatorId], references: [id])
+  branch   Branch?        @relation(fields: [branchId], references: [id])
+  skuLinks BatchSkuLink[]
+
+  @@index([roastDate])
+  @@index([roastLevel])
+}
+
+model BatchSkuLink {
+  id             String @id @default(cuid())
+  batchId        String
+  productId      String
+  allocatedGrams Int?
+
+  batch   RoastBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  product Product    @relation(fields: [productId], references: [id])
+
+  @@unique([batchId, productId])
+}
+
+// ---------------------------------------------------------------------------
+// Inventory (ledger model: current stock = signed sum of movements)
+// ---------------------------------------------------------------------------
+
+model InventoryItem {
+  id            String            @id @default(cuid())
+  category      InventoryCategory
+  productId     String?
+  nameEn        String
+  nameAr        String
+  unit          String // "g", "unit", "sachet"
+  reorderPoint  Int?
+  avgDailyUsage Float?
+  unitCost      Int? // minor units IQD, for stock valuation
+  branchId      String?
+  createdAt     DateTime          @default(now())
+
+  product   Product?        @relation(fields: [productId], references: [id])
+  branch    Branch?         @relation(fields: [branchId], references: [id])
+  movements StockMovement[]
+
+  @@index([category])
+}
+
+model StockMovement {
+  id              String         @id @default(cuid())
+  inventoryItemId String
+  occurredAt      DateTime
+  reason          MovementReason
+  quantity        Int // signed: + in / - out, in the item's base unit
+  reference       String?
+  externalId      String?        @unique
+  expiryDate      DateTime?
+  branchId        String?
+  uploadBatchId   String?
+  createdAt       DateTime       @default(now())
+
+  inventoryItem InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+  branch        Branch?       @relation(fields: [branchId], references: [id])
+
+  @@index([inventoryItemId, occurredAt])
+  @@index([reason])
+}
+
+// ---------------------------------------------------------------------------
+// Finance
+// ---------------------------------------------------------------------------
+
+model ExpenseCategory {
+  id     String              @id @default(cuid())
+  type   ExpenseCategoryType @unique
+  nameEn String
+  nameAr String
+
+  expenses Expense[]
+}
+
+model Expense {
+  id            String   @id @default(cuid())
+  categoryId    String
+  incurredAt    DateTime
+  amount        Int
+  currency      Currency @default(IQD)
+  vendor        String?
+  note          String?
+  branchId      String?
+  uploadBatchId String?
+  createdAt     DateTime @default(now())
+
+  category ExpenseCategory @relation(fields: [categoryId], references: [id])
+  branch   Branch?         @relation(fields: [branchId], references: [id])
+
+  @@index([incurredAt])
+  @@index([categoryId])
+}
+
+// ---------------------------------------------------------------------------
+// Offers
+// ---------------------------------------------------------------------------
+
+model Offer {
+  id            String       @id @default(cuid())
+  name          String
+  code          String?      @unique
+  isAutomatic   Boolean      @default(false)
+  discountType  DiscountType @default(PERCENT)
+  discountValue Float
+  startsAt      DateTime?
+  endsAt        DateTime?
+  createdAt     DateTime     @default(now())
+
+  orders Order[]
+}
+
+// ---------------------------------------------------------------------------
+// Fulfillment
+// ---------------------------------------------------------------------------
+
+model Shipment {
+  id            String         @id @default(cuid())
+  orderId       String         @unique
+  courier       String
+  status        ShipmentStatus @default(DISPATCHED)
+  dispatchedAt  DateTime?
+  deliveredAt   DateTime?
+  shippingCost  Int            @default(0)
+  governorate   Governorate
+  failureReason String?
+  createdAt     DateTime       @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([courier])
+}
+
+// ---------------------------------------------------------------------------
+// Ingestion / audit (UploadBatch wired when CSV import lands; AuditLog used now)
+// ---------------------------------------------------------------------------
+
+model UploadBatch {
+  id           String       @id @default(cuid())
+  dataset      DatasetType
+  fileName     String
+  uploadedById String?
+  uploadedAt   DateTime     @default(now())
+  status       UploadStatus @default(PENDING)
+  rowsTotal    Int          @default(0)
+  rowsInserted Int          @default(0)
+  rowsUpdated  Int          @default(0)
+  rowsSkipped  Int          @default(0)
+  errorReport  Json?
+
+  @@index([dataset])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String
+  entity    String?
+  entityId  String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([createdAt])
+}
