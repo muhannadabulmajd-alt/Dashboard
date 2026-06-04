@@ -1,0 +1,87 @@
+import { z } from 'zod';
+import {
+  CHANNELS,
+  GOVERNORATES,
+  PRODUCT_LINES,
+  GRINDS,
+  ROAST_LEVELS,
+  CUSTOMER_SEGMENTS,
+  FULFILLMENT_METHODS,
+} from './enums';
+
+export const RANGE_PRESETS = [
+  'today',
+  'yesterday',
+  '7d',
+  'this_month',
+  'last_month',
+  'all',
+  'custom',
+] as const;
+
+export const DashboardFiltersSchema = z.object({
+  range: z.enum(RANGE_PRESETS).default('this_month'),
+  from: z.string().optional(),
+  to: z.string().optional(),
+  channel: z.array(z.enum(CHANNELS)).optional(),
+  governorate: z.array(z.enum(GOVERNORATES)).optional(),
+  productLine: z.array(z.enum(PRODUCT_LINES)).optional(),
+  grind: z.array(z.enum(GRINDS)).optional(),
+  roastLevel: z.array(z.enum(ROAST_LEVELS)).optional(),
+  segment: z.array(z.enum(CUSTOMER_SEGMENTS)).optional(),
+  fulfillment: z.array(z.enum(FULFILLMENT_METHODS)).optional(),
+  sku: z.array(z.string()).optional(),
+  branchId: z.array(z.string()).optional(),
+});
+
+export type DashboardFilters = z.infer<typeof DashboardFiltersSchema>;
+
+/** Multi-select array filter keys, serialized as comma-separated URL params. */
+export const ARRAY_FILTER_KEYS = [
+  'channel',
+  'governorate',
+  'productLine',
+  'grind',
+  'roastLevel',
+  'segment',
+  'fulfillment',
+  'sku',
+  'branchId',
+] as const;
+
+type SearchParamsInput = Record<string, string | string[] | undefined>;
+
+/** Parse Next.js searchParams (or URLSearchParams entries) into typed filters. */
+export function parseFilters(input: SearchParamsInput): DashboardFilters {
+  const obj: Record<string, unknown> = {};
+  for (const key of ['range', 'from', 'to'] as const) {
+    const v = input[key];
+    if (typeof v === 'string' && v) obj[key] = v;
+  }
+  for (const key of ARRAY_FILTER_KEYS) {
+    const v = input[key];
+    if (v === undefined) continue;
+    const parts = (Array.isArray(v) ? v : [v]).flatMap((s) => s.split(','));
+    const cleaned = parts.map((s) => s.trim()).filter(Boolean);
+    if (cleaned.length) obj[key] = cleaned;
+  }
+  const parsed = DashboardFiltersSchema.safeParse(obj);
+  return parsed.success ? parsed.data : DashboardFiltersSchema.parse({});
+}
+
+/** Serialize filters back to URLSearchParams (arrays joined by commas). */
+export function serializeFilters(f: Partial<DashboardFilters>): URLSearchParams {
+  const sp = new URLSearchParams();
+  if (f.range) sp.set('range', f.range);
+  if (f.from) sp.set('from', f.from);
+  if (f.to) sp.set('to', f.to);
+  for (const key of ARRAY_FILTER_KEYS) {
+    const v = f[key];
+    if (v && v.length) sp.set(key, v.join(','));
+  }
+  return sp;
+}
+
+export function hasActiveFilters(f: DashboardFilters): boolean {
+  return ARRAY_FILTER_KEYS.some((k) => (f[k]?.length ?? 0) > 0);
+}
