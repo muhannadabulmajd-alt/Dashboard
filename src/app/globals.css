@@ -1,26 +1,45 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+@theme {
+  --color-background: #faf8f4;
+  --color-card: #ffffff;
+  --color-foreground: #1c1917;
+  --color-muted: #f1ece4;
+  --color-muted-foreground: #6b625a;
+  --color-border: #e7e0d6;
+  --color-input: #e7e0d6;
+  --color-primary: #6f4e37;
+  --color-primary-foreground: #ffffff;
+  --color-accent: #a9743f;
+  --color-accent-foreground: #ffffff;
+  --color-success: #15803d;
+  --color-success-soft: #dcfce7;
+  --color-danger: #b91c1c;
+  --color-danger-soft: #fee2e2;
+  --color-warning: #b45309;
+  --color-warning-soft: #fef3c7;
+
+  --font-sans: ui-sans-serif, system-ui, "Segoe UI", Tahoma, "Noto Sans Arabic",
+    "Cairo", "Helvetica Neue", Arial, sans-serif;
+
+  --radius: 0.75rem;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+*,
+::after,
+::before {
+  border-color: var(--color-border);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
+html,
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Tabular figures for KPI numbers regardless of locale digits. */
+.tabular {
+  font-variant-numeric: tabular-nums;
 }

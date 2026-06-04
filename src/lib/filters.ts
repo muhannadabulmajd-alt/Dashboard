@@ -85,3 +85,11 @@ export function serializeFilters(f: Partial<DashboardFilters>): URLSearchParams 
 export function hasActiveFilters(f: DashboardFilters): boolean {
   return ARRAY_FILTER_KEYS.some((k) => (f[k]?.length ?? 0) > 0);
 }
+
+/** Build a CSV export URL carrying the active filters + dataset + locale. */
+export function buildExportHref(dataset: string, filters: DashboardFilters, locale: string): string {
+  const sp = serializeFilters(filters);
+  sp.set('dataset', dataset);
+  sp.set('locale', locale);
+  return `/api/export?${sp.toString()}`;
+}
