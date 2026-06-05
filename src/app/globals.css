@@ -1,0 +1,45 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: #faf8f4;
+  --color-card: #ffffff;
+  --color-foreground: #1c1917;
+  --color-muted: #f1ece4;
+  --color-muted-foreground: #6b625a;
+  --color-border: #e7e0d6;
+  --color-input: #e7e0d6;
+  --color-primary: #6f4e37;
+  --color-primary-foreground: #ffffff;
+  --color-accent: #a9743f;
+  --color-accent-foreground: #ffffff;
+  --color-success: #15803d;
+  --color-success-soft: #dcfce7;
+  --color-danger: #b91c1c;
+  --color-danger-soft: #fee2e2;
+  --color-warning: #b45309;
+  --color-warning-soft: #fef3c7;
+
+  --font-sans: ui-sans-serif, system-ui, "Segoe UI", Tahoma, "Noto Sans Arabic",
+    "Cairo", "Helvetica Neue", Arial, sans-serif;
+
+  --radius: 0.75rem;
+}
+
+*,
+::after,
+::before {
+  border-color: var(--color-border);
+}
+
+html,
+body {
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Tabular figures for KPI numbers regardless of locale digits. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
