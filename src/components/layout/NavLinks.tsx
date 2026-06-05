@@ -11,6 +11,7 @@ import {
   Truck,
   Percent,
   Scale,
+  Upload,
   type LucideIcon,
 } from 'lucide-react';
 import { Link, usePathname } from '@/i18n/navigation';
@@ -27,6 +28,7 @@ const ICONS: Record<string, LucideIcon> = {
   Truck,
   Percent,
   Scale,
+  Upload,
 };
 
 export interface NavLinkItem {

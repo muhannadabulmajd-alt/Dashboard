@@ -88,5 +88,6 @@ export const NAV_ITEMS: NavItem[] = [
   { href: '/offers', key: 'offers', icon: 'Percent', capability: 'view:offers' },
   { href: '/pnl', key: 'pnl', icon: 'TrendingUp', capability: 'view:financial' },
   { href: '/compare', key: 'compare', icon: 'Scale', capability: 'view:dashboard' },
+  { href: '/admin/uploads', key: 'uploads', icon: 'Upload', capability: 'upload:data' },
   { href: '/admin/users', key: 'users', icon: 'Users', capability: 'manage:users' },
 ];

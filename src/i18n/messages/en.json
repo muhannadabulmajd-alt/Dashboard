@@ -14,6 +14,7 @@
     "fulfillment": "Fulfillment & Delivery",
     "offers": "Offers & Campaigns",
     "compare": "Compare",
+    "uploads": "Data import",
     "users": "Users",
     "section": "Dashboards",
     "admin": "Administration"
@@ -252,6 +253,32 @@
     "delta": "Change",
     "byChannel": "By channel",
     "byCity": "By city"
+  },
+  "uploads": {
+    "title": "Data import",
+    "subtitle": "Upload CSV files. Re-uploading the same file updates existing rows (dedup on natural keys).",
+    "dataset": "Dataset",
+    "file": "CSV file",
+    "import": "Import",
+    "template": "Template",
+    "datasets": {
+      "products": "Products",
+      "customers": "Customers",
+      "orders": "Orders",
+      "batches": "Roast batches"
+    },
+    "inserted": "Inserted",
+    "updated": "Updated",
+    "skipped": "Skipped",
+    "errors": "Errors",
+    "recent": "Recent uploads",
+    "fileName": "File",
+    "status": "Status",
+    "rows": "Rows (+ins / ~upd / −skip)",
+    "when": "When",
+    "forbidden": "You are not allowed to import data.",
+    "invalid": "Choose a valid dataset.",
+    "nofile": "Please choose a CSV file."
   },
   "stale": {
     "warning": "Showing seeded sample data — last updated {date}."
