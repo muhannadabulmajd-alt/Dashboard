@@ -34,7 +34,8 @@
     "language": "Language",
     "arabic": "العربية",
     "english": "English",
-    "selected": "{count} selected"
+    "selected": "{count} selected",
+    "downloadDeck": "Download deck (PDF)"
   },
   "login": {
     "title": "Sign in",

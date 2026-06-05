@@ -1,5 +1,6 @@
 import { getTranslations } from 'next-intl/server';
-import { AlertTriangle, CalendarClock } from 'lucide-react';
+import { AlertTriangle, CalendarClock, FileDown } from 'lucide-react';
+import { serializeFilters } from '@/lib/filters';
 import { getPageContext } from '@/server/page-context';
 import { getOrders, getPrevOrders, getOrderLines } from '@/server/db/repositories/sales.repo';
 import { getInventoryItems } from '@/server/db/repositories/inventory.repo';
@@ -24,6 +25,7 @@ export default async function ExecutiveOverviewPage({
   const { locale, user, filters, scope, range } = ctx;
   const t = await getTranslations('executive');
   const tk = await getTranslations('kpi');
+  const tc = await getTranslations('common');
 
   const [orders, prevOrders, lines, items, expenses] = await Promise.all([
     getOrders(filters, scope, range),
@@ -58,9 +60,26 @@ export default async function ExecutiveOverviewPage({
   const reorder = M.reorderAlerts(items);
   const expiry = M.nearExpiry(items, 21);
 
+  const deckQuery = (() => {
+    const sp = serializeFilters(filters);
+    sp.set('locale', locale);
+    return sp.toString();
+  })();
+
   return (
     <>
-      <PageHeader title={t('title')} subtitle={t('subtitle')} />
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <PageHeader title={t('title')} subtitle={t('subtitle')} />
+        {can(user.role, 'export:data') ? (
+          <a
+            href={`/api/reports/deck?${deckQuery}`}
+            className="inline-flex items-center gap-1.5 rounded-lg border bg-card px-3 py-1.5 text-xs font-medium hover:bg-muted"
+          >
+            <FileDown className="size-3.5" />
+            {tc('downloadDeck')}
+          </a>
+        ) : null}
+      </div>
 
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard label={tk('netSales')} value={formatMoney(net, 'IQD', locale)} delta={M.deltaPct(net, prevNet)} locale={locale} />

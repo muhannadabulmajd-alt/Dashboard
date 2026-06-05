@@ -34,7 +34,8 @@
     "language": "اللغة",
     "arabic": "العربية",
     "english": "English",
-    "selected": "{count} محدد"
+    "selected": "{count} محدد",
+    "downloadDeck": "تنزيل العرض (PDF)"
   },
   "login": {
     "title": "تسجيل الدخول",
