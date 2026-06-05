@@ -4,7 +4,7 @@ Guidance for working in this repository.
 
 ## What this is
 
-**Laheeb Operations Atlas** — a bilingual (AR/EN, RTL) BI dashboard for Laheeb Coffee, built on Next.js 16 (App Router) + Prisma 6 + PostgreSQL + Auth.js v5 + next-intl. This is the MVP: four pages (Executive Overview, Sales & Product, Inventory, P&L) on a full auth/RBAC/i18n/filter foundation.
+**Laheeb Operations Atlas** — a bilingual (AR/EN, RTL) BI dashboard for Laheeb Coffee, built on Next.js 16 (App Router) + Prisma 6 + PostgreSQL + Auth.js v5 + next-intl. Nine pages (Executive, Sales, Roastery, Inventory, Customers, Fulfillment, Offers, P&L, Compare) on a full auth/RBAC/i18n/filter foundation. New analytics follow the same pattern: pure tested metric in `src/lib/metrics` → repository → page.
 
 ## Running it (ephemeral container)
 

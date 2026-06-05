@@ -2,7 +2,7 @@
 
 Internal Roastery & Commerce Intelligence dashboard for **Laheeb Coffee (قهوة لهيب)** — a bilingual (Arabic/English, RTL) business‑intelligence app that brings sales, roasting, inventory, customers, fulfillment, offers, and expenses into one always‑on view.
 
-This repository is the **MVP (iteration 1)**: foundation + the four most important pages.
+This repository covers the **MVP (iteration 1)** plus **Phase 2** analytics — nine dashboard pages on a full auth/RBAC/i18n/filter foundation.
 
 ## Stack
 
@@ -14,7 +14,7 @@ This repository is the **MVP (iteration 1)**: foundation + the four most importa
 
 ## Features in this iteration
 
-- **Pages:** Executive Overview · Sales & Product View · Inventory & Stock Health · P&L & Unit Economics (finance‑gated)
+- **Pages:** Executive Overview · Sales & Product · Roastery & Production · Inventory & Stock Health · Customers & CRM · Fulfillment & Delivery · Offers & Campaigns · P&L & Unit Economics (finance‑gated) · Compare
 - **Global filter bar** (date range, channel, city, product line, grind) that drives every card, chart, table, and export via URL state
 - **RBAC:** Owner/Admin, Finance, Roastery Ops, Sales/CRM, Branch Manager, Franchisee, Viewer — with branch data‑scoping enforced at the query layer
 - **CSV export** for tables (UTF‑8 BOM so Arabic renders in Excel), audit‑logged
@@ -74,7 +74,6 @@ pnpm dev                      # http://localhost:3000  (redirects to /ar)
 
 ## Roadmap (next iterations)
 
-- Pages: Roastery & Production, Customers & CRM, Fulfillment & Delivery, Offers & Campaigns, Compare
 - CSV **import** pipeline (dedup on natural keys) to replace seed data
 - Branded PDF management deck + scheduled owner/finance reports
 - Franchise module with scoped franchisee accounts; system connectors (store/POS/accounting/courier) behind the same repository interface
