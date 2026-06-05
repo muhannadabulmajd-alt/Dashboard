@@ -37,7 +37,7 @@ async function defaultBranchId(uploaderBranchId: string | null): Promise<string 
 export async function ingestCsv(
   dataset: ImportDataset,
   csvText: string,
-  opts: { userId: string; branchId: string | null; fileName: string },
+  opts: { userId: string | null; branchId: string | null; fileName: string },
 ): Promise<IngestSummary> {
   const rows = csvToRows(csvText);
   const upload = await prisma.uploadBatch.create({

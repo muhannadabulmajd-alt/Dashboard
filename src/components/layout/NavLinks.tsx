@@ -14,6 +14,7 @@ import {
   Upload,
   Store,
   Building2,
+  Cable,
   type LucideIcon,
 } from 'lucide-react';
 import { Link, usePathname } from '@/i18n/navigation';
@@ -33,6 +34,7 @@ const ICONS: Record<string, LucideIcon> = {
   Upload,
   Store,
   Building2,
+  Cable,
 };
 
 export interface NavLinkItem {

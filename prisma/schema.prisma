@@ -525,3 +525,57 @@ model AuditLog {
   @@index([userId])
   @@index([createdAt])
 }
+
+// ---------------------------------------------------------------------------
+// System connectors (pull external data through the same ingestion path)
+// ---------------------------------------------------------------------------
+
+enum ConnectorType {
+  SAMPLE
+  SHOPIFY
+  ODOO
+  POS
+  COURIER
+}
+
+enum ConnectorStatus {
+  ACTIVE
+  PAUSED
+}
+
+enum SyncStatus {
+  SUCCESS
+  PARTIAL
+  FAILED
+}
+
+model Connector {
+  id         String          @id @default(cuid())
+  name       String
+  type       ConnectorType
+  dataset    DatasetType
+  status     ConnectorStatus @default(ACTIVE)
+  config     Json?
+  lastSyncAt DateTime?
+  createdAt  DateTime        @default(now())
+
+  runs SyncRun[]
+
+  @@index([status])
+}
+
+model SyncRun {
+  id           String     @id @default(cuid())
+  connectorId  String
+  startedAt    DateTime   @default(now())
+  finishedAt   DateTime?
+  status       SyncStatus @default(SUCCESS)
+  rowsInserted Int        @default(0)
+  rowsUpdated  Int        @default(0)
+  rowsSkipped  Int        @default(0)
+  message      String?
+
+  connector Connector @relation(fields: [connectorId], references: [id], onDelete: Cascade)
+
+  @@index([connectorId, startedAt])
+}

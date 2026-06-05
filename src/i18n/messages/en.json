@@ -16,6 +16,7 @@
     "compare": "Compare",
     "franchise": "Franchise Readiness",
     "uploads": "Data import",
+    "connectors": "Connectors",
     "branches": "Branches",
     "users": "Users",
     "section": "Dashboards",
@@ -276,6 +277,25 @@
     "marginScore": "Margin",
     "ordersScore": "Orders",
     "comparison": "Net sales by branch"
+  },
+  "connectors": {
+    "title": "System connectors",
+    "subtitle": "Pull data from external systems through the same idempotent import path.",
+    "name": "Connector",
+    "type": "Type",
+    "dataset": "Dataset",
+    "status": "Status",
+    "lastSync": "Last sync",
+    "action": "Action",
+    "syncNow": "Sync now",
+    "active": "Active",
+    "paused": "Paused",
+    "runs": "Recent syncs",
+    "result": "Result",
+    "rows": "Rows (+ins / ~upd / −skip)",
+    "when": "When",
+    "message": "Message",
+    "never": "Never"
   },
   "branches": {
     "title": "Branches & franchises",

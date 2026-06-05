@@ -39,8 +39,38 @@ async function clear() {
   await prisma.product.deleteMany();
   await prisma.customer.deleteMany();
   await prisma.uploadBatch.deleteMany();
+  await prisma.syncRun.deleteMany();
+  await prisma.connector.deleteMany();
   await prisma.user.deleteMany();
   await prisma.branch.deleteMany();
+}
+
+async function seedConnectors() {
+  await prisma.connector.createMany({
+    data: [
+      {
+        name: 'Online Store (sample)',
+        type: 'SAMPLE',
+        dataset: 'ORDERS',
+        status: 'ACTIVE',
+        config: { note: 'Generates sample orders from the live catalog on each sync.' },
+      },
+      {
+        name: 'Odoo ERP',
+        type: 'ODOO',
+        dataset: 'PRODUCTS',
+        status: 'PAUSED',
+        config: { note: 'Configure API credentials to enable.' },
+      },
+      {
+        name: 'Courier API',
+        type: 'COURIER',
+        dataset: 'SHIPMENTS',
+        status: 'PAUSED',
+        config: { note: 'Configure courier endpoint to enable.' },
+      },
+    ],
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -639,6 +669,9 @@ async function main() {
   console.log('Seeding expenses…');
   const expenses = await seedExpenses(hq.id);
   console.log(`  ${expenses} expense entries`);
+
+  console.log('Seeding connectors…');
+  await seedConnectors();
 
   console.log('\nDone. Sign in with any of:');
   console.log('  owner@laheeb.coffee / laheeb1234 (full access)');

@@ -13,6 +13,7 @@ export type Capability =
   | 'view:financial' // P&L, COGS, margins, expenses, cash burn
   | 'manage:users'
   | 'manage:branches'
+  | 'manage:connectors'
   | 'upload:data'
   | 'export:data'
   | 'export:financial';
@@ -29,6 +30,7 @@ const ALL: Capability[] = [
   'view:financial',
   'manage:users',
   'manage:branches',
+  'manage:connectors',
   'upload:data',
   'export:data',
   'export:financial',
@@ -95,6 +97,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: '/compare', key: 'compare', icon: 'Scale', capability: 'view:dashboard' },
   { href: '/franchise', key: 'franchise', icon: 'Store', capability: 'view:franchise' },
   { href: '/admin/uploads', key: 'uploads', icon: 'Upload', capability: 'upload:data' },
+  { href: '/admin/connectors', key: 'connectors', icon: 'Cable', capability: 'manage:connectors' },
   { href: '/admin/branches', key: 'branches', icon: 'Building2', capability: 'manage:branches' },
   { href: '/admin/users', key: 'users', icon: 'Users', capability: 'manage:users' },
 ];
