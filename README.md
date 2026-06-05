@@ -2,7 +2,7 @@
 
 Internal Roastery & Commerce Intelligence dashboard for **Laheeb Coffee (قهوة لهيب)** — a bilingual (Arabic/English, RTL) business‑intelligence app that brings sales, roasting, inventory, customers, fulfillment, offers, and expenses into one always‑on view.
 
-This repository covers the **MVP (iteration 1)** plus **Phase 2** analytics — nine dashboard pages on a full auth/RBAC/i18n/filter foundation.
+This repository covers the **MVP**, **Phase 2** analytics, and the reporting / franchise / connector roadmap — ten dashboard pages on a full auth/RBAC/i18n/filter foundation.
 
 ## Stack
 
@@ -14,11 +14,14 @@ This repository covers the **MVP (iteration 1)** plus **Phase 2** analytics — 
 
 ## Features in this iteration
 
-- **Pages:** Executive Overview · Sales & Product · Roastery & Production · Inventory & Stock Health · Customers & CRM · Fulfillment & Delivery · Offers & Campaigns · P&L & Unit Economics (finance‑gated) · Compare
-- **Global filter bar** (date range, channel, city, product line, grind) that drives every card, chart, table, and export via URL state
+- **Pages:** Executive Overview · Sales & Product · Roastery & Production · Inventory & Stock Health · Customers & CRM · Fulfillment & Delivery · Offers & Campaigns · P&L & Unit Economics (finance‑gated) · Compare · Cafe/Franchise Readiness
+- **Global filter bar** (date range, channel, city, product line, grind, branch) that drives every card, chart, table, and export via URL state
 - **RBAC:** Owner/Admin, Finance, Roastery Ops, Sales/CRM, Branch Manager, Franchisee, Viewer — with branch data‑scoping enforced at the query layer
 - **CSV export** for tables (UTF‑8 BOM so Arabic renders in Excel), audit‑logged
 - **CSV import** (admin): products, customers, orders, and batches — dedup on natural keys (idempotent re‑uploads), row‑level validation, `UploadBatch` audit, downloadable templates, and a programmatic `POST /api/import`
+- **Branded PDF management deck** (`/api/reports/deck`) + **scheduled owner/finance reports** (`/api/reports/scheduled`, cron‑protected, with `vercel.json` crons)
+- **Franchise module:** per‑branch economics + a composite readiness score, branch‑scoped accounts, branch management (`/admin/branches`)
+- **System connectors** (`/admin/connectors`): pull external data through the same idempotent ingestion path — a working sample connector plus paused placeholders, with a cron sync endpoint
 - **Seeded sample data** so every dashboard is populated on first run
 
 ## Architecture
@@ -73,7 +76,8 @@ pnpm dev                      # http://localhost:3000  (redirects to /ar)
 
 `.env` keys (see `.env.example`): `DATABASE_URL`, `AUTH_SECRET`, `AUTH_TRUST_HOST`, and optional `NEXT_PUBLIC_USD_PER_IQD` (display‑only IQD→USD rate for the P&L page; currencies are never silently merged).
 
-## Roadmap (next iterations)
+## Possible future work
 
-- Branded PDF management deck + scheduled owner/finance reports
-- Franchise module with scoped franchisee accounts; system connectors (store/POS/accounting/courier) behind the same repository interface
+- Wire a real delivery provider for scheduled reports (e.g. Resend email / object storage) — generation is in place behind a single hook in `src/server/reports/scheduled.ts`.
+- Implement real connector integrations (Shopify/Odoo/POS/courier) behind the existing `resolveConnectorSource` interface; encrypt connector credentials at rest.
+- Custom date‑range picker UI and per‑page filter relevance.

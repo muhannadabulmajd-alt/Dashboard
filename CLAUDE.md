@@ -4,7 +4,7 @@ Guidance for working in this repository.
 
 ## What this is
 
-**Laheeb Operations Atlas** — a bilingual (AR/EN, RTL) BI dashboard for Laheeb Coffee, built on Next.js 16 (App Router) + Prisma 6 + PostgreSQL + Auth.js v5 + next-intl. Nine pages (Executive, Sales, Roastery, Inventory, Customers, Fulfillment, Offers, P&L, Compare) on a full auth/RBAC/i18n/filter foundation. New analytics follow the same pattern: pure tested metric in `src/lib/metrics` → repository → page.
+**Laheeb Operations Atlas** — a bilingual (AR/EN, RTL) BI dashboard for Laheeb Coffee, built on Next.js 16 (App Router) + Prisma 6 + PostgreSQL + Auth.js v5 + next-intl. Ten pages (Executive, Sales, Roastery, Inventory, Customers, Fulfillment, Offers, P&L, Compare, Franchise Readiness) plus admin (users, branches, uploads, connectors), a branded PDF deck + scheduled reports, and a system-connector framework — on a full auth/RBAC/i18n/filter foundation. New analytics follow the same pattern: pure tested metric in `src/lib/metrics` → repository → page.
 
 ## Running it (ephemeral container)
 
@@ -38,5 +38,7 @@ pnpm dev                        # or: pnpm build && pnpm start
 ## Notes
 
 - **CSV import** lives in `src/server/ingestion`: pure, tested `parsers.ts` (Zod) + `ingestCsv` orchestrator that upserts on natural keys (sku / externalId / orderNumber / batchNumber) so re-uploads are idempotent, and records an `UploadBatch`. UI at `/admin/uploads`; programmatic `POST /api/import`. Both gated by `upload:data`.
+- **Reports** (`src/server/reports`): `buildDeckData` reuses repos+metrics; `Deck.tsx` is a `@react-pdf/renderer` document. `GET /api/reports/deck` (export:data); `GET /api/reports/scheduled` (CRON_SECRET) for owner/finance reports. Email delivery is a single TODO hook in `scheduled.ts`.
+- **Connectors** (`src/server/connectors`): `resolveConnectorSource(type)` returns a CSV payload that flows through `ingestCsv` (so syncs dedup like imports). Only `SAMPLE` is wired; real integrations throw until configured. `Connector`/`SyncRun` models; `/admin/connectors` (manage:connectors); `GET /api/connectors/sync` (CRON_SECRET).
 - Prisma is pinned to v6 (v7 requires a driver adapter + `prisma.config.ts`).
 - `middleware.ts` triggers a Next 16 "use proxy" deprecation notice but works.
