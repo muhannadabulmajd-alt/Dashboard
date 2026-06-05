@@ -1,0 +1,270 @@
+import { z } from 'zod';
+import {
+  CHANNELS,
+  GOVERNORATES,
+  PRODUCT_LINES,
+  GRINDS,
+  ROAST_LEVELS,
+  CUSTOMER_SEGMENTS,
+  FULFILLMENT_METHODS,
+  ORDER_STATUSES,
+} from '@/lib/enums';
+
+export type ImportDataset = 'products' | 'customers' | 'orders' | 'batches';
+
+export interface RowError {
+  row: number;
+  message: string;
+}
+export interface ParseResult<T> {
+  valid: T[];
+  errors: RowError[];
+}
+
+export interface IngestSummary {
+  dataset: ImportDataset;
+  rowsTotal: number;
+  inserted: number;
+  updated: number;
+  skipped: number;
+  errors: RowError[];
+  uploadBatchId: string;
+}
+
+type Raw = Record<string, string>;
+
+// --- field helpers ----------------------------------------------------------
+
+const blank = (v: unknown) => (typeof v === 'string' && v.trim() === '' ? undefined : v);
+const reqInt = z.preprocess(blank, z.coerce.number().int());
+const optInt = z.preprocess(blank, z.coerce.number().int().optional());
+const optStr = z.preprocess(blank, z.string().optional());
+const dateField = z.preprocess(
+  (v) => (typeof v === 'string' && v.trim() ? new Date(v) : undefined),
+  z.date({ message: 'invalid date' }),
+);
+const optDate = z.preprocess(
+  (v) => (typeof v === 'string' && v.trim() ? new Date(v) : undefined),
+  z.date().optional(),
+);
+const optEnum = <T extends readonly [string, ...string[]]>(vals: T) =>
+  z.preprocess(blank, z.enum(vals).optional());
+const boolField = z.preprocess((v) => {
+  if (typeof v !== 'string' || v.trim() === '') return true;
+  return ['active', 'true', '1', 'yes'].includes(v.trim().toLowerCase());
+}, z.boolean());
+
+function parseEach<T>(rows: Raw[], schema: z.ZodType<T>): ParseResult<T> {
+  const valid: T[] = [];
+  const errors: RowError[] = [];
+  rows.forEach((row, i) => {
+    const res = schema.safeParse(row);
+    if (res.success) valid.push(res.data);
+    else {
+      errors.push({
+        row: i + 2, // +1 header, +1 to 1-index
+        message: res.error.issues.map((x) => `${x.path.join('.') || '?'}: ${x.message}`).join('; '),
+      });
+    }
+  });
+  return { valid, errors };
+}
+
+// --- Products ---------------------------------------------------------------
+
+export interface ProductInput {
+  sku: string;
+  nameEn: string;
+  nameAr: string;
+  productLine: (typeof PRODUCT_LINES)[number];
+  sizeLabel: string;
+  sizeGrams?: number;
+  grind: (typeof GRINDS)[number];
+  roastLevel?: (typeof ROAST_LEVELS)[number];
+  origin?: string;
+  sellingPrice: number;
+  cogsPerUnit: number;
+  isActive: boolean;
+}
+
+const productSchema = z
+  .object({
+    sku: z.string().min(3),
+    nameEn: z.string().min(1),
+    nameAr: z.string().min(1),
+    productLine: z.enum(PRODUCT_LINES),
+    sizeLabel: z.string().min(1),
+    sizeGrams: optInt,
+    grind: z.enum(GRINDS),
+    roastLevel: optEnum(ROAST_LEVELS),
+    origin: optStr,
+    sellingPrice: reqInt.pipe(z.number().int().nonnegative()),
+    cogsPerUnit: reqInt.pipe(z.number().int().nonnegative()),
+    active: boolField,
+  })
+  .transform((r): ProductInput => ({
+    sku: r.sku.trim(),
+    nameEn: r.nameEn,
+    nameAr: r.nameAr,
+    productLine: r.productLine,
+    sizeLabel: r.sizeLabel,
+    sizeGrams: r.sizeGrams,
+    grind: r.grind,
+    roastLevel: r.roastLevel,
+    origin: r.origin,
+    sellingPrice: r.sellingPrice,
+    cogsPerUnit: r.cogsPerUnit,
+    isActive: r.active,
+  }));
+
+export const parseProducts = (rows: Raw[]) => parseEach(rows, productSchema);
+
+// --- Customers --------------------------------------------------------------
+
+export interface CustomerInput {
+  externalId: string;
+  phone?: string;
+  email?: string;
+  nameEn?: string;
+  nameAr?: string;
+  governorate?: (typeof GOVERNORATES)[number];
+  segment: (typeof CUSTOMER_SEGMENTS)[number];
+  campaignSource?: string;
+}
+
+const customerSchema = z
+  .object({
+    externalId: z.string().min(1),
+    phone: optStr,
+    email: optStr,
+    nameEn: optStr,
+    nameAr: optStr,
+    governorate: optEnum(GOVERNORATES),
+    segment: z.preprocess(blank, z.enum(CUSTOMER_SEGMENTS).default('NEW')),
+    campaignSource: optStr,
+  })
+  .transform((r): CustomerInput => ({ ...r, externalId: r.externalId.trim() }));
+
+export const parseCustomers = (rows: Raw[]) => parseEach(rows, customerSchema);
+
+// --- Batches ----------------------------------------------------------------
+
+export interface BatchInput {
+  batchNumber: string;
+  roastDate: Date;
+  packagingDate?: Date;
+  origin: string;
+  roastLevel: (typeof ROAST_LEVELS)[number];
+  greenInputGrams: number;
+  roastedOutputGrams: number;
+  qcScore?: number;
+  qcNotes?: string;
+}
+
+const batchSchema = z
+  .object({
+    batchNumber: z.string().min(1),
+    roastDate: dateField,
+    packagingDate: optDate,
+    origin: z.string().min(1),
+    roastLevel: z.enum(ROAST_LEVELS),
+    greenInputGrams: reqInt.pipe(z.number().int().positive()),
+    roastedOutputGrams: reqInt.pipe(z.number().int().positive()),
+    qcScore: z.preprocess(blank, z.coerce.number().optional()),
+    qcNotes: optStr,
+  })
+  .transform((r): BatchInput => ({ ...r, batchNumber: r.batchNumber.trim() }));
+
+export const parseBatches = (rows: Raw[]) => parseEach(rows, batchSchema);
+
+// --- Orders (one CSV row per order line) ------------------------------------
+
+export interface OrderLineInput {
+  sku: string;
+  quantity: number;
+  unitGrossPrice: number;
+  lineDiscount: number;
+}
+export interface OrderInput {
+  orderNumber: string;
+  placedAt: Date;
+  customerExternalId?: string;
+  channel: (typeof CHANNELS)[number];
+  governorate: (typeof GOVERNORATES)[number];
+  fulfillmentMethod: (typeof FULFILLMENT_METHODS)[number];
+  status: (typeof ORDER_STATUSES)[number];
+  deliveryFee: number;
+  deliveryCost: number;
+  lines: OrderLineInput[];
+}
+
+const orderRowSchema = z.object({
+  orderNumber: z.string().min(1),
+  placedAt: dateField,
+  customerExternalId: optStr,
+  channel: z.enum(CHANNELS),
+  governorate: z.enum(GOVERNORATES),
+  fulfillmentMethod: z.enum(FULFILLMENT_METHODS),
+  status: z.preprocess(blank, z.enum(ORDER_STATUSES).default('COMPLETED')),
+  sku: z.string().min(1),
+  quantity: reqInt.pipe(z.number().int().positive()),
+  unitGrossPrice: reqInt.pipe(z.number().int().nonnegative()),
+  lineDiscount: z.preprocess(blank, z.coerce.number().int().nonnegative().default(0)),
+  deliveryFee: z.preprocess(blank, z.coerce.number().int().nonnegative().default(0)),
+  deliveryCost: z.preprocess(blank, z.coerce.number().int().nonnegative().default(0)),
+});
+
+/** Validate order-line rows and group them into orders by order number. */
+export function parseOrders(rows: Raw[]): ParseResult<OrderInput> {
+  const { valid, errors } = parseEach(rows, orderRowSchema);
+  const byOrder = new Map<string, OrderInput>();
+  for (const r of valid) {
+    const key = r.orderNumber.trim();
+    let order = byOrder.get(key);
+    if (!order) {
+      order = {
+        orderNumber: key,
+        placedAt: r.placedAt,
+        customerExternalId: r.customerExternalId,
+        channel: r.channel,
+        governorate: r.governorate,
+        fulfillmentMethod: r.fulfillmentMethod,
+        status: r.status,
+        deliveryFee: r.deliveryFee,
+        deliveryCost: r.deliveryCost,
+        lines: [],
+      };
+      byOrder.set(key, order);
+    }
+    order.lines.push({
+      sku: r.sku.trim(),
+      quantity: r.quantity,
+      unitGrossPrice: r.unitGrossPrice,
+      lineDiscount: r.lineDiscount,
+    });
+  }
+  return { valid: [...byOrder.values()], errors };
+}
+
+// --- Templates (headers + one example row) ----------------------------------
+
+export const TEMPLATES: Record<ImportDataset, { headers: string[]; example: string[] }> = {
+  products: {
+    headers: ['sku', 'nameEn', 'nameAr', 'productLine', 'sizeLabel', 'sizeGrams', 'grind', 'roastLevel', 'origin', 'sellingPrice', 'cogsPerUnit', 'active'],
+    example: ['LH-ESP-SPRING-250-WB', 'Espresso Spring 250g', 'إسبريسو الربيع', 'ESPRESSO', '250g', '250', 'WHOLE_BEAN', 'MEDIUM_DARK', 'Blend', '13000', '6000', 'Active'],
+  },
+  customers: {
+    headers: ['externalId', 'phone', 'email', 'nameEn', 'nameAr', 'governorate', 'segment', 'campaignSource'],
+    example: ['C-1001', '+9647700000000', '', 'Ahmed', 'أحمد', 'BAGHDAD', 'NEW', 'instagram'],
+  },
+  orders: {
+    headers: ['orderNumber', 'placedAt', 'customerExternalId', 'channel', 'governorate', 'fulfillmentMethod', 'status', 'sku', 'quantity', 'unitGrossPrice', 'lineDiscount', 'deliveryFee', 'deliveryCost'],
+    example: ['LH-O-90001', '2026-06-01 14:30', 'C-1001', 'ONLINE_STORE', 'BAGHDAD', 'COURIER', 'COMPLETED', 'LH-ESP-SPRING-250-WB', '2', '13000', '0', '4000', '5000'],
+  },
+  batches: {
+    headers: ['batchNumber', 'roastDate', 'packagingDate', 'origin', 'roastLevel', 'greenInputGrams', 'roastedOutputGrams', 'qcScore', 'qcNotes'],
+    example: ['LH-2026-0100', '2026-06-01', '2026-06-02', 'Ethiopia', 'LIGHT', '30000', '25500', '86.5', 'Bright, floral'],
+  },
+};
+
+export const IMPORT_DATASETS: ImportDataset[] = ['products', 'customers', 'orders', 'batches'];
