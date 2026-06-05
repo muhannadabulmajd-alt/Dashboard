@@ -1,36 +1,80 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Laheeb Operations Atlas
 
-## Getting Started
+Internal Roastery & Commerce Intelligence dashboard for **Laheeb Coffee (قهوة لهيب)** — a bilingual (Arabic/English, RTL) business‑intelligence app that brings sales, roasting, inventory, customers, fulfillment, offers, and expenses into one always‑on view.
 
-First, run the development server:
+This repository is the **MVP (iteration 1)**: foundation + the four most important pages.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## Stack
+
+- **Next.js 16** (App Router) + **React 19** + **TypeScript**
+- **PostgreSQL** via **Prisma 6**
+- **Auth.js v5** (credentials, JWT sessions, no public sign‑up) with role‑based access control
+- **next-intl** (Arabic default, full RTL) · **Tailwind CSS v4** · **Recharts**
+- **Vitest** for the metrics unit tests
+
+## Features in this iteration
+
+- **Pages:** Executive Overview · Sales & Product View · Inventory & Stock Health · P&L & Unit Economics (finance‑gated)
+- **Global filter bar** (date range, channel, city, product line, grind) that drives every card, chart, table, and export via URL state
+- **RBAC:** Owner/Admin, Finance, Roastery Ops, Sales/CRM, Branch Manager, Franchisee, Viewer — with branch data‑scoping enforced at the query layer
+- **CSV export** for tables (UTF‑8 BOM so Arabic renders in Excel), audit‑logged
+- **Seeded sample data** so every dashboard is populated on first run
+
+## Architecture
+
+Pages (server components) → `getPageContext` (auth + role guard) → **repositories** (`src/server/db/repositories`, Prisma + branch scope) → **metrics** (`src/lib/metrics`, pure & unit‑tested) → render. CSV export reuses the exact same filter + repository path, so exports always match what is on screen. The single filter→query translator lives in `src/server/filters/where-builder.ts`.
+
+```
+src/
+  app/[locale]/(auth)/login        # login
+  app/[locale]/(dashboard)/        # 4 pages + admin/users
+  app/api/{auth,export}/           # Auth.js handler + CSV export
+  server/{auth,db,filters,export}  # server-only logic
+  lib/{metrics,money,dates,filters,rbac,enums}  # pure, client-safe
+  components/{layout,filters,charts,kpi,data-table,ui}
+prisma/{schema.prisma,seed.ts}
+tests/metrics/                     # vitest
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Getting started
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Requires Node 20+, pnpm, and a PostgreSQL database.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+pnpm install
+cp .env.example .env          # set DATABASE_URL and AUTH_SECRET
 
-## Learn More
+pnpm prisma migrate dev       # create schema
+pnpm db:seed                  # load realistic sample data
+pnpm dev                      # http://localhost:3000  (redirects to /ar)
+```
 
-To learn more about Next.js, take a look at the following resources:
+### Demo accounts (password `laheeb1234`)
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+| Email | Role | Sees |
+|---|---|---|
+| `owner@laheeb.coffee` | Owner | Everything incl. P&L |
+| `finance@laheeb.coffee` | Finance | Everything incl. P&L |
+| `sales@laheeb.coffee` | Sales/CRM | Sales & customers |
+| `ops@laheeb.coffee` | Roastery Ops | Inventory & roastery |
+| `viewer@laheeb.coffee` | Viewer | Read‑only, **no P&L** |
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Scripts
 
-## Deploy on Vercel
+| Command | Purpose |
+|---|---|
+| `pnpm dev` / `pnpm build` / `pnpm start` | Run / build / serve |
+| `pnpm test` | Metrics unit tests (Vitest) |
+| `pnpm typecheck` | `tsc --noEmit` |
+| `pnpm db:migrate` / `pnpm db:seed` / `pnpm db:reset` | Database lifecycle |
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Configuration
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+`.env` keys (see `.env.example`): `DATABASE_URL`, `AUTH_SECRET`, `AUTH_TRUST_HOST`, and optional `NEXT_PUBLIC_USD_PER_IQD` (display‑only IQD→USD rate for the P&L page; currencies are never silently merged).
+
+## Roadmap (next iterations)
+
+- Pages: Roastery & Production, Customers & CRM, Fulfillment & Delivery, Offers & Campaigns, Compare
+- CSV **import** pipeline (dedup on natural keys) to replace seed data
+- Branded PDF management deck + scheduled owner/finance reports
+- Franchise module with scoped franchisee accounts; system connectors (store/POS/accounting/courier) behind the same repository interface
