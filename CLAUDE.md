@@ -37,5 +37,6 @@ pnpm dev                        # or: pnpm build && pnpm start
 
 ## Notes
 
+- **CSV import** lives in `src/server/ingestion`: pure, tested `parsers.ts` (Zod) + `ingestCsv` orchestrator that upserts on natural keys (sku / externalId / orderNumber / batchNumber) so re-uploads are idempotent, and records an `UploadBatch`. UI at `/admin/uploads`; programmatic `POST /api/import`. Both gated by `upload:data`.
 - Prisma is pinned to v6 (v7 requires a driver adapter + `prisma.config.ts`).
 - `middleware.ts` triggers a Next 16 "use proxy" deprecation notice but works.

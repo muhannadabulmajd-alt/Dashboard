@@ -18,6 +18,7 @@ This repository covers the **MVP (iteration 1)** plus **Phase 2** analytics — 
 - **Global filter bar** (date range, channel, city, product line, grind) that drives every card, chart, table, and export via URL state
 - **RBAC:** Owner/Admin, Finance, Roastery Ops, Sales/CRM, Branch Manager, Franchisee, Viewer — with branch data‑scoping enforced at the query layer
 - **CSV export** for tables (UTF‑8 BOM so Arabic renders in Excel), audit‑logged
+- **CSV import** (admin): products, customers, orders, and batches — dedup on natural keys (idempotent re‑uploads), row‑level validation, `UploadBatch` audit, downloadable templates, and a programmatic `POST /api/import`
 - **Seeded sample data** so every dashboard is populated on first run
 
 ## Architecture
@@ -74,6 +75,5 @@ pnpm dev                      # http://localhost:3000  (redirects to /ar)
 
 ## Roadmap (next iterations)
 
-- CSV **import** pipeline (dedup on natural keys) to replace seed data
 - Branded PDF management deck + scheduled owner/finance reports
 - Franchise module with scoped franchisee accounts; system connectors (store/POS/accounting/courier) behind the same repository interface
