@@ -7,6 +7,8 @@ export type Capability =
   | 'view:inventory'
   | 'view:roastery'
   | 'view:customers'
+  | 'view:fulfillment'
+  | 'view:offers'
   | 'view:financial' // P&L, COGS, margins, expenses, cash burn
   | 'manage:users'
   | 'upload:data'
@@ -19,6 +21,8 @@ const ALL: Capability[] = [
   'view:inventory',
   'view:roastery',
   'view:customers',
+  'view:fulfillment',
+  'view:offers',
   'view:financial',
   'manage:users',
   'upload:data',
@@ -35,15 +39,31 @@ export const ROLE_CAPABILITIES: Record<Role, Capability[]> = {
     'view:inventory',
     'view:roastery',
     'view:customers',
+    'view:fulfillment',
+    'view:offers',
     'view:financial',
     'export:data',
     'export:financial',
   ],
-  ROASTERY_OPS: ['view:dashboard', 'view:inventory', 'view:roastery', 'export:data'],
-  SALES_CRM: ['view:dashboard', 'view:sales', 'view:customers', 'export:data'],
-  BRANCH_MANAGER: ['view:dashboard', 'view:sales', 'view:inventory', 'export:data'],
+  ROASTERY_OPS: ['view:dashboard', 'view:inventory', 'view:roastery', 'view:fulfillment', 'export:data'],
+  SALES_CRM: [
+    'view:dashboard',
+    'view:sales',
+    'view:customers',
+    'view:fulfillment',
+    'view:offers',
+    'export:data',
+  ],
+  BRANCH_MANAGER: ['view:dashboard', 'view:sales', 'view:inventory', 'view:fulfillment', 'export:data'],
   FRANCHISEE_VIEWER: ['view:dashboard', 'view:sales'],
-  VIEWER: ['view:dashboard', 'view:sales', 'view:inventory'],
+  VIEWER: [
+    'view:dashboard',
+    'view:sales',
+    'view:inventory',
+    'view:customers',
+    'view:fulfillment',
+    'view:offers',
+  ],
 };
 
 export function can(role: Role, capability: Capability): boolean {
@@ -57,11 +77,16 @@ export interface NavItem {
   capability: Capability;
 }
 
-// Navigation for the MVP. Each entry is gated by a capability.
+// Navigation. Each entry is gated by a capability.
 export const NAV_ITEMS: NavItem[] = [
   { href: '/', key: 'executive', icon: 'LayoutDashboard', capability: 'view:dashboard' },
   { href: '/sales', key: 'sales', icon: 'ShoppingBag', capability: 'view:sales' },
+  { href: '/roastery', key: 'roastery', icon: 'Flame', capability: 'view:roastery' },
   { href: '/inventory', key: 'inventory', icon: 'Package', capability: 'view:inventory' },
+  { href: '/customers', key: 'customers', icon: 'UsersRound', capability: 'view:customers' },
+  { href: '/fulfillment', key: 'fulfillment', icon: 'Truck', capability: 'view:fulfillment' },
+  { href: '/offers', key: 'offers', icon: 'Percent', capability: 'view:offers' },
   { href: '/pnl', key: 'pnl', icon: 'TrendingUp', capability: 'view:financial' },
+  { href: '/compare', key: 'compare', icon: 'Scale', capability: 'view:dashboard' },
   { href: '/admin/users', key: 'users', icon: 'Users', capability: 'manage:users' },
 ];

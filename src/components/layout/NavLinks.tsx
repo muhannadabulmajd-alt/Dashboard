@@ -1,6 +1,18 @@
 'use client';
 
-import { LayoutDashboard, ShoppingBag, Package, TrendingUp, Users, type LucideIcon } from 'lucide-react';
+import {
+  LayoutDashboard,
+  ShoppingBag,
+  Package,
+  TrendingUp,
+  Users,
+  UsersRound,
+  Flame,
+  Truck,
+  Percent,
+  Scale,
+  type LucideIcon,
+} from 'lucide-react';
 import { Link, usePathname } from '@/i18n/navigation';
 import { cn } from '@/lib/utils';
 
@@ -10,6 +22,11 @@ const ICONS: Record<string, LucideIcon> = {
   Package,
   TrendingUp,
   Users,
+  UsersRound,
+  Flame,
+  Truck,
+  Percent,
+  Scale,
 };
 
 export interface NavLinkItem {
