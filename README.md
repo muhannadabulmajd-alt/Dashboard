@@ -15,13 +15,13 @@ This repository covers the **MVP**, **Phase 2** analytics, and the reporting / f
 ## Features in this iteration
 
 - **Pages:** Executive Overview · Sales & Product · Roastery & Production · Inventory & Stock Health · Customers & CRM · Fulfillment & Delivery · Offers & Campaigns · P&L & Unit Economics (finance‑gated) · Compare · Cafe/Franchise Readiness
-- **Global filter bar** (date range, channel, city, product line, grind, branch) that drives every card, chart, table, and export via URL state
+- **Global filter bar** (date range incl. a custom from/to picker, channel, city, product line, grind, branch) that drives every card, chart, table, and export via URL state
 - **RBAC:** Owner/Admin, Finance, Roastery Ops, Sales/CRM, Branch Manager, Franchisee, Viewer — with branch data‑scoping enforced at the query layer
 - **CSV export** for tables (UTF‑8 BOM so Arabic renders in Excel), audit‑logged
 - **CSV import** (admin): products, customers, orders, and batches — dedup on natural keys (idempotent re‑uploads), row‑level validation, `UploadBatch` audit, downloadable templates, and a programmatic `POST /api/import`
-- **Branded PDF management deck** (`/api/reports/deck`) + **scheduled owner/finance reports** (`/api/reports/scheduled`, cron‑protected, with `vercel.json` crons)
+- **Branded PDF management deck** (`/api/reports/deck`) + **scheduled owner/finance reports** (`/api/reports/scheduled`, cron‑protected) **emailed via Resend** (no‑op log fallback when no key is set)
 - **Franchise module:** per‑branch economics + a composite readiness score, branch‑scoped accounts, branch management (`/admin/branches`)
-- **System connectors** (`/admin/connectors`): pull external data through the same idempotent ingestion path — a working sample connector plus paused placeholders, with a cron sync endpoint
+- **System connectors** (`/admin/connectors`): pull external data through the same idempotent ingestion path — a built‑in sample connector and a **credentialed HTTP‑CSV connector with its token encrypted at rest (AES‑256‑GCM)**, plus paused placeholders and a cron sync endpoint
 - **Seeded sample data** so every dashboard is populated on first run
 
 ## Architecture
@@ -78,6 +78,5 @@ pnpm dev                      # http://localhost:3000  (redirects to /ar)
 
 ## Possible future work
 
-- Wire a real delivery provider for scheduled reports (e.g. Resend email / object storage) — generation is in place behind a single hook in `src/server/reports/scheduled.ts`.
-- Implement real connector integrations (Shopify/Odoo/POS/courier) behind the existing `resolveConnectorSource` interface; encrypt connector credentials at rest.
-- Custom date‑range picker UI and per‑page filter relevance.
+- Vendor‑specific connectors (Shopify/Odoo/POS/courier) behind the existing `resolveConnectorSource` interface — the credentialed HTTP‑CSV connector is the working reference.
+- Per‑page filter relevance (hide filters that don't apply to a given page) and a CI workflow running typecheck + tests on every push.

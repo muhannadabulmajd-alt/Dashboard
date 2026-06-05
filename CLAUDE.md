@@ -38,7 +38,7 @@ pnpm dev                        # or: pnpm build && pnpm start
 ## Notes
 
 - **CSV import** lives in `src/server/ingestion`: pure, tested `parsers.ts` (Zod) + `ingestCsv` orchestrator that upserts on natural keys (sku / externalId / orderNumber / batchNumber) so re-uploads are idempotent, and records an `UploadBatch`. UI at `/admin/uploads`; programmatic `POST /api/import`. Both gated by `upload:data`.
-- **Reports** (`src/server/reports`): `buildDeckData` reuses repos+metrics; `Deck.tsx` is a `@react-pdf/renderer` document. `GET /api/reports/deck` (export:data); `GET /api/reports/scheduled` (CRON_SECRET) for owner/finance reports. Email delivery is a single TODO hook in `scheduled.ts`.
-- **Connectors** (`src/server/connectors`): `resolveConnectorSource(type)` returns a CSV payload that flows through `ingestCsv` (so syncs dedup like imports). Only `SAMPLE` is wired; real integrations throw until configured. `Connector`/`SyncRun` models; `/admin/connectors` (manage:connectors); `GET /api/connectors/sync` (CRON_SECRET).
+- **Reports** (`src/server/reports`): `buildDeckData` reuses repos+metrics; `Deck.tsx` is a `@react-pdf/renderer` document. `GET /api/reports/deck` (export:data); `GET /api/reports/scheduled` (CRON_SECRET) renders + **emails** the PDF via `email.ts` (Resend when `RESEND_API_KEY` is set, else a no-op log provider).
+- **Connectors** (`src/server/connectors`): `resolveConnectorSource(connector)` returns a CSV payload that flows through `ingestCsv` (so syncs dedup like imports). `SAMPLE` and credentialed `HTTP_CSV` are wired; secrets are encrypted via `src/server/crypto.ts` (AES-256-GCM, `ENCRYPTION_KEY`). `Connector`/`SyncRun` models; `/admin/connectors` + `POST /api/connectors/configure` (manage:connectors); `GET /api/connectors/sync` (CRON_SECRET).
 - Prisma is pinned to v6 (v7 requires a driver adapter + `prisma.config.ts`).
 - `middleware.ts` triggers a Next 16 "use proxy" deprecation notice but works.
