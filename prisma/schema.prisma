@@ -532,6 +532,7 @@ model AuditLog {
 
 enum ConnectorType {
   SAMPLE
+  HTTP_CSV
   SHOPIFY
   ODOO
   POS

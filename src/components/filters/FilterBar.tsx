@@ -36,6 +36,8 @@ export function FilterBar({ branchOptions }: { branchOptions?: Option[] }) {
     return v ? v.split(',').filter(Boolean) : [];
   };
   const range = searchParams.get('range') ?? 'this_month';
+  const from = searchParams.get('from') ?? '';
+  const to = searchParams.get('to') ?? '';
 
   const apply = (mutate: (sp: URLSearchParams) => void) => {
     const sp = new URLSearchParams(searchParams.toString());
@@ -81,15 +83,50 @@ export function FilterBar({ branchOptions }: { branchOptions?: Option[] }) {
       <select
         aria-label={t('dateRange')}
         value={range}
-        onChange={(e) => apply((sp) => sp.set('range', e.target.value))}
+        onChange={(e) =>
+          apply((sp) => {
+            const v = e.target.value;
+            sp.set('range', v);
+            if (v !== 'custom') {
+              sp.delete('from');
+              sp.delete('to');
+            }
+          })
+        }
         className="rounded-lg border bg-card px-2.5 py-1.5 text-sm"
       >
-        {RANGE_PRESETS.filter((p) => p !== 'custom').map((p) => (
+        {RANGE_PRESETS.map((p) => (
           <option key={p} value={p}>
             {t(`presets.${p}`)}
           </option>
         ))}
       </select>
+
+      {range === 'custom' ? (
+        <span className="flex items-center gap-1">
+          <input
+            type="date"
+            aria-label={t('from')}
+            value={from}
+            max={to || undefined}
+            onChange={(e) =>
+              apply((sp) => (e.target.value ? sp.set('from', e.target.value) : sp.delete('from')))
+            }
+            className="rounded-lg border bg-card px-2 py-1.5 text-sm"
+          />
+          <span className="text-xs text-muted-foreground">→</span>
+          <input
+            type="date"
+            aria-label={t('to')}
+            value={to}
+            min={from || undefined}
+            onChange={(e) =>
+              apply((sp) => (e.target.value ? sp.set('to', e.target.value) : sp.delete('to')))
+            }
+            className="rounded-lg border bg-card px-2 py-1.5 text-sm"
+          />
+        </span>
+      ) : null}
 
       {groups.map((g) => (
         <MultiSelect

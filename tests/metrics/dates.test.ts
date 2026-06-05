@@ -23,6 +23,12 @@ describe('resolveRange (Baghdad-local boundaries)', () => {
     const r = resolveRange({ range: 'all' }, NOW);
     expect(r.prevStart).toBeUndefined();
   });
+
+  it('custom uses Baghdad-local from/to boundaries (tz-independent)', () => {
+    const r = resolveRange({ range: 'custom', from: '2026-05-01', to: '2026-05-31' }, NOW);
+    expect(r.start.toISOString()).toBe('2026-04-30T21:00:00.000Z'); // 1 May 00:00 Baghdad
+    expect(r.end.toISOString()).toBe('2026-05-31T20:59:59.999Z'); // 31 May 23:59:59.999 Baghdad
+  });
 });
 
 describe('bucketKey', () => {

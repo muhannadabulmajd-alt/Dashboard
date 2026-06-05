@@ -6,6 +6,7 @@ import { formatDate } from '@/lib/dates';
 import { syncConnector } from '@/server/connectors/actions';
 import { Badge, PageHeader } from '@/components/ui/primitives';
 import { DataTable } from '@/components/data-table/DataTable';
+import { ConnectorConfigForm } from './ConnectorConfigForm';
 
 const RUN_VARIANT: Record<string, 'success' | 'warning' | 'danger'> = {
   SUCCESS: 'success',
@@ -85,6 +86,10 @@ export default async function ConnectorsPage({
       <PageHeader title={t('title')} subtitle={t('subtitle')} />
       <section className="space-y-2">
         <DataTable columns={connectorCols} rows={connectorRows} emptyLabel="—" />
+      </section>
+      <section className="space-y-2">
+        <h3 className="text-sm font-semibold">{t('configure')}</h3>
+        <ConnectorConfigForm connectors={connectors.map((c) => ({ id: c.id, name: c.name }))} />
       </section>
       <section className="space-y-2">
         <h3 className="text-sm font-semibold">{t('runs')}</h3>

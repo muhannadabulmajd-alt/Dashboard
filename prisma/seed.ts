@@ -56,6 +56,13 @@ async function seedConnectors() {
         config: { note: 'Generates sample orders from the live catalog on each sync.' },
       },
       {
+        name: 'External CSV feed',
+        type: 'HTTP_CSV',
+        dataset: 'PRODUCTS',
+        status: 'PAUSED',
+        config: { dataset: 'products', note: 'Set the endpoint URL and token, then activate.' },
+      },
+      {
         name: 'Odoo ERP',
         type: 'ODOO',
         dataset: 'PRODUCTS',

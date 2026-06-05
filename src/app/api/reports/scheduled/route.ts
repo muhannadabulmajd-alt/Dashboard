@@ -21,9 +21,11 @@ export async function GET(req: NextRequest) {
   const kind = (req.nextUrl.searchParams.get('kind') ?? 'weekly') as ReportKind;
   if (kind !== 'weekly' && kind !== 'monthly') return new NextResponse('Bad kind', { status: 400 });
 
-  const { data } = await runScheduledReport(kind);
+  const wantPdf = req.nextUrl.searchParams.get('format') === 'pdf';
+  const deliver = !wantPdf && req.nextUrl.searchParams.get('deliver') !== 'false';
+  const { data, delivery } = await runScheduledReport(kind, { deliver });
 
-  if (req.nextUrl.searchParams.get('format') === 'pdf') {
+  if (wantPdf) {
     const element = createElement(Deck, { data }) as Parameters<typeof renderToBuffer>[0];
     const buffer = await renderToBuffer(element);
     return new NextResponse(new Uint8Array(buffer), {
@@ -39,5 +41,6 @@ export async function GET(req: NextRequest) {
     kind,
     period: data.periodLabel,
     kpis: data.executive,
+    delivery,
   });
 }

@@ -94,8 +94,10 @@ export function resolveRange(
       };
     }
     case 'custom': {
-      const from = input.from ? fromZonedTime(startOfDay(new Date(input.from)), TZ) : dayStart(z);
-      const to = input.to ? fromZonedTime(endOfDay(new Date(input.to)), TZ) : dayEnd(z);
+      // Parse the YYYY-MM-DD strings directly as Baghdad-local boundaries so the
+      // result is independent of the runtime's timezone.
+      const from = input.from ? fromZonedTime(`${input.from}T00:00:00.000`, TZ) : dayStart(z);
+      const to = input.to ? fromZonedTime(`${input.to}T23:59:59.999`, TZ) : dayEnd(z);
       return { start: from, end: to, ...prevByDuration(from, to) };
     }
     case 'all':

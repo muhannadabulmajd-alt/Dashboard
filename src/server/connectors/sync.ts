@@ -21,7 +21,7 @@ export async function runConnectorSync(connectorId: string): Promise<SyncResult>
   try {
     if (connector.status !== 'ACTIVE') throw new Error('connector is paused');
 
-    const { dataset, csv } = await resolveConnectorSource(connector.type);
+    const { dataset, csv } = await resolveConnectorSource(connector);
     const summary = await ingestCsv(dataset, csv, {
       userId: null,
       branchId: null,
