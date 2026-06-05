@@ -5,6 +5,9 @@ export * from './margin';
 export * from './inventory';
 export * from './roasting';
 export * from './runrate';
+export * from './customers';
+export * from './fulfillment';
+export * from './offers';
 
 /** Period-over-period delta as a ratio (e.g. 0.12 == +12%). */
 export function deltaPct(current: number, previous: number | undefined): number | undefined {

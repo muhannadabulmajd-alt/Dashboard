@@ -12,6 +12,8 @@ import type {
   MovementReason,
   InventoryCategory,
   ExpenseCategoryType,
+  CustomerSegment,
+  ShipmentStatus,
 } from '@prisma/client';
 
 export interface OrderLike {
@@ -84,6 +86,34 @@ export interface ExpenseLike {
   currency: Currency;
   incurredAt: Date;
   categoryType: ExpenseCategoryType;
+}
+
+export interface CustomerLike {
+  id: string;
+  governorate: Governorate | null;
+  segment: CustomerSegment;
+  firstOrderAt: Date | null;
+  lastOrderAt: Date | null;
+  ordersCount: number;
+}
+
+export interface ShipmentLike {
+  status: ShipmentStatus;
+  dispatchedAt: Date | null;
+  deliveredAt: Date | null;
+  shippingCost: number;
+  courier: string;
+  governorate: Governorate;
+  placedAt: Date;
+}
+
+export interface OfferOrderLike {
+  offerId: string | null;
+  customerId: string | null;
+  status: OrderStatus;
+  grossAmount: number;
+  discountAmount: number;
+  refundAmount: number;
 }
 
 export interface DimensionBucket<K extends string = string> {

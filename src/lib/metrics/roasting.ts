@@ -43,3 +43,36 @@ export function roastLevelMix(
     }))
     .sort((a, b) => b.outputGrams - a.outputGrams);
 }
+
+export interface OperatorBatch {
+  operatorName: string | null;
+  greenInputGrams: number;
+  roastedOutputGrams: number;
+}
+
+export function operatorActivity(
+  batches: OperatorBatch[],
+): { operator: string; batches: number; outputGrams: number; shrinkagePct: number }[] {
+  const map = new Map<string, { batches: number; green: number; roasted: number }>();
+  for (const b of batches) {
+    const key = b.operatorName ?? '—';
+    const e = map.get(key) ?? { batches: 0, green: 0, roasted: 0 };
+    e.batches += 1;
+    e.green += b.greenInputGrams;
+    e.roasted += b.roastedOutputGrams;
+    map.set(key, e);
+  }
+  return [...map.entries()]
+    .map(([operator, e]) => ({
+      operator,
+      batches: e.batches,
+      outputGrams: e.roasted,
+      shrinkagePct: shrinkagePct(e.green, e.roasted),
+    }))
+    .sort((a, b) => b.outputGrams - a.outputGrams);
+}
+
+export function avgQcScore(batches: { qcScore: number | null }[]): number {
+  const scores = batches.map((b) => b.qcScore).filter((s): s is number => s != null);
+  return scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
+}

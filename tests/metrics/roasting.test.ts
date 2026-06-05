@@ -4,6 +4,8 @@ import {
   shrinkagePct,
   avgShrinkage,
   roastLevelMix,
+  operatorActivity,
+  avgQcScore,
 } from '@/lib/metrics/roasting';
 import type { BatchLike } from '@/lib/metrics/types';
 
@@ -36,5 +38,21 @@ describe('roasting metrics', () => {
     const mix = roastLevelMix(batches);
     expect(mix[0].roastLevel).toBe('MEDIUM');
     expect(mix[0].pct).toBeCloseTo(0.6, 6);
+  });
+
+  it('operatorActivity aggregates per operator with shrinkage', () => {
+    const rows = operatorActivity([
+      { operatorName: 'Ali', greenInputGrams: 1000, roastedOutputGrams: 850 },
+      { operatorName: 'Ali', greenInputGrams: 1000, roastedOutputGrams: 830 },
+      { operatorName: 'Sara', greenInputGrams: 500, roastedOutputGrams: 430 },
+    ]);
+    const ali = rows.find((r) => r.operator === 'Ali')!;
+    expect(ali.batches).toBe(2);
+    expect(ali.outputGrams).toBe(1680);
+    expect(ali.shrinkagePct).toBeCloseTo(0.16, 6); // 1 - 1680/2000
+  });
+
+  it('avgQcScore ignores nulls', () => {
+    expect(avgQcScore([{ qcScore: 80 }, { qcScore: 90 }, { qcScore: null }])).toBe(85);
   });
 });
