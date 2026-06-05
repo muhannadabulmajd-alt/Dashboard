@@ -9,8 +9,10 @@ export type Capability =
   | 'view:customers'
   | 'view:fulfillment'
   | 'view:offers'
+  | 'view:franchise'
   | 'view:financial' // P&L, COGS, margins, expenses, cash burn
   | 'manage:users'
+  | 'manage:branches'
   | 'upload:data'
   | 'export:data'
   | 'export:financial';
@@ -23,8 +25,10 @@ const ALL: Capability[] = [
   'view:customers',
   'view:fulfillment',
   'view:offers',
+  'view:franchise',
   'view:financial',
   'manage:users',
+  'manage:branches',
   'upload:data',
   'export:data',
   'export:financial',
@@ -41,6 +45,7 @@ export const ROLE_CAPABILITIES: Record<Role, Capability[]> = {
     'view:customers',
     'view:fulfillment',
     'view:offers',
+    'view:franchise',
     'view:financial',
     'export:data',
     'export:financial',
@@ -54,8 +59,8 @@ export const ROLE_CAPABILITIES: Record<Role, Capability[]> = {
     'view:offers',
     'export:data',
   ],
-  BRANCH_MANAGER: ['view:dashboard', 'view:sales', 'view:inventory', 'view:fulfillment', 'export:data'],
-  FRANCHISEE_VIEWER: ['view:dashboard', 'view:sales'],
+  BRANCH_MANAGER: ['view:dashboard', 'view:sales', 'view:inventory', 'view:fulfillment', 'view:franchise', 'export:data'],
+  FRANCHISEE_VIEWER: ['view:dashboard', 'view:sales', 'view:franchise'],
   VIEWER: [
     'view:dashboard',
     'view:sales',
@@ -88,6 +93,8 @@ export const NAV_ITEMS: NavItem[] = [
   { href: '/offers', key: 'offers', icon: 'Percent', capability: 'view:offers' },
   { href: '/pnl', key: 'pnl', icon: 'TrendingUp', capability: 'view:financial' },
   { href: '/compare', key: 'compare', icon: 'Scale', capability: 'view:dashboard' },
+  { href: '/franchise', key: 'franchise', icon: 'Store', capability: 'view:franchise' },
   { href: '/admin/uploads', key: 'uploads', icon: 'Upload', capability: 'upload:data' },
+  { href: '/admin/branches', key: 'branches', icon: 'Building2', capability: 'manage:branches' },
   { href: '/admin/users', key: 'users', icon: 'Users', capability: 'manage:users' },
 ];

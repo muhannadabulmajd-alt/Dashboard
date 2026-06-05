@@ -49,13 +49,22 @@ async function seedBranchesAndUsers() {
   const hq = await prisma.branch.create({
     data: { code: 'HQ', nameEn: 'Laheeb Roastery (HQ)', nameAr: 'محمصة لهيب (الرئيسي)', governorate: 'BAGHDAD' },
   });
-  await prisma.branch.create({
+  const karada = await prisma.branch.create({
     data: {
-      code: 'CAFE-01',
-      nameEn: 'Laheeb Cafe — Karada (pilot)',
-      nameAr: 'مقهى لهيب — الكرادة (تجريبي)',
+      code: 'CAFE-KRD',
+      nameEn: 'Laheeb Cafe — Karada',
+      nameAr: 'مقهى لهيب — الكرادة',
       governorate: 'BAGHDAD',
-      isActive: false,
+      isFranchise: true,
+    },
+  });
+  const erbil = await prisma.branch.create({
+    data: {
+      code: 'CAFE-ERB',
+      nameEn: 'Laheeb Cafe — Erbil',
+      nameAr: 'مقهى لهيب — أربيل',
+      governorate: 'ERBIL',
+      isFranchise: true,
     },
   });
 
@@ -66,11 +75,13 @@ async function seedBranchesAndUsers() {
     { email: 'finance@laheeb.coffee', name: 'Finance Lead', role: 'FINANCE', hashedPassword, branchId: hq.id },
     { email: 'ops@laheeb.coffee', name: 'Roastery Ops', role: 'ROASTERY_OPS', hashedPassword, branchId: hq.id },
     { email: 'sales@laheeb.coffee', name: 'Sales & CRM', role: 'SALES_CRM', hashedPassword, branchId: hq.id },
+    { email: 'manager@laheeb.coffee', name: 'Karada Manager', role: 'BRANCH_MANAGER', hashedPassword, branchId: karada.id },
+    { email: 'franchisee@laheeb.coffee', name: 'Erbil Franchisee', role: 'FRANCHISEE_VIEWER', hashedPassword, branchId: erbil.id },
     { email: 'viewer@laheeb.coffee', name: 'Read-only Viewer', role: 'VIEWER', hashedPassword, branchId: hq.id },
   ];
   await prisma.user.createMany({ data: users });
   const ops = await prisma.user.findUnique({ where: { email: 'ops@laheeb.coffee' } });
-  return { hq, opsId: ops!.id };
+  return { hq, branches: [hq, karada, erbil], opsId: ops!.id };
 }
 
 // ---------------------------------------------------------------------------
@@ -256,7 +267,7 @@ async function seedOrders(
   products: SeededProduct[],
   customerIds: string[],
   offerIds: string[],
-  branchId: string,
+  branches: { value: string; weight: number }[],
 ) {
   const orders: Prisma.OrderCreateManyInput[] = [];
   const lines: Prisma.OrderLineCreateManyInput[] = [];
@@ -332,7 +343,7 @@ async function seedOrders(
         orderNumber: `LH-O-${String(orderN).padStart(5, '0')}`,
         placedAt,
         customerId,
-        branchId,
+        branchId: weighted(branches),
         channel,
         governorate,
         fulfillmentMethod,
@@ -597,7 +608,13 @@ async function main() {
   await clear();
 
   console.log('Seeding branches and users…');
-  const { hq, opsId } = await seedBranchesAndUsers();
+  const { hq, branches, opsId } = await seedBranchesAndUsers();
+  // HQ takes the bulk of orders; the two franchise cafes share the rest.
+  const branchWeights = [
+    { value: branches[0].id, weight: 68 },
+    { value: branches[1].id, weight: 20 },
+    { value: branches[2].id, weight: 12 },
+  ];
 
   console.log('Seeding products…');
   const products = await seedProducts();
@@ -608,7 +625,7 @@ async function main() {
   const offerIds = await seedOffers();
 
   console.log('Seeding orders (this can take a moment)…');
-  const { orderCount, lineCount } = await seedOrders(products, customerIds, offerIds, hq.id);
+  const { orderCount, lineCount } = await seedOrders(products, customerIds, offerIds, branchWeights);
   console.log(`  ${orderCount} orders, ${lineCount} lines`);
 
   console.log('Seeding roast batches…');
@@ -626,6 +643,8 @@ async function main() {
   console.log('\nDone. Sign in with any of:');
   console.log('  owner@laheeb.coffee / laheeb1234 (full access)');
   console.log('  finance@laheeb.coffee / laheeb1234 (P&L access)');
+  console.log('  manager@laheeb.coffee / laheeb1234 (Karada branch only)');
+  console.log('  franchisee@laheeb.coffee / laheeb1234 (Erbil franchise only)');
   console.log('  viewer@laheeb.coffee / laheeb1234 (read-only, no P&L)');
 }
 

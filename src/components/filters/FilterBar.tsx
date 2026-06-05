@@ -10,14 +10,19 @@ import { CHANNELS, GOVERNORATES, PRODUCT_LINES, GRINDS, enumLabel } from '@/lib/
 import type { AppLocale } from '@/lib/money';
 import { cn } from '@/lib/utils';
 
-const GROUPS = [
+const ENUM_GROUPS = [
   { key: 'channel', labelKey: 'channel', options: CHANNELS },
   { key: 'governorate', labelKey: 'city', options: GOVERNORATES },
   { key: 'productLine', labelKey: 'productLine', options: PRODUCT_LINES },
   { key: 'grind', labelKey: 'grind', options: GRINDS },
 ] as const;
 
-export function FilterBar() {
+interface Option {
+  value: string;
+  label: string;
+}
+
+export function FilterBar({ branchOptions }: { branchOptions?: Option[] }) {
   const t = useTranslations('filters');
   const tc = useTranslations('common');
   const locale = useLocale() as AppLocale;
@@ -48,7 +53,18 @@ export function FilterBar() {
       else sp.delete(key);
     });
 
-  const anyActive = GROUPS.some((g) => current(g.key).length > 0);
+  const groups: { key: string; label: string; options: Option[] }[] = [
+    ...ENUM_GROUPS.map((g) => ({
+      key: g.key,
+      label: t(g.labelKey),
+      options: g.options.map((o) => ({ value: o, label: enumLabel(o, locale) })),
+    })),
+    ...(branchOptions && branchOptions.length
+      ? [{ key: 'branchId', label: t('branch'), options: branchOptions }]
+      : []),
+  ];
+
+  const anyActive = groups.some((g) => current(g.key).length > 0);
 
   return (
     <div
@@ -75,13 +91,12 @@ export function FilterBar() {
         ))}
       </select>
 
-      {GROUPS.map((g) => (
+      {groups.map((g) => (
         <MultiSelect
           key={g.key}
-          label={t(g.labelKey)}
+          label={g.label}
           options={g.options}
           selected={current(g.key)}
-          locale={locale}
           onToggle={(v) => toggle(g.key, v)}
         />
       ))}
@@ -104,13 +119,11 @@ function MultiSelect({
   options,
   selected,
   onToggle,
-  locale,
 }: {
   label: string;
-  options: readonly string[];
+  options: Option[];
   selected: string[];
   onToggle: (value: string) => void;
-  locale: AppLocale;
 }) {
   return (
     <details className="group relative">
@@ -126,16 +139,16 @@ function MultiSelect({
       <div className="absolute z-20 mt-1 max-h-64 w-52 overflow-auto rounded-lg border bg-card p-1 shadow-lg">
         {options.map((o) => (
           <label
-            key={o}
+            key={o.value}
             className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted"
           >
             <input
               type="checkbox"
               className="accent-[var(--color-primary)]"
-              checked={selected.includes(o)}
-              onChange={() => onToggle(o)}
+              checked={selected.includes(o.value)}
+              onChange={() => onToggle(o.value)}
             />
-            {enumLabel(o, locale)}
+            {o.label}
           </label>
         ))}
       </div>
