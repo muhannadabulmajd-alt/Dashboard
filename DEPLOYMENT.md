@@ -61,6 +61,19 @@ After the Vercel deploy finishes you get `https://<your-project>.vercel.app`:
 - **Email reports:** set `RESEND_API_KEY` + a verified `REPORT_FROM` domain; otherwise the pipeline runs but only logs.
 - **Connectors:** configure the credentialed HTTP-CSV connector (or build vendor adapters behind `resolveConnectorSource`) at **/admin/connectors**; tokens are encrypted with `ENCRYPTION_KEY`.
 
+## Continuous deployment options
+
+**Option A — Vercel Git integration (simplest).** Connect the repo in the Vercel dashboard; Vercel auto-deploys every push to `main`. Nothing else needed.
+
+**Option B — GitHub Actions → Vercel** (`.github/workflows/deploy.yml`, opt-in and skipped by default). To enable:
+
+1. Repository → Settings → Secrets and variables → **Actions**:
+   - **Variables:** `ENABLE_VERCEL_DEPLOY = true`
+   - **Secrets:** `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` (from `vercel link` / your Vercel account).
+2. Pushes to `main` then build and deploy to production via the Vercel CLI.
+
+`.github/workflows/ci.yml` runs `typecheck` + `tests` on every push and PR regardless.
+
 ## Production checklist
 
 - [ ] Strong, unique `AUTH_SECRET`, `CRON_SECRET`, `ENCRYPTION_KEY` set in Vercel (never committed).
