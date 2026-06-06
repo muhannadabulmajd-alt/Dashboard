@@ -87,35 +87,80 @@ export interface ProductInput {
   isActive: boolean;
 }
 
+// Real-world catalogs use category words the schema doesn't model 1:1 (e.g.
+// "CUPS" for accessories, "DRIP_BAG" as a grind). Normalize casing/spacing and
+// alias those to the closest supported enum value instead of rejecting the row.
+const PRODUCT_LINE_ALIASES: Record<string, (typeof PRODUCT_LINES)[number]> = {
+  CUP: 'ACCESSORIES',
+  CUPS: 'ACCESSORIES',
+  ACCESSORY: 'ACCESSORIES',
+  DRIP_BAG: 'DRIP_BAGS',
+  SINGLE: 'SINGLE_ORIGIN',
+  BLEND: 'BLENDS',
+};
+const GRIND_ALIASES: Record<string, (typeof GRINDS)[number]> = {
+  WHOLE: 'WHOLE_BEAN',
+  WHOLEBEAN: 'WHOLE_BEAN',
+  BEAN: 'WHOLE_BEAN',
+  BEANS: 'WHOLE_BEAN',
+  DRIP: 'NONE',
+  DRIP_BAG: 'NONE',
+  DRIP_BAGS: 'NONE',
+  GROUND: 'FILTER',
+  MOKA_POT: 'MOKA',
+};
+const normEnum = (v: string) => v.trim().toUpperCase().replace(/[\s-]+/g, '_');
+
+const productLineField = z.preprocess((v) => {
+  if (typeof v !== 'string') return v;
+  const up = normEnum(v);
+  return PRODUCT_LINE_ALIASES[up] ?? up;
+}, z.enum(PRODUCT_LINES));
+
+// Grind is optional in practice (cups/accessories have none) → default NONE.
+const grindField = z.preprocess((v) => {
+  if (typeof v !== 'string' || v.trim() === '') return 'NONE';
+  const up = normEnum(v);
+  return GRIND_ALIASES[up] ?? up;
+}, z.enum(GRINDS));
+
 const productSchema = z
   .object({
     sku: z.string().min(3),
-    nameEn: z.string().min(1),
-    nameAr: z.string().min(1),
-    productLine: z.enum(PRODUCT_LINES),
-    sizeLabel: z.string().min(1),
+    nameEn: optStr,
+    nameAr: optStr,
+    productLine: productLineField,
+    sizeLabel: optStr,
     sizeGrams: optInt,
-    grind: z.enum(GRINDS),
+    grind: grindField,
     roastLevel: optEnum(ROAST_LEVELS),
     origin: optStr,
     sellingPrice: reqInt.pipe(z.number().int().nonnegative()),
     cogsPerUnit: reqInt.pipe(z.number().int().nonnegative()),
     active: boolField,
   })
-  .transform((r): ProductInput => ({
-    sku: r.sku.trim(),
-    nameEn: r.nameEn,
-    nameAr: r.nameAr,
-    productLine: r.productLine,
-    sizeLabel: r.sizeLabel,
-    sizeGrams: r.sizeGrams,
-    grind: r.grind,
-    roastLevel: r.roastLevel,
-    origin: r.origin,
-    sellingPrice: r.sellingPrice,
-    cogsPerUnit: r.cogsPerUnit,
-    isActive: r.active,
-  }));
+  // Arabic-first catalog: one name is enough — mirror it to the other side.
+  .refine((r) => Boolean(r.nameEn?.trim() || r.nameAr?.trim()), {
+    path: ['nameEn'],
+    message: 'a name is required (nameEn or nameAr)',
+  })
+  .transform((r): ProductInput => {
+    const name = (r.nameEn?.trim() || r.nameAr?.trim()) ?? '';
+    return {
+      sku: r.sku.trim(),
+      nameEn: r.nameEn?.trim() || name,
+      nameAr: r.nameAr?.trim() || name,
+      productLine: r.productLine,
+      sizeLabel: r.sizeLabel?.trim() || (r.sizeGrams ? `${r.sizeGrams}g` : '—'),
+      sizeGrams: r.sizeGrams,
+      grind: r.grind,
+      roastLevel: r.roastLevel,
+      origin: r.origin,
+      sellingPrice: r.sellingPrice,
+      cogsPerUnit: r.cogsPerUnit,
+      isActive: r.active,
+    };
+  });
 
 export const parseProducts = (rows: Raw[]) => parseEach(rows, productSchema);
 
