@@ -33,6 +33,28 @@ describe('product parser', () => {
     const { errors } = parseProducts([{ ...base, sellingPrice: '' }]);
     expect(errors).toHaveLength(1);
   });
+
+  it('accepts an Arabic-only catalog (nameEn blank → mirrors nameAr)', () => {
+    const { valid, errors } = parseProducts([{ ...base, nameEn: '' }]);
+    expect(errors).toHaveLength(0);
+    expect(valid[0]).toMatchObject({ nameEn: 'إسبريسو إكس', nameAr: 'إسبريسو إكس' });
+  });
+
+  it('requires at least one name', () => {
+    const { errors } = parseProducts([{ ...base, nameEn: '', nameAr: '' }]);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toContain('nameEn');
+  });
+
+  it('aliases real-world categories: CUPS→ACCESSORIES, blank/DRIP_BAG grind→NONE', () => {
+    const { valid, errors } = parseProducts([
+      { ...base, productLine: 'CUPS', grind: '' },
+      { ...base, sku: 'PL-DB-1', productLine: 'DRIP_BAGS', grind: 'DRIP_BAG' },
+    ]);
+    expect(errors).toHaveLength(0);
+    expect(valid[0]).toMatchObject({ productLine: 'ACCESSORIES', grind: 'NONE' });
+    expect(valid[1]).toMatchObject({ productLine: 'DRIP_BAGS', grind: 'NONE' });
+  });
 });
 
 describe('customer parser', () => {
