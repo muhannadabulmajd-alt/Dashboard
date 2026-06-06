@@ -101,6 +101,16 @@ describe('inventory parser', () => {
 });
 
 describe('batch parser', () => {
+  it('accepts green-only batches with roast details pending', () => {
+    const { valid, errors } = parseBatches([
+      { batchNumber: 'LC00001', roastDate: '', packagingDate: '', origin: 'Ethiopia Guji', roastLevel: '', greenInputGrams: '230', roastedOutputGrams: '', qcScore: '', qcNotes: '' },
+    ]);
+    expect(errors).toHaveLength(0);
+    expect(valid[0]).toMatchObject({ batchNumber: 'LC00001', origin: 'Ethiopia Guji', greenInputGrams: 230 });
+    expect(valid[0].roastedOutputGrams).toBeUndefined();
+    expect(valid[0].roastLevel).toBeUndefined();
+  });
+
   it('parses valid batch and rejects bad dates', () => {
     const ok = parseBatches([
       { batchNumber: 'LH-2026-1', roastDate: '2026-06-01', origin: 'Ethiopia', roastLevel: 'LIGHT', greenInputGrams: '30000', roastedOutputGrams: '25000', qcScore: '86' },
