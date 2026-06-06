@@ -34,8 +34,15 @@ export async function getBatches(
   scope: Scope,
   range: ResolvedRange,
 ): Promise<BatchLike[]> {
-  return prisma.roastBatch.findMany({
-    where: buildBatchWhere(filters, scope, range),
+  // Only fully-roasted batches feed cost/yield metrics; green-only logged
+  // batches (no roast output yet) are excluded.
+  const rows = await prisma.roastBatch.findMany({
+    where: {
+      AND: [
+        buildBatchWhere(filters, scope, range),
+        { roastDate: { not: null }, roastLevel: { not: null }, roastedOutputGrams: { not: null } },
+      ],
+    },
     select: {
       greenInputGrams: true,
       roastedOutputGrams: true,
@@ -43,4 +50,10 @@ export async function getBatches(
       roastDate: true,
     },
   });
+  return rows.map((r) => ({
+    greenInputGrams: r.greenInputGrams,
+    roastedOutputGrams: r.roastedOutputGrams!,
+    roastLevel: r.roastLevel!,
+    roastDate: r.roastDate!,
+  }));
 }

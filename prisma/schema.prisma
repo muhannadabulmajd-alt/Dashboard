@@ -349,15 +349,15 @@ model OrderLine {
 // ---------------------------------------------------------------------------
 
 model RoastBatch {
-  id                 String     @id @default(cuid())
-  batchNumber        String     @unique
-  roastDate          DateTime
+  id                 String      @id @default(cuid())
+  batchNumber        String      @unique
+  roastDate          DateTime?
   packagingDate      DateTime?
   origin             String
-  roastLevel         RoastLevel
+  roastLevel         RoastLevel?
   profileNotes       String?
   greenInputGrams    Int
-  roastedOutputGrams Int
+  roastedOutputGrams Int?
   qcScore            Float?
   qcNotes            String?
   operatorId         String?

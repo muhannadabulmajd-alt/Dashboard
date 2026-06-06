@@ -255,12 +255,12 @@ export const parseCustomers = (rows: Raw[]) => parseEach(rows, customerSchema);
 
 export interface BatchInput {
   batchNumber: string;
-  roastDate: Date;
+  roastDate?: Date;
   packagingDate?: Date;
   origin: string;
-  roastLevel: (typeof ROAST_LEVELS)[number];
+  roastLevel?: (typeof ROAST_LEVELS)[number];
   greenInputGrams: number;
-  roastedOutputGrams: number;
+  roastedOutputGrams?: number;
   qcScore?: number;
   qcNotes?: string;
 }
@@ -268,12 +268,12 @@ export interface BatchInput {
 const batchSchema = z
   .object({
     batchNumber: z.string().min(1),
-    roastDate: dateField,
+    roastDate: optDate,
     packagingDate: optDate,
     origin: z.string().min(1),
-    roastLevel: z.enum(ROAST_LEVELS),
+    roastLevel: optEnum(ROAST_LEVELS),
     greenInputGrams: reqInt.pipe(z.number().int().positive()),
-    roastedOutputGrams: reqInt.pipe(z.number().int().positive()),
+    roastedOutputGrams: z.preprocess(blank, z.coerce.number().int().positive().optional()),
     qcScore: z.preprocess(blank, z.coerce.number().optional()),
     qcNotes: optStr,
   })
