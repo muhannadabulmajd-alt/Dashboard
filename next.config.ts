@@ -4,8 +4,10 @@ import createNextIntlPlugin from 'next-intl/plugin';
 const withNextIntl = createNextIntlPlugin('./src/i18n/request.ts');
 
 const nextConfig: NextConfig = {
-  // Prisma client must not be bundled for the server runtime tracing.
   serverExternalPackages: ['@prisma/client', 'bcryptjs', '@react-pdf/renderer'],
+  experimental: {
+    instrumentationHook: true,
+  },
 };
 
 export default withNextIntl(nextConfig);
