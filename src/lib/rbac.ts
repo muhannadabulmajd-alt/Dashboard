@@ -11,6 +11,12 @@ export type Capability =
   | 'view:offers'
   | 'view:franchise'
   | 'view:financial' // P&L, COGS, margins, expenses, cash burn
+  | 'view:records' // back-office: browse/manage raw records
+  | 'manage:products'
+  | 'manage:customers'
+  | 'manage:orders'
+  | 'manage:inventory'
+  | 'manage:batches'
   | 'manage:users'
   | 'manage:branches'
   | 'manage:connectors'
@@ -28,6 +34,12 @@ const ALL: Capability[] = [
   'view:offers',
   'view:franchise',
   'view:financial',
+  'view:records',
+  'manage:products',
+  'manage:customers',
+  'manage:orders',
+  'manage:inventory',
+  'manage:batches',
   'manage:users',
   'manage:branches',
   'manage:connectors',
@@ -49,19 +61,50 @@ export const ROLE_CAPABILITIES: Record<Role, Capability[]> = {
     'view:offers',
     'view:franchise',
     'view:financial',
+    'view:records',
+    'manage:products',
+    'manage:customers',
+    'manage:orders',
+    'manage:inventory',
+    'manage:batches',
     'export:data',
     'export:financial',
   ],
-  ROASTERY_OPS: ['view:dashboard', 'view:inventory', 'view:roastery', 'view:fulfillment', 'export:data'],
+  ROASTERY_OPS: [
+    'view:dashboard',
+    'view:inventory',
+    'view:roastery',
+    'view:fulfillment',
+    'view:records',
+    'manage:products',
+    'manage:inventory',
+    'manage:batches',
+    'export:data',
+  ],
   SALES_CRM: [
     'view:dashboard',
     'view:sales',
     'view:customers',
     'view:fulfillment',
     'view:offers',
+    'view:records',
+    'manage:products',
+    'manage:customers',
+    'manage:orders',
     'export:data',
   ],
-  BRANCH_MANAGER: ['view:dashboard', 'view:sales', 'view:inventory', 'view:fulfillment', 'view:franchise', 'export:data'],
+  BRANCH_MANAGER: [
+    'view:dashboard',
+    'view:sales',
+    'view:inventory',
+    'view:fulfillment',
+    'view:franchise',
+    'view:records',
+    'manage:customers',
+    'manage:orders',
+    'manage:inventory',
+    'export:data',
+  ],
   FRANCHISEE_VIEWER: ['view:dashboard', 'view:sales', 'view:franchise'],
   VIEWER: [
     'view:dashboard',
@@ -96,6 +139,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: '/pnl', key: 'pnl', icon: 'TrendingUp', capability: 'view:financial' },
   { href: '/compare', key: 'compare', icon: 'Scale', capability: 'view:dashboard' },
   { href: '/franchise', key: 'franchise', icon: 'Store', capability: 'view:franchise' },
+  { href: '/admin/records', key: 'records', icon: 'Database', capability: 'view:records' },
   { href: '/admin/uploads', key: 'uploads', icon: 'Upload', capability: 'upload:data' },
   { href: '/admin/connectors', key: 'connectors', icon: 'Cable', capability: 'manage:connectors' },
   { href: '/admin/branches', key: 'branches', icon: 'Building2', capability: 'manage:branches' },

@@ -15,12 +15,54 @@
     "offers": "Offers & Campaigns",
     "compare": "Compare",
     "franchise": "Franchise Readiness",
+    "records": "Manage data",
     "uploads": "Data import",
     "connectors": "Connectors",
     "branches": "Branches",
     "users": "Users",
     "section": "Dashboards",
     "admin": "Administration"
+  },
+  "records": {
+    "title": "Manage data",
+    "subtitle": "Browse every record; open one to see full details.",
+    "open": "Open",
+    "back": "Back",
+    "search": "Search",
+    "total": "{n} records",
+    "none": "Nothing here yet.",
+    "entities": {
+      "products": "Products",
+      "customers": "Customers",
+      "orders": "Orders",
+      "inventory": "Inventory",
+      "batches": "Roast batches"
+    },
+    "entityHints": {
+      "products": "Catalog items, prices and costs",
+      "customers": "People and businesses who order",
+      "orders": "Every order and its line items",
+      "inventory": "Stock items and movements",
+      "batches": "Roasting log and green-coffee usage"
+    },
+    "f": {
+      "sku": "SKU", "name": "Name", "productLine": "Line", "size": "Size", "grind": "Grind",
+      "roastLevel": "Roast", "origin": "Origin", "price": "Price", "cost": "Cost", "status": "Status",
+      "active": "Active", "inactive": "Archived",
+      "externalId": "ID", "phone": "Phone", "email": "Email", "governorate": "Governorate",
+      "segment": "Segment", "ordersCount": "Orders", "firstOrder": "First order", "lastOrder": "Last order",
+      "campaign": "Source",
+      "orderNumber": "Order #", "date": "Date", "customer": "Customer", "channel": "Channel",
+      "fulfillment": "Fulfillment", "gross": "Gross", "discount": "Discount", "net": "Net",
+      "deliveryFee": "Delivery fee", "deliveryCost": "Delivery cost", "items": "Items",
+      "product": "Product", "qty": "Qty", "unitPrice": "Unit price", "lineTotal": "Line total",
+      "item": "Item", "category": "Category", "unit": "Unit", "currentStock": "Current stock",
+      "reorderPoint": "Reorder point", "avgDailyUsage": "Avg daily use", "unitCost": "Unit cost",
+      "movements": "Stock movements", "reason": "Reason", "quantity": "Quantity", "occurredAt": "Date",
+      "batchNumber": "Batch #", "roastDate": "Roast date", "green": "Green (g)", "output": "Output (g)",
+      "yield": "Yield", "shrinkage": "Shrinkage", "qc": "QC", "pending": "Pending", "roasted": "Roasted",
+      "none": "—", "createdAt": "Added"
+    }
   },
   "common": {
     "signOut": "Sign out",
