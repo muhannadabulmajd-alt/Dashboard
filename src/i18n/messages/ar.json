@@ -15,12 +15,54 @@
     "offers": "العروض",
     "compare": "المقارنة",
     "franchise": "جاهزية الامتياز",
+    "records": "إدارة البيانات",
     "uploads": "استيراد البيانات",
     "connectors": "الموصلات",
     "branches": "الفروع",
     "users": "المستخدمون",
     "section": "اللوحات",
     "admin": "الإدارة"
+  },
+  "records": {
+    "title": "إدارة البيانات",
+    "subtitle": "تصفّح كل السجلات؛ افتح أي سجل لعرض كامل التفاصيل.",
+    "open": "فتح",
+    "back": "رجوع",
+    "search": "بحث",
+    "total": "{n} سجل",
+    "none": "لا توجد سجلات بعد.",
+    "entities": {
+      "products": "المنتجات",
+      "customers": "العملاء",
+      "orders": "الطلبات",
+      "inventory": "المخزون",
+      "batches": "دفعات التحميص"
+    },
+    "entityHints": {
+      "products": "أصناف الكتالوج والأسعار والتكاليف",
+      "customers": "الأشخاص والجهات التي تطلب",
+      "orders": "كل طلب وبنوده",
+      "inventory": "أصناف المخزون والحركات",
+      "batches": "سجل التحميص واستهلاك البن الأخضر"
+    },
+    "f": {
+      "sku": "الرمز", "name": "الاسم", "productLine": "الفئة", "size": "الحجم", "grind": "الطحن",
+      "roastLevel": "التحميص", "origin": "المنشأ", "price": "السعر", "cost": "التكلفة", "status": "الحالة",
+      "active": "نشط", "inactive": "مؤرشف",
+      "externalId": "المعرّف", "phone": "الهاتف", "email": "البريد", "governorate": "المحافظة",
+      "segment": "الشريحة", "ordersCount": "الطلبات", "firstOrder": "أول طلب", "lastOrder": "آخر طلب",
+      "campaign": "المصدر",
+      "orderNumber": "رقم الطلب", "date": "التاريخ", "customer": "العميل", "channel": "القناة",
+      "fulfillment": "التسليم", "gross": "الإجمالي", "discount": "الخصم", "net": "الصافي",
+      "deliveryFee": "أجور التوصيل", "deliveryCost": "كلفة التوصيل", "items": "البنود",
+      "product": "المنتج", "qty": "الكمية", "unitPrice": "سعر الوحدة", "lineTotal": "إجمالي البند",
+      "item": "الصنف", "category": "التصنيف", "unit": "الوحدة", "currentStock": "الرصيد الحالي",
+      "reorderPoint": "حد إعادة الطلب", "avgDailyUsage": "متوسط الاستهلاك اليومي", "unitCost": "كلفة الوحدة",
+      "movements": "حركات المخزون", "reason": "السبب", "quantity": "الكمية", "occurredAt": "التاريخ",
+      "batchNumber": "رقم الدفعة", "roastDate": "تاريخ التحميص", "green": "أخضر (غم)", "output": "ناتج (غم)",
+      "yield": "العائد", "shrinkage": "الفاقد", "qc": "الجودة", "pending": "قيد الانتظار", "roasted": "محمّص",
+      "none": "—", "createdAt": "أُضيف"
+    }
   },
   "common": {
     "signOut": "تسجيل الخروج",
