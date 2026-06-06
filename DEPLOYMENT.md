@@ -42,6 +42,18 @@ Target stack: **Vercel** (Next.js host) + **Neon** (free serverless PostgreSQL).
 
 Open `https://<your-project>.vercel.app` → it redirects to `/ar`; sign in at `/ar/login` or `/en/login` with your `ADMIN_EMAIL` / `ADMIN_PASSWORD`. You're now the Owner (full access). Create the rest of your team from **/admin/users**.
 
+> Paste env values **without** surrounding quotes; leading/trailing spaces are trimmed automatically. Use a real email format for `ADMIN_EMAIL`.
+
+### Forgot the password / "Invalid email or password"?
+
+`ADMIN_EMAIL` / `ADMIN_PASSWORD` double as a no-terminal reset. Signing in with them **creates the owner if missing, or resets that owner's password** to `ADMIN_PASSWORD`:
+
+1. In Vercel → **Settings → Environment Variables**, set `ADMIN_PASSWORD` to a fresh value (no quotes/spaces); confirm `ADMIN_EMAIL` is exactly the address you log in with.
+2. **Redeploy** (Deployments → `···` → Redeploy) so the new values take effect.
+3. Sign in with `ADMIN_EMAIL` + the new `ADMIN_PASSWORD`.
+
+Once you're in, you can **delete `ADMIN_PASSWORD`** from Vercel to turn the env-based login/reset off; manage users from **/admin/users** thereafter.
+
 > **Do not run `pnpm db:seed` against this database** — it loads the demo dataset and **wipes existing data**. It's only for a throwaway demo/staging environment.
 
 ## 6. Optional extras
