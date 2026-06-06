@@ -4,6 +4,10 @@ Internal Roastery & Commerce Intelligence dashboard for **Laheeb Coffee (قهو�
 
 This repository covers the **MVP**, **Phase 2** analytics, and the reporting / franchise / connector roadmap — ten dashboard pages on a full auth/RBAC/i18n/filter foundation.
 
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fmuhannadabulmajd-alt%2FDashboard&env=DATABASE_URL,AUTH_SECRET,AUTH_TRUST_HOST,ADMIN_EMAIL,ADMIN_PASSWORD,CRON_SECRET,ENCRYPTION_KEY,NEXT_PUBLIC_USD_PER_IQD&envDescription=Neon%20Postgres%20URL%20%2B%20app%20secrets%20%2B%20first%20admin%20(see%20DEPLOYMENT.md)&envLink=https%3A%2F%2Fgithub.com%2Fmuhannadabulmajd-alt%2FDashboard%2Fblob%2Fmain%2FDEPLOYMENT.md)
+
+No terminal needed: migrations run automatically on deploy, and your Owner account is created the first time you sign in with `ADMIN_EMAIL` / `ADMIN_PASSWORD`. Full steps: **[DEPLOYMENT.md](./DEPLOYMENT.md)**.
+
 ## Stack
 
 - **Next.js 16** (App Router) + **React 19** + **TypeScript**
