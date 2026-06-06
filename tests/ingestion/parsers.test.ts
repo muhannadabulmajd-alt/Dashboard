@@ -122,4 +122,18 @@ describe('order parser', () => {
     expect(errors).toHaveLength(1); // quantity must be positive
     expect(valid).toHaveLength(1); // only O-1 survived
   });
+
+  it('maps courier statuses, hand-delivery, and rounds decimal prices', () => {
+    const { valid, errors } = parseOrders([
+      row({ orderNumber: 'O-A', status: 'SENT_TO_CENTER', fulfillmentMethod: 'HAND_DELIVERY' }),
+      row({ orderNumber: 'O-B', status: 'POSTPONED', unitGrossPrice: '9666.67' }),
+      row({ orderNumber: 'O-C', status: 'DELIVERED' }),
+    ]);
+    expect(errors).toHaveLength(0);
+    const byNum = Object.fromEntries(valid.map((o) => [o.orderNumber, o]));
+    expect(byNum['O-A']).toMatchObject({ status: 'PENDING', fulfillmentMethod: 'INTERNAL_DELIVERY' });
+    expect(byNum['O-B'].status).toBe('PENDING');
+    expect(byNum['O-B'].lines[0].unitGrossPrice).toBe(9667);
+    expect(byNum['O-C'].status).toBe('COMPLETED');
+  });
 });
