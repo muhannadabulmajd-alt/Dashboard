@@ -1,12 +1,13 @@
 import 'server-only';
 import Papa from 'papaparse';
-import { Prisma, type DatasetType } from '@prisma/client';
+import { Prisma, type DatasetType, type MovementReason } from '@prisma/client';
 import { prisma } from '@/server/db/client';
 import {
   parseProducts,
   parseCustomers,
   parseBatches,
   parseOrders,
+  parseInventory,
   type ImportDataset,
   type RowError,
   type IngestSummary,
@@ -17,6 +18,7 @@ const DATASET_TYPE: Record<ImportDataset, DatasetType> = {
   customers: 'CUSTOMERS',
   orders: 'ORDERS',
   batches: 'BATCHES',
+  inventory: 'INVENTORY',
 };
 
 function csvToRows(csvText: string): Record<string, string>[] {
@@ -101,6 +103,55 @@ export async function ingestCsv(
         } else {
           await prisma.roastBatch.create({ data: { batchNumber, ...data } });
           inserted += 1;
+        }
+      }
+    } else if (dataset === 'inventory') {
+      const branchId = await defaultBranchId(opts.branchId);
+      const { valid, errors: e } = parseInventory(rows);
+      errors.push(...e);
+      const now = new Date();
+      for (const it of valid) {
+        const existing = await prisma.inventoryItem.findFirst({
+          where: { nameAr: it.nameAr, branchId },
+          select: { id: true },
+        });
+        let itemId: string;
+        if (existing) {
+          await prisma.inventoryItem.update({
+            where: { id: existing.id },
+            data: { category: it.category, unit: it.unit, nameEn: it.nameEn },
+          });
+          itemId = existing.id;
+          updated += 1;
+        } else {
+          const created = await prisma.inventoryItem.create({
+            data: { category: it.category, nameEn: it.nameEn, nameAr: it.nameAr, unit: it.unit, branchId },
+          });
+          itemId = created.id;
+          inserted += 1;
+        }
+        // Opening / additions / deductions become signed stock movements. A
+        // deterministic externalId per item+type keeps re-uploads idempotent.
+        const moves: [MovementReason, number, string][] = [
+          ['OPENING', it.opening, 'OPEN'],
+          ['PURCHASE', it.additions, 'ADD'],
+          ['ADJUSTMENT', -it.deductions, 'DED'],
+        ];
+        for (const [reason, qty, tag] of moves) {
+          const externalId = `INV-${tag}-${itemId}`;
+          await prisma.stockMovement.upsert({
+            where: { externalId },
+            create: {
+              externalId,
+              inventoryItemId: itemId,
+              occurredAt: now,
+              reason,
+              quantity: qty,
+              branchId,
+              uploadBatchId: upload.id,
+            },
+            update: { quantity: qty, reason },
+          });
         }
       }
     } else {

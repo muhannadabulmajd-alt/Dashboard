@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { parseProducts, parseCustomers, parseBatches, parseOrders } from '@/server/ingestion/parsers';
+import {
+  parseProducts,
+  parseCustomers,
+  parseBatches,
+  parseOrders,
+  parseInventory,
+} from '@/server/ingestion/parsers';
 
 describe('product parser', () => {
   const base = {
@@ -74,6 +80,23 @@ describe('customer parser', () => {
     ]);
     expect(errors).toHaveLength(0);
     expect(valid.map((v) => v.governorate)).toEqual(['WASIT', 'DIWANIYAH', 'DHI_QAR', undefined]);
+  });
+});
+
+describe('inventory parser', () => {
+  it('parses items case-insensitively, defaults unit, aliases category', () => {
+    const { valid, errors } = parseInventory([
+      { Item: 'قهوة خام برازيل', Category: 'GREEN', Unit: 'GRAM', Opening: '0', Additions: '30000', Deductions: '5000' },
+      { item: 'كيس تقطير', category: 'PACKING', unit: '', opening: '0', additions: '5000', deductions: '256' },
+    ]);
+    expect(errors).toHaveLength(0);
+    expect(valid[0]).toMatchObject({ category: 'GREEN_COFFEE', unit: 'GRAM', additions: 30000, deductions: 5000 });
+    expect(valid[1]).toMatchObject({ category: 'PACKAGING', unit: 'unit' });
+  });
+
+  it('requires an item name', () => {
+    const { errors } = parseInventory([{ item: '', category: 'PACKAGING' }]);
+    expect(errors).toHaveLength(1);
   });
 });
 

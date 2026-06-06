@@ -338,7 +338,8 @@
       "products": "Products",
       "customers": "Customers",
       "orders": "Orders",
-      "batches": "Roast batches"
+      "batches": "Roast batches",
+      "inventory": "Inventory"
     },
     "inserted": "Inserted",
     "updated": "Updated",

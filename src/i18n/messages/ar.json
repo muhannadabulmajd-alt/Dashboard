@@ -338,7 +338,8 @@
       "products": "المنتجات",
       "customers": "العملاء",
       "orders": "الطلبات",
-      "batches": "دفعات التحميص"
+      "batches": "دفعات التحميص",
+      "inventory": "المخزون"
     },
     "inserted": "مُضاف",
     "updated": "مُحدّث",
