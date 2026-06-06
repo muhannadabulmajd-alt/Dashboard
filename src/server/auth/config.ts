@@ -4,6 +4,7 @@ import type { Role } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { prisma } from '@/server/db/client';
+import { maybeBootstrapOwner } from './bootstrap';
 
 const credentialsSchema = z.object({
   email: z.string().email(),
@@ -20,6 +21,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const parsed = credentialsSchema.safeParse(raw);
         if (!parsed.success) return null;
         const { email, password } = parsed.data;
+
+        // First-run only: create the owner from ADMIN_EMAIL/ADMIN_PASSWORD env.
+        await maybeBootstrapOwner(email, password);
 
         const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
         if (!user || !user.isActive) return null;
