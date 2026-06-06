@@ -64,6 +64,17 @@ describe('customer parser', () => {
     const bad = parseCustomers([{ externalId: '', governorate: 'BAGHDAD' }]);
     expect(bad.errors).toHaveLength(1);
   });
+
+  it('accepts all Iraqi governorates and aliases city names', () => {
+    const { valid, errors } = parseCustomers([
+      { externalId: 'C-2', governorate: 'WASIT' },
+      { externalId: 'C-3', governorate: 'DIWANIYAH' },
+      { externalId: 'C-4', governorate: 'Nasiriyah' }, // city → DHI_QAR
+      { externalId: 'C-5', governorate: '' }, // blank stays undefined
+    ]);
+    expect(errors).toHaveLength(0);
+    expect(valid.map((v) => v.governorate)).toEqual(['WASIT', 'DIWANIYAH', 'DHI_QAR', undefined]);
+  });
 });
 
 describe('batch parser', () => {

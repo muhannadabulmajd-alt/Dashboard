@@ -49,6 +49,31 @@ const optDate = z.preprocess(
 );
 const optEnum = <T extends readonly [string, ...string[]]>(vals: T) =>
   z.preprocess(blank, z.enum(vals).optional());
+
+// Iraqi address data often uses the city name rather than the province; map the
+// common ones to their governorate so they aren't rejected or dumped into OTHER.
+const normEnum = (v: string) => v.trim().toUpperCase().replace(/[\s-]+/g, '_');
+const GOVERNORATE_ALIASES: Record<string, (typeof GOVERNORATES)[number]> = {
+  NINEVEH: 'MOSUL', NINAWA: 'MOSUL', NINAVA: 'MOSUL',
+  KUT: 'WASIT',
+  QADISIYAH: 'DIWANIYAH', QADISIYYAH: 'DIWANIYAH', AL_QADISIYAH: 'DIWANIYAH', DIWANIYA: 'DIWANIYAH',
+  NASIRIYAH: 'DHI_QAR', NASIRIYA: 'DHI_QAR', THI_QAR: 'DHI_QAR', THIQAR: 'DHI_QAR',
+  HILLA: 'BABYLON', HILLAH: 'BABYLON', BABIL: 'BABYLON',
+  AMARA: 'MAYSAN', AMARAH: 'MAYSAN',
+  SAMAWA: 'MUTHANNA', SAMAWAH: 'MUTHANNA',
+  RAMADI: 'ANBAR', FALLUJA: 'ANBAR', FALLUJAH: 'ANBAR', AL_ANBAR: 'ANBAR',
+  BAQUBA: 'DIYALA', BAQUBAH: 'DIYALA',
+  TIKRIT: 'SALAHUDDIN', SALAH_AL_DIN: 'SALAHUDDIN', SALAH_ADDIN: 'SALAHUDDIN', SALAHALDIN: 'SALAHUDDIN',
+  SULAIMANIYA: 'SULAYMANIYAH', SLEMANI: 'SULAYMANIYAH', SLEMANY: 'SULAYMANIYAH',
+  HEWLER: 'ERBIL', HAWLER: 'ERBIL', ARBIL: 'ERBIL',
+};
+const govPre = (v: unknown) => {
+  if (typeof v !== 'string' || v.trim() === '') return undefined;
+  const up = normEnum(v);
+  return GOVERNORATE_ALIASES[up] ?? up;
+};
+const optGovernorate = z.preprocess(govPre, z.enum(GOVERNORATES).optional());
+const reqGovernorate = z.preprocess(govPre, z.enum(GOVERNORATES));
 const boolField = z.preprocess((v) => {
   if (typeof v !== 'string' || v.trim() === '') return true;
   return ['active', 'true', '1', 'yes'].includes(v.trim().toLowerCase());
@@ -109,7 +134,6 @@ const GRIND_ALIASES: Record<string, (typeof GRINDS)[number]> = {
   GROUND: 'FILTER',
   MOKA_POT: 'MOKA',
 };
-const normEnum = (v: string) => v.trim().toUpperCase().replace(/[\s-]+/g, '_');
 
 const productLineField = z.preprocess((v) => {
   if (typeof v !== 'string') return v;
@@ -184,7 +208,7 @@ const customerSchema = z
     email: optStr,
     nameEn: optStr,
     nameAr: optStr,
-    governorate: optEnum(GOVERNORATES),
+    governorate: optGovernorate,
     segment: z.preprocess(blank, z.enum(CUSTOMER_SEGMENTS).default('NEW')),
     campaignSource: optStr,
   })
@@ -248,7 +272,7 @@ const orderRowSchema = z.object({
   placedAt: dateField,
   customerExternalId: optStr,
   channel: z.enum(CHANNELS),
-  governorate: z.enum(GOVERNORATES),
+  governorate: reqGovernorate,
   fulfillmentMethod: z.enum(FULFILLMENT_METHODS),
   status: z.preprocess(blank, z.enum(ORDER_STATUSES).default('COMPLETED')),
   sku: z.string().min(1),
