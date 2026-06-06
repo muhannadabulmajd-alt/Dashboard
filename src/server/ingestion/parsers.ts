@@ -8,9 +8,10 @@ import {
   CUSTOMER_SEGMENTS,
   FULFILLMENT_METHODS,
   ORDER_STATUSES,
+  INVENTORY_CATEGORIES,
 } from '@/lib/enums';
 
-export type ImportDataset = 'products' | 'customers' | 'orders' | 'batches';
+export type ImportDataset = 'products' | 'customers' | 'orders' | 'batches' | 'inventory';
 
 export interface RowError {
   row: number;
@@ -280,6 +281,64 @@ const batchSchema = z
 
 export const parseBatches = (rows: Raw[]) => parseEach(rows, batchSchema);
 
+// --- Inventory --------------------------------------------------------------
+
+export interface InventoryInput {
+  nameEn: string;
+  nameAr: string;
+  category: (typeof INVENTORY_CATEGORIES)[number];
+  unit: string;
+  opening: number;
+  additions: number;
+  deductions: number;
+}
+
+const INVENTORY_CATEGORY_ALIASES: Record<string, (typeof INVENTORY_CATEGORIES)[number]> = {
+  PACKING: 'PACKAGING', PACKAGE: 'PACKAGING', BAGS: 'PACKAGING',
+  GREEN: 'GREEN_COFFEE', GREEN_BEANS: 'GREEN_COFFEE', RAW: 'GREEN_COFFEE', BEANS: 'GREEN_COFFEE',
+  ROAST: 'ROASTED', ROASTED_COFFEE: 'ROASTED',
+  DRIP: 'DRIP_BAGS', DRIP_BAG: 'DRIP_BAGS',
+  ACCESSORIES: 'ACCESSORY', ACCESSORIES_ITEM: 'ACCESSORY',
+};
+const invCategoryField = z.preprocess((v) => {
+  if (typeof v !== 'string') return v;
+  const up = normEnum(v);
+  return INVENTORY_CATEGORY_ALIASES[up] ?? up;
+}, z.enum(INVENTORY_CATEGORIES));
+const invInt = z.preprocess(
+  (v) => (typeof v === 'string' && v.trim() === '' ? 0 : v),
+  z.coerce.number().int().nonnegative(),
+);
+
+const inventorySchema = z
+  .object({
+    item: z.string().min(1),
+    category: invCategoryField,
+    unit: optStr,
+    opening: invInt,
+    additions: invInt,
+    deductions: invInt,
+  })
+  .transform((r): InventoryInput => ({
+    nameEn: r.item.trim(),
+    nameAr: r.item.trim(),
+    category: r.category,
+    unit: r.unit?.trim() || 'unit',
+    opening: r.opening,
+    additions: r.additions,
+    deductions: r.deductions,
+  }));
+
+/** Inventory rows; header matching is case-insensitive (Item/item both work). */
+export function parseInventory(rows: Raw[]): ParseResult<InventoryInput> {
+  const lowered = rows.map((r) => {
+    const o: Raw = {};
+    for (const k of Object.keys(r)) o[k.trim().toLowerCase()] = r[k];
+    return o;
+  });
+  return parseEach(lowered, inventorySchema);
+}
+
 // --- Orders (one CSV row per order line) ------------------------------------
 
 export interface OrderLineInput {
@@ -368,6 +427,10 @@ export const TEMPLATES: Record<ImportDataset, { headers: string[]; example: stri
     headers: ['batchNumber', 'roastDate', 'packagingDate', 'origin', 'roastLevel', 'greenInputGrams', 'roastedOutputGrams', 'qcScore', 'qcNotes'],
     example: ['LH-2026-0100', '2026-06-01', '2026-06-02', 'Ethiopia', 'LIGHT', '30000', '25500', '86.5', 'Bright, floral'],
   },
+  inventory: {
+    headers: ['item', 'category', 'unit', 'opening', 'additions', 'deductions'],
+    example: ['قهوة خام برازيل ريو ميناس', 'GREEN_COFFEE', 'GRAM', '0', '30000', '5000'],
+  },
 };
 
-export const IMPORT_DATASETS: ImportDataset[] = ['products', 'customers', 'orders', 'batches'];
+export const IMPORT_DATASETS: ImportDataset[] = ['products', 'customers', 'orders', 'batches', 'inventory'];
