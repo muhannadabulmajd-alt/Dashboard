@@ -74,6 +74,40 @@ const govPre = (v: unknown) => {
 };
 const optGovernorate = z.preprocess(govPre, z.enum(GOVERNORATES).optional());
 const reqGovernorate = z.preprocess(govPre, z.enum(GOVERNORATES));
+
+// Courier / COD pipeline states map onto the order lifecycle. Revenue is only
+// realized on completion, so any in-transit / on-hold state is treated as PENDING.
+const ORDER_STATUS_ALIASES: Record<string, (typeof ORDER_STATUSES)[number]> = {
+  DELIVERED: 'COMPLETED', DONE: 'COMPLETED', FULFILLED: 'COMPLETED', PAID: 'COMPLETED',
+  RECEIVED_AT_WAREHOUSE: 'PENDING', AT_WAREHOUSE: 'PENDING', SENT_TO_CENTER: 'PENDING',
+  IN_TRANSIT: 'PENDING', OUT_FOR_DELIVERY: 'PENDING', SHIPPED: 'PENDING',
+  PROCESSING: 'PENDING', POSTPONED: 'PENDING', ON_HOLD: 'PENDING', CONFIRMED: 'PENDING',
+  CANCELED: 'CANCELLED', RETURN: 'RETURNED', REFUND: 'REFUNDED',
+};
+const statusField = z.preprocess((v) => {
+  if (typeof v !== 'string' || v.trim() === '') return 'COMPLETED';
+  const up = normEnum(v);
+  return ORDER_STATUS_ALIASES[up] ?? up;
+}, z.enum(ORDER_STATUSES));
+
+const FULFILLMENT_ALIASES: Record<string, (typeof FULFILLMENT_METHODS)[number]> = {
+  HAND_DELIVERY: 'INTERNAL_DELIVERY', HAND: 'INTERNAL_DELIVERY', IN_HOUSE: 'INTERNAL_DELIVERY',
+  DELIVERY: 'INTERNAL_DELIVERY', PICK_UP: 'PICKUP', STORE_PICKUP: 'PICKUP',
+  WHOLESALE: 'B2B', BRANCH: 'BRANCH_SALE',
+};
+const fulfillmentField = z.preprocess((v) => {
+  if (typeof v !== 'string') return v;
+  const up = normEnum(v);
+  return FULFILLMENT_ALIASES[up] ?? up;
+}, z.enum(FULFILLMENT_METHODS));
+
+// Money is whole IQD. Tolerate decimals (e.g. a total split across a quantity)
+// by rounding instead of rejecting the row.
+const reqMoney = z.preprocess(blank, z.coerce.number().nonnegative().transform(Math.round));
+const optMoney0 = z.preprocess(
+  (v) => (typeof v === 'string' && v.trim() === '' ? 0 : v),
+  z.coerce.number().nonnegative().transform(Math.round),
+);
 const boolField = z.preprocess((v) => {
   if (typeof v !== 'string' || v.trim() === '') return true;
   return ['active', 'true', '1', 'yes'].includes(v.trim().toLowerCase());
@@ -273,14 +307,14 @@ const orderRowSchema = z.object({
   customerExternalId: optStr,
   channel: z.enum(CHANNELS),
   governorate: reqGovernorate,
-  fulfillmentMethod: z.enum(FULFILLMENT_METHODS),
-  status: z.preprocess(blank, z.enum(ORDER_STATUSES).default('COMPLETED')),
+  fulfillmentMethod: fulfillmentField,
+  status: statusField,
   sku: z.string().min(1),
   quantity: reqInt.pipe(z.number().int().positive()),
-  unitGrossPrice: reqInt.pipe(z.number().int().nonnegative()),
-  lineDiscount: z.preprocess(blank, z.coerce.number().int().nonnegative().default(0)),
-  deliveryFee: z.preprocess(blank, z.coerce.number().int().nonnegative().default(0)),
-  deliveryCost: z.preprocess(blank, z.coerce.number().int().nonnegative().default(0)),
+  unitGrossPrice: reqMoney,
+  lineDiscount: optMoney0,
+  deliveryFee: optMoney0,
+  deliveryCost: optMoney0,
 });
 
 /** Validate order-line rows and group them into orders by order number. */
