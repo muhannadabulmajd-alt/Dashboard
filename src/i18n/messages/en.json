@@ -41,6 +41,12 @@
     "dues": "Dues",
     "shareholders": "Shareholders",
     "recordEntry": "Record entry",
+    "overdue": "Overdue",
+    "remaining": "Remaining",
+    "contributions": "Contributions",
+    "noDues": "No outstanding dues.",
+    "settleTitle": "Record a payment",
+    "totalCapital": "Total capital",
     "entityHints": {
       "accounts": "Cash & bank balances",
       "parties": "Suppliers, retailers, shareholders…",

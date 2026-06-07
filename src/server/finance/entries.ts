@@ -121,3 +121,56 @@ export async function deleteEntry(id: string, locale: string): Promise<void> {
   }
   redirect(`/${locale}/finance/ledger`);
 }
+
+const settleSchema = z.object({
+  amount: z.coerce.number().positive(),
+  accountId: z.string().min(1),
+  date: z.coerce.date(),
+});
+
+/** Record a (partial) payment that settles a payable/receivable obligation. */
+export async function settleEntry(
+  obligationId: string,
+  _prev: ActionState,
+  fd: FormData,
+): Promise<ActionState> {
+  const user = await requireCap(CAP);
+  if (!user) return { error: 'forbidden' };
+  const r = settleSchema.safeParse({
+    amount: reqField(fd, 'amount'),
+    accountId: reqField(fd, 'accountId'),
+    date: reqField(fd, 'date'),
+  });
+  if (!r.success) return { error: 'invalid' };
+  const locale = reqField(fd, 'locale') || 'ar';
+
+  const ob = await prisma.financeEntry.findUnique({
+    where: { id: obligationId },
+    include: { settlements: { select: { amount: true } } },
+  });
+  if (!ob || !ob.obligation || !ob.obligationKind) return { error: 'invalid' };
+  const paid = ob.settlements.reduce((s, x) => s + x.amount, 0);
+  const outstanding = Math.max(0, ob.amount - paid);
+  if (outstanding <= 0) return { error: 'invalid' };
+  const amount = Math.min(toMinor(r.data.amount, ob.currency), outstanding);
+
+  await prisma.financeEntry.create({
+    data: {
+      date: r.data.date,
+      type: ob.obligationKind === 'PAYABLE' ? 'PAYMENT_OUT' : 'PAYMENT_IN',
+      amount,
+      currency: ob.currency,
+      obligation: false,
+      accountId: r.data.accountId,
+      partyId: ob.partyId,
+      settlesId: ob.id,
+      description: 'Settlement',
+      createdById: user.id,
+    },
+  });
+  await audit(user.id, 'SETTLE', 'FinanceEntry', { obligationId, amount });
+  revalidatePath(HUB, 'page');
+  revalidatePath(LIST, 'page');
+  revalidatePath('/[locale]/(dashboard)/finance/dues', 'page');
+  redirect(`/${locale}/finance/dues`);
+}
