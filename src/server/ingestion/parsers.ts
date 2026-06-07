@@ -10,6 +10,7 @@ import {
   ORDER_STATUSES,
   INVENTORY_CATEGORIES,
   CURRENCIES,
+  EXPENSE_CATEGORY_TYPES,
 } from '@/lib/enums';
 
 export type ImportDataset =
@@ -358,7 +359,25 @@ export interface PurchaseInput {
   supplier?: string;
   reference?: string;
   description: string;
+  categoryType?: (typeof EXPENSE_CATEGORY_TYPES)[number];
   importKey: string;
+}
+
+/** Best-effort expense category from an Arabic/English item name (editable later). */
+function inferCategory(item: string): (typeof EXPENSE_CATEGORY_TYPES)[number] | undefined {
+  const s = item.toLowerCase();
+  const has = (...kw: string[]) => kw.some((k) => s.includes(k));
+  if (has('قهوة خام', 'بن خام', 'green')) return 'GREEN_COFFEE';
+  if (has('شحن', 'توصيل')) return 'SHIPPING';
+  if (has('ريكلام', 'اعلان', 'تسويق', 'ads')) return 'MARKETING';
+  if (has('اودو', 'اوبريتنك', 'سيستم', 'نظام', 'اشتراك', 'سوفت', 'هوست', 'دومين', 'canva', 'كانفا')) return 'TECH';
+  if (has('ايجار')) return 'RENT';
+  if (has('راتب', 'رواتب')) return 'SALARIES';
+  if (has('ماكنة', 'مكائن', 'جهاز', 'طابعة', 'معدات', 'ستيل', 'كبس', 'فلتر')) return 'EQUIPMENT';
+  if (has('كهرباء', 'ماء', 'انترنت', 'هاتف')) return 'UTILITIES';
+  if (has('كيس', 'علبة', 'علاكة', 'مغلف', 'قدح', 'كوب', 'باكيت', 'تغليف', 'ورقي', 'حافظة', 'كرتون', 'ستكر', 'ملصق'))
+    return 'PACKAGING';
+  return undefined;
 }
 
 const purchaseSchema = z
@@ -384,7 +403,16 @@ const purchaseSchema = z
       (qtyUnit ? ` (${qtyUnit})` : '') +
       (r.deliveryCompany?.trim() ? ` — ${r.deliveryCompany.trim()}` : '');
     const key = `PUR:${r.doc?.trim() || r.invoice?.trim() || r.item.trim()}:${r.date.toISOString().slice(0, 10)}:${amount}`;
-    return { amount, currency: r.currency, date: r.date, supplier: r.supplier, reference: ref, description, importKey: key };
+    return {
+      amount,
+      currency: r.currency,
+      date: r.date,
+      supplier: r.supplier,
+      reference: ref,
+      description,
+      categoryType: inferCategory(r.item),
+      importKey: key,
+    };
   });
 
 export const parsePurchases = (rows: Raw[]) => parseEach(rows, purchaseSchema);

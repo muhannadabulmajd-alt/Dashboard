@@ -22,6 +22,27 @@ interface Option {
   label: string;
 }
 
+// Which filters each page actually uses. Pages not listed (finance, admin,
+// records, …) get no filter bar at all, so no page shows irrelevant filters.
+type FilterConfig = { groups: string[]; branch: boolean };
+const ALL_GROUPS = ['channel', 'governorate', 'productLine', 'grind'];
+function pageConfig(path: string): FilterConfig | null {
+  if (path.startsWith('/finance') || path.startsWith('/admin')) return null;
+  const map: Record<string, FilterConfig> = {
+    '/': { groups: ALL_GROUPS, branch: true },
+    '/sales': { groups: ALL_GROUPS, branch: true },
+    '/inventory': { groups: [], branch: true },
+    '/pnl': { groups: ['channel'], branch: true },
+    '/roastery': { groups: [], branch: true },
+    '/customers': { groups: ['channel', 'governorate'], branch: true },
+    '/fulfillment': { groups: ['channel', 'governorate'], branch: true },
+    '/offers': { groups: ['channel'], branch: true },
+    '/compare': { groups: [], branch: true },
+    '/franchise': { groups: [], branch: true },
+  };
+  return map[path] ?? { groups: ALL_GROUPS, branch: true };
+}
+
 export function FilterBar({ branchOptions }: { branchOptions?: Option[] }) {
   const t = useTranslations('filters');
   const tc = useTranslations('common');
@@ -30,6 +51,8 @@ export function FilterBar({ branchOptions }: { branchOptions?: Option[] }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [pending, startTransition] = useTransition();
+
+  const cfg = pageConfig(pathname);
 
   const current = (key: string): string[] => {
     const v = searchParams.get(key);
@@ -55,18 +78,23 @@ export function FilterBar({ branchOptions }: { branchOptions?: Option[] }) {
       else sp.delete(key);
     });
 
-  const groups: { key: string; label: string; options: Option[] }[] = [
-    ...ENUM_GROUPS.map((g) => ({
-      key: g.key,
-      label: t(g.labelKey),
-      options: g.options.map((o) => ({ value: o, label: enumLabel(o, locale) })),
-    })),
-    ...(branchOptions && branchOptions.length
-      ? [{ key: 'branchId', label: t('branch'), options: branchOptions }]
-      : []),
-  ];
+  const groups: { key: string; label: string; options: Option[] }[] = cfg
+    ? [
+        ...ENUM_GROUPS.filter((g) => cfg.groups.includes(g.key)).map((g) => ({
+          key: g.key,
+          label: t(g.labelKey),
+          options: g.options.map((o) => ({ value: o, label: enumLabel(o, locale) })),
+        })),
+        ...(cfg.branch && branchOptions && branchOptions.length
+          ? [{ key: 'branchId', label: t('branch'), options: branchOptions }]
+          : []),
+      ]
+    : [];
 
   const anyActive = groups.some((g) => current(g.key).length > 0);
+
+  // Pages without a config (finance, admin, records, …) show no filter bar.
+  if (!cfg) return null;
 
   return (
     <div
