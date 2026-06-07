@@ -9,6 +9,7 @@
     "sales": "Sales & Products",
     "inventory": "Inventory & Stock",
     "pnl": "P&L & Unit Economics",
+    "finance": "Finance",
     "roastery": "Roastery & Production",
     "customers": "Customers & CRM",
     "fulfillment": "Fulfillment & Delivery",
@@ -22,6 +23,40 @@
     "users": "Users",
     "section": "Dashboards",
     "admin": "Administration"
+  },
+  "finance": {
+    "title": "Finance",
+    "subtitle": "Money in and out, balances, dues, and capital — all in one place.",
+    "cashOnHand": "Cash on hand",
+    "capital": "Capital contributed",
+    "spent": "Total spent",
+    "received": "Received",
+    "payables": "Payables (we owe)",
+    "receivables": "Receivables (owed to us)",
+    "net": "Net cash",
+    "byAccount": "By account",
+    "accounts": "Accounts",
+    "parties": "Parties",
+    "ledger": "Ledger",
+    "dues": "Dues",
+    "shareholders": "Shareholders",
+    "recordEntry": "Record entry",
+    "entityHints": {
+      "accounts": "Cash & bank balances",
+      "parties": "Suppliers, retailers, shareholders…",
+      "ledger": "Every money movement",
+      "dues": "Payables & receivables",
+      "shareholders": "Capital & ownership"
+    },
+    "f": {
+      "name": "Name", "type": "Type", "bank": "Bank", "branch": "Branch", "currency": "Currency",
+      "opening": "Opening balance", "balance": "Balance", "account": "Account", "toAccount": "To account",
+      "party": "Party", "amount": "Amount", "date": "Date", "dueDate": "Due date", "category": "Category",
+      "description": "Description", "reference": "Reference", "status": "Status", "paid": "Paid", "due": "Due",
+      "outstanding": "Outstanding", "kind": "Kind", "obligation": "Record as a due (not paid yet)",
+      "phone": "Phone", "email": "Email", "notes": "Notes", "equityShare": "Ownership %", "settle": "Settle",
+      "settles": "Settles", "none": "—"
+    }
   },
   "records": {
     "title": "Manage data",

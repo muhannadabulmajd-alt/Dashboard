@@ -11,6 +11,8 @@ export type Capability =
   | 'view:offers'
   | 'view:franchise'
   | 'view:financial' // P&L, COGS, margins, expenses, cash burn
+  | 'view:finance' // finance/accounting section
+  | 'manage:finance' // record finance entries, accounts, parties
   | 'view:records' // back-office: browse/manage raw records
   | 'manage:products'
   | 'manage:customers'
@@ -34,6 +36,8 @@ const ALL: Capability[] = [
   'view:offers',
   'view:franchise',
   'view:financial',
+  'view:finance',
+  'manage:finance',
   'view:records',
   'manage:products',
   'manage:customers',
@@ -61,6 +65,8 @@ export const ROLE_CAPABILITIES: Record<Role, Capability[]> = {
     'view:offers',
     'view:franchise',
     'view:financial',
+    'view:finance',
+    'manage:finance',
     'view:records',
     'manage:products',
     'manage:customers',
@@ -137,6 +143,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: '/fulfillment', key: 'fulfillment', icon: 'Truck', capability: 'view:fulfillment' },
   { href: '/offers', key: 'offers', icon: 'Percent', capability: 'view:offers' },
   { href: '/pnl', key: 'pnl', icon: 'TrendingUp', capability: 'view:financial' },
+  { href: '/finance', key: 'finance', icon: 'Wallet', capability: 'view:finance' },
   { href: '/compare', key: 'compare', icon: 'Scale', capability: 'view:dashboard' },
   { href: '/franchise', key: 'franchise', icon: 'Store', capability: 'view:franchise' },
   { href: '/admin/records', key: 'records', icon: 'Database', capability: 'view:records' },

@@ -1,0 +1,123 @@
+'use server';
+
+import { redirect } from 'next/navigation';
+import { revalidatePath } from 'next/cache';
+import { z } from 'zod';
+import { prisma } from '@/server/db/client';
+import { FINANCE_TYPES, CURRENCIES, OBLIGATION_KINDS, EXPENSE_CATEGORY_TYPES } from '@/lib/enums';
+import { toMinor } from '@/lib/money';
+import { requireCap, audit, reqField, optField, type ActionState } from '@/server/records/shared';
+
+const HUB = '/[locale]/(dashboard)/finance';
+const LIST = '/[locale]/(dashboard)/finance/ledger';
+const CAP = 'manage:finance' as const;
+
+const schema = z.object({
+  type: z.enum(FINANCE_TYPES),
+  amount: z.coerce.number().positive(), // major units; converted to minor on save
+  currency: z.enum(CURRENCIES),
+  date: z.coerce.date(),
+  accountId: z.string().optional(),
+  toAccountId: z.string().optional(),
+  partyId: z.string().optional(),
+  categoryType: z.enum(EXPENSE_CATEGORY_TYPES).optional(),
+  obligationKind: z.enum(OBLIGATION_KINDS).optional(),
+  dueDate: z.coerce.date().optional(),
+  description: z.string().optional(),
+  reference: z.string().optional(),
+  settlesId: z.string().optional(),
+});
+
+type Parsed = z.infer<typeof schema>;
+
+function parse(fd: FormData) {
+  const obligation = reqField(fd, 'obligation') === 'yes';
+  const res = schema.safeParse({
+    type: reqField(fd, 'type'),
+    amount: reqField(fd, 'amount'),
+    currency: reqField(fd, 'currency'),
+    date: reqField(fd, 'date'),
+    accountId: optField(fd, 'accountId'),
+    toAccountId: optField(fd, 'toAccountId'),
+    partyId: optField(fd, 'partyId'),
+    categoryType: optField(fd, 'categoryType'),
+    obligationKind: optField(fd, 'obligationKind'),
+    dueDate: optField(fd, 'dueDate'),
+    description: optField(fd, 'description'),
+    reference: optField(fd, 'reference'),
+    settlesId: optField(fd, 'settlesId'),
+  });
+  return { obligation, res };
+}
+
+/** Validate the type/obligation/account combination and shape the row. */
+function toData(p: Parsed, obligation: boolean) {
+  if (obligation) {
+    if (!p.obligationKind) return null; // a due needs payable/receivable
+  } else if (p.type === 'TRANSFER') {
+    if (!p.accountId || !p.toAccountId || p.accountId === p.toAccountId) return null;
+  } else if (!p.accountId) {
+    return null; // a cash movement needs an account
+  }
+  return {
+    date: p.date,
+    type: p.type,
+    amount: toMinor(p.amount, p.currency),
+    currency: p.currency,
+    obligation,
+    obligationKind: obligation ? (p.obligationKind ?? null) : null,
+    dueDate: obligation ? (p.dueDate ?? null) : null,
+    accountId: obligation ? null : (p.accountId ?? null),
+    toAccountId: !obligation && p.type === 'TRANSFER' ? (p.toAccountId ?? null) : null,
+    partyId: p.partyId ?? null,
+    categoryType: p.type === 'EXPENSE' || p.type === 'PURCHASE' ? (p.categoryType ?? null) : null,
+    settlesId: p.settlesId ?? null,
+    description: p.description ?? null,
+    reference: p.reference ?? null,
+  };
+}
+
+export async function createEntry(_prev: ActionState, fd: FormData): Promise<ActionState> {
+  const user = await requireCap(CAP);
+  if (!user) return { error: 'forbidden' };
+  const { obligation, res } = parse(fd);
+  if (!res.success) return { error: 'invalid' };
+  const data = toData(res.data, obligation);
+  if (!data) return { error: 'invalid' };
+  const locale = reqField(fd, 'locale') || 'ar';
+  const row = await prisma.financeEntry.create({ data: { ...data, createdById: user.id } });
+  await audit(user.id, 'CREATE', 'FinanceEntry', { type: data.type, amount: data.amount });
+  revalidatePath(HUB, 'page');
+  revalidatePath(LIST, 'page');
+  redirect(`/${locale}/finance/ledger/${row.id}`);
+}
+
+export async function updateEntry(id: string, _prev: ActionState, fd: FormData): Promise<ActionState> {
+  const user = await requireCap(CAP);
+  if (!user) return { error: 'forbidden' };
+  const { obligation, res } = parse(fd);
+  if (!res.success) return { error: 'invalid' };
+  const data = toData(res.data, obligation);
+  if (!data) return { error: 'invalid' };
+  const locale = reqField(fd, 'locale') || 'ar';
+  await prisma.financeEntry.update({ where: { id }, data });
+  await audit(user.id, 'UPDATE', 'FinanceEntry', { id });
+  revalidatePath(HUB, 'page');
+  revalidatePath(LIST, 'page');
+  redirect(`/${locale}/finance/ledger/${id}`);
+}
+
+export async function deleteEntry(id: string, locale: string): Promise<void> {
+  const user = await requireCap(CAP);
+  if (!user) return;
+  try {
+    await prisma.financeEntry.delete({ where: { id } });
+    await audit(user.id, 'DELETE', 'FinanceEntry', { id });
+    revalidatePath(HUB, 'page');
+    revalidatePath(LIST, 'page');
+  } catch {
+    // Has linked settlements — leave it; user removes payments first.
+    redirect(`/${locale}/finance/ledger/${id}`);
+  }
+  redirect(`/${locale}/finance/ledger`);
+}

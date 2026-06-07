@@ -593,3 +593,108 @@ model SyncRun {
 
   @@index([connectorId, startedAt])
 }
+
+// ---------------------------------------------------------------------------
+// Finance / accounting (cashbook + AR/AP + capital)
+// ---------------------------------------------------------------------------
+
+enum AccountType {
+  CASH
+  BANK
+}
+
+enum PartyType {
+  SUPPLIER
+  RETAILER
+  PARTNER
+  CUSTOMER
+  SHAREHOLDER
+  EMPLOYEE
+  OTHER
+}
+
+enum FinanceType {
+  EXPENSE
+  PURCHASE
+  INCOME
+  PAYMENT_IN
+  PAYMENT_OUT
+  CAPITAL_IN
+  DRAWING
+  TRANSFER
+}
+
+enum ObligationKind {
+  PAYABLE
+  RECEIVABLE
+}
+
+model FinanceAccount {
+  id             String      @id @default(cuid())
+  name           String
+  type           AccountType
+  bankName       String?
+  branchId       String? // for CASH accounts: which branch holds the cash
+  currency       Currency    @default(IQD)
+  openingBalance Int         @default(0) // minor units
+  isActive       Boolean     @default(true)
+  createdAt      DateTime    @default(now())
+
+  entries   FinanceEntry[] @relation("AccountEntries")
+  transfers FinanceEntry[] @relation("TransferTo")
+
+  @@index([type])
+}
+
+model Party {
+  id          String    @id @default(cuid())
+  name        String
+  type        PartyType @default(OTHER)
+  phone       String?
+  email       String?
+  notes       String?
+  equityShare Float? // ownership % (shareholders)
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+
+  entries FinanceEntry[]
+
+  @@index([type])
+}
+
+model FinanceEntry {
+  id            String               @id @default(cuid())
+  date          DateTime
+  type          FinanceType
+  amount        Int // minor units, positive
+  currency      Currency             @default(IQD)
+  // When obligation=true this is a payable/receivable that has NOT moved cash.
+  // When false it is an actual cash movement on `account` (and `toAccount` for transfers).
+  obligation    Boolean              @default(false)
+  obligationKind ObligationKind?
+  dueDate       DateTime?
+  accountId     String?
+  toAccountId   String?
+  partyId       String?
+  categoryType  ExpenseCategoryType?
+  settlesId     String? // payment that settles an obligation (partial allowed)
+  description   String?
+  reference     String?
+  branchId      String?
+  orderId       String?
+  createdById   String?
+  createdAt     DateTime             @default(now())
+
+  account     FinanceAccount? @relation("AccountEntries", fields: [accountId], references: [id])
+  toAccount   FinanceAccount? @relation("TransferTo", fields: [toAccountId], references: [id])
+  party       Party?          @relation(fields: [partyId], references: [id])
+  settles     FinanceEntry?   @relation("Settlements", fields: [settlesId], references: [id])
+  settlements FinanceEntry[]  @relation("Settlements")
+
+  @@index([date])
+  @@index([type])
+  @@index([obligation])
+  @@index([accountId])
+  @@index([partyId])
+  @@index([settlesId])
+}
