@@ -479,6 +479,6 @@
     "nofile": "Please choose a CSV file."
   },
   "stale": {
-    "warning": "Showing seeded sample data — last updated {date}."
+    "warning": "Latest data: {date}"
   }
 }

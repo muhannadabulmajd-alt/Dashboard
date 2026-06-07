@@ -13,7 +13,7 @@ export async function StaleDataBanner({
   if (!lastUpdated) return null;
   const t = await getTranslations('stale');
   return (
-    <div className="flex items-center justify-center gap-1.5 bg-warning-soft px-4 py-1.5 text-center text-xs text-warning">
+    <div className="flex items-center justify-center gap-1.5 border-b bg-muted/40 px-4 py-1 text-center text-xs text-muted-foreground">
       <Info className="size-3.5 shrink-0" />
       {t('warning', { date: formatDate(lastUpdated, locale) })}
     </div>

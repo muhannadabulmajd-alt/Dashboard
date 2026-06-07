@@ -190,6 +190,7 @@ export async function ingestCsv(
               currency: p.currency,
               obligation: false,
               partyId: await partyId(p.supplier, 'SUPPLIER'),
+              categoryType: p.categoryType ?? null,
               reference: p.reference ?? null,
               description: p.description,
               importKey: `PUR:${i++}`,
