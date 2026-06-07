@@ -23,12 +23,25 @@ export default async function RoasteryPage({
 
   const batches = await getBatchRows(filters, scope, range);
 
-  const green = M.totalGreenInput(batches);
-  const roasted = M.totalRoastedOutput(batches);
+  // Roasted subset (has output) drives yield metrics; green input counts all batches.
+  const roastedBatches = batches
+    .filter((b) => b.roastedOutputGrams != null && b.roastLevel != null && b.roastDate != null)
+    .map((b) => ({
+      greenInputGrams: b.greenInputGrams,
+      roastedOutputGrams: b.roastedOutputGrams as number,
+      roastLevel: b.roastLevel!,
+      roastDate: b.roastDate as Date,
+    }));
+  const green = batches.reduce((s, b) => s + b.greenInputGrams, 0);
+  const roasted = roastedBatches.reduce((s, b) => s + b.roastedOutputGrams, 0);
   const kg = (g: number) => `${formatNumber(Math.round(g / 1000), locale)} kg`;
 
-  const roastMix = M.roastLevelMix(batches).map((r) => ({ label: enumLabel(r.roastLevel, locale), value: r.outputGrams }));
-  const operators = M.operatorActivity(batches).map((o) => ({ label: o.operator, value: o.outputGrams }));
+  const roastMix = M.roastLevelMix(roastedBatches).map((r) => ({ label: enumLabel(r.roastLevel, locale), value: r.outputGrams }));
+  const operators = M.operatorActivity(
+    batches
+      .filter((b) => b.roastedOutputGrams != null)
+      .map((b) => ({ operatorName: b.operatorName, greenInputGrams: b.greenInputGrams, roastedOutputGrams: b.roastedOutputGrams as number })),
+  ).map((o) => ({ label: o.operator, value: o.outputGrams }));
 
   const cols = [
     { label: t('batchNumber') },
@@ -42,9 +55,11 @@ export default async function RoasteryPage({
   const rows = batches.map((b) => [
     b.batchNumber,
     b.origin,
-    enumLabel(b.roastLevel, locale),
-    kg(b.roastedOutputGrams),
-    formatPercent(M.shrinkagePct(b.greenInputGrams, b.roastedOutputGrams), locale),
+    b.roastLevel ? enumLabel(b.roastLevel, locale) : '—',
+    b.roastedOutputGrams != null ? kg(b.roastedOutputGrams) : '—',
+    b.roastedOutputGrams != null
+      ? formatPercent(M.shrinkagePct(b.greenInputGrams, b.roastedOutputGrams), locale)
+      : '—',
     b.qcScore != null ? formatNumber(b.qcScore, locale, 1) : '—',
     b.operatorName ?? '—',
   ]);
@@ -57,7 +72,7 @@ export default async function RoasteryPage({
         <KpiCard label={t('batches')} value={formatNumber(batches.length, locale)} locale={locale} />
         <KpiCard label={t('greenInput')} value={kg(green)} locale={locale} />
         <KpiCard label={t('roastedOutput')} value={kg(roasted)} locale={locale} />
-        <KpiCard label={t('avgShrinkage')} value={formatPercent(M.avgShrinkage(batches), locale)} locale={locale} invertDelta />
+        <KpiCard label={t('avgShrinkage')} value={formatPercent(M.avgShrinkage(roastedBatches), locale)} locale={locale} invertDelta />
         <KpiCard label={t('avgQc')} value={formatNumber(M.avgQcScore(batches), locale, 1)} locale={locale} />
       </section>
 

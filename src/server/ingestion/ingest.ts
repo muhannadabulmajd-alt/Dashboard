@@ -308,6 +308,27 @@ export async function ingestCsv(
           }
         });
       }
+
+      // Refresh each customer's order aggregates so CRM metrics (segments,
+      // by-city, first/last order) reflect the imported orders.
+      const agg = await prisma.order.groupBy({
+        by: ['customerId'],
+        where: { customerId: { not: null } },
+        _count: { _all: true },
+        _min: { placedAt: true },
+        _max: { placedAt: true },
+      });
+      for (const a of agg) {
+        if (!a.customerId) continue;
+        await prisma.customer.update({
+          where: { id: a.customerId },
+          data: {
+            ordersCount: a._count._all,
+            firstOrderAt: a._min.placedAt,
+            lastOrderAt: a._max.placedAt,
+          },
+        });
+      }
     }
   } catch (err) {
     errors.push({ row: 0, message: err instanceof Error ? err.message : 'ingest failed' });

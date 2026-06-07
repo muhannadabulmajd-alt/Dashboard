@@ -58,7 +58,7 @@ export function FilterBar({ branchOptions }: { branchOptions?: Option[] }) {
     const v = searchParams.get(key);
     return v ? v.split(',').filter(Boolean) : [];
   };
-  const range = searchParams.get('range') ?? 'this_month';
+  const range = searchParams.get('range') ?? 'all';
   const from = searchParams.get('from') ?? '';
   const to = searchParams.get('to') ?? '';
 
