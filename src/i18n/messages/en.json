@@ -102,14 +102,39 @@
       "customers": "Customers",
       "orders": "Orders",
       "inventory": "Inventory",
-      "batches": "Roast batches"
+      "batches": "Roast batches",
+      "systemLists": "System lists"
     },
     "entityHints": {
       "products": "Catalog items, prices and costs",
       "customers": "People and businesses who order",
       "orders": "Every order and its line items",
       "inventory": "Stock items and movements",
-      "batches": "Roasting log and green-coffee usage"
+      "batches": "Roasting log and green-coffee usage",
+      "systemLists": "Reference: channels, grinds, categories…"
+    },
+    "systemLists": {
+      "title": "System lists",
+      "subtitle": "The standard categories used across the app, in both languages.",
+      "fixed": "These are standard lists. Branches are editable under Admin → Branches; to add or rename any other value, ask your admin.",
+      "value": "Value",
+      "en": "English",
+      "ar": "Arabic",
+      "sections": {
+        "channels": "Channels",
+        "governorates": "Governorates",
+        "productLines": "Product lines",
+        "grinds": "Grinds",
+        "roastLevels": "Roast levels",
+        "customerSegments": "Customer segments",
+        "fulfillment": "Fulfillment methods",
+        "orderStatuses": "Order statuses",
+        "inventoryCategories": "Inventory categories",
+        "expenseCategories": "Expense categories",
+        "accountTypes": "Account types",
+        "partyTypes": "Party types",
+        "financeTypes": "Finance entry types"
+      }
     },
     "f": {
       "sku": "SKU", "name": "Name", "nameEn": "Name (EN)", "nameAr": "Name (AR)", "productLine": "Line", "size": "Size", "grind": "Grind",
