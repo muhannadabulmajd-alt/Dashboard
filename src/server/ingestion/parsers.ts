@@ -9,9 +9,17 @@ import {
   FULFILLMENT_METHODS,
   ORDER_STATUSES,
   INVENTORY_CATEGORIES,
+  CURRENCIES,
 } from '@/lib/enums';
 
-export type ImportDataset = 'products' | 'customers' | 'orders' | 'batches' | 'inventory';
+export type ImportDataset =
+  | 'products'
+  | 'customers'
+  | 'orders'
+  | 'batches'
+  | 'inventory'
+  | 'purchases'
+  | 'capital';
 
 export interface RowError {
   row: number;
@@ -339,6 +347,76 @@ export function parseInventory(rows: Raw[]): ParseResult<InventoryInput> {
   return parseEach(lowered, inventorySchema);
 }
 
+// --- Finance: purchases & capital -------------------------------------------
+
+const curField = z.preprocess(blank, z.enum(CURRENCIES).default('IQD'));
+
+export interface PurchaseInput {
+  amount: number; // major units (converted to minor on ingest)
+  currency: (typeof CURRENCIES)[number];
+  date: Date;
+  supplier?: string;
+  reference?: string;
+  description: string;
+  importKey: string;
+}
+
+const purchaseSchema = z
+  .object({
+    item: z.string().min(1),
+    supplier: optStr,
+    qty: optStr,
+    unit: optStr,
+    unitPrice: optStr,
+    amount: z.preprocess(blank, z.coerce.number().nonnegative().optional()),
+    currency: curField,
+    date: dateField,
+    invoice: optStr,
+    doc: optStr,
+    deliveryCompany: optStr,
+  })
+  .transform((r): PurchaseInput => {
+    const amount = r.amount ?? 0;
+    const ref = r.invoice?.trim() || r.doc?.trim() || undefined;
+    const qtyUnit = [r.qty?.trim(), r.unit?.trim()].filter(Boolean).join(' ');
+    const description =
+      r.item.trim() +
+      (qtyUnit ? ` (${qtyUnit})` : '') +
+      (r.deliveryCompany?.trim() ? ` — ${r.deliveryCompany.trim()}` : '');
+    const key = `PUR:${r.doc?.trim() || r.invoice?.trim() || r.item.trim()}:${r.date.toISOString().slice(0, 10)}:${amount}`;
+    return { amount, currency: r.currency, date: r.date, supplier: r.supplier, reference: ref, description, importKey: key };
+  });
+
+export const parsePurchases = (rows: Raw[]) => parseEach(rows, purchaseSchema);
+
+export interface CapitalInput {
+  shareholder: string;
+  amount: number; // major units
+  currency: (typeof CURRENCIES)[number];
+  date: Date;
+  reference?: string;
+  importKey: string;
+}
+
+const capitalSchema = z
+  .object({
+    shareholder: z.string().min(1),
+    amount: reqInt.pipe(z.number().int().nonnegative()),
+    currency: curField,
+    date: dateField,
+    reference: optStr,
+  })
+  .transform((r): CapitalInput => ({
+    shareholder: r.shareholder.trim(),
+    amount: r.amount,
+    currency: r.currency,
+    date: r.date,
+    reference: r.reference,
+    importKey: `CAP:${r.shareholder.trim()}:${r.date.toISOString().slice(0, 10)}:${r.amount}:${r.reference?.trim() ?? ''}`,
+  }));
+
+export const parseCapital = (rows: Raw[]) => parseEach(rows, capitalSchema);
+
 // --- Orders (one CSV row per order line) ------------------------------------
 
 export interface OrderLineInput {
@@ -431,6 +509,22 @@ export const TEMPLATES: Record<ImportDataset, { headers: string[]; example: stri
     headers: ['item', 'category', 'unit', 'opening', 'additions', 'deductions'],
     example: ['قهوة خام برازيل ريو ميناس', 'GREEN_COFFEE', 'GRAM', '0', '30000', '5000'],
   },
+  purchases: {
+    headers: ['item', 'supplier', 'qty', 'unit', 'unitPrice', 'amount', 'currency', 'date', 'invoice', 'doc', 'deliveryCompany'],
+    example: ['قهوة خام برازيل', 'بوابة الرافدين', '30', 'كيلو', '15000', '450000', 'IQD', '2026-03-15', '1572307', 'DOC000102', 'سما السندباد'],
+  },
+  capital: {
+    headers: ['shareholder', 'amount', 'date', 'currency', 'reference'],
+    example: ['مهند منجد', '1000000', '2026-01-15', 'IQD', 'DOC000149'],
+  },
 };
 
-export const IMPORT_DATASETS: ImportDataset[] = ['products', 'customers', 'orders', 'batches', 'inventory'];
+export const IMPORT_DATASETS: ImportDataset[] = [
+  'products',
+  'customers',
+  'orders',
+  'batches',
+  'inventory',
+  'purchases',
+  'capital',
+];

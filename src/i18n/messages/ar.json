@@ -455,7 +455,9 @@
       "customers": "العملاء",
       "orders": "الطلبات",
       "batches": "دفعات التحميص",
-      "inventory": "المخزون"
+      "inventory": "المخزون",
+      "purchases": "المشتريات (المالية)",
+      "capital": "رأس مال المساهمين"
     },
     "inserted": "مُضاف",
     "updated": "مُحدّث",
