@@ -280,6 +280,7 @@ model Customer {
   firstOrderAt   DateTime?
   lastOrderAt    DateTime?
   ordersCount    Int             @default(0)
+  isActive       Boolean         @default(true)
   createdAt      DateTime        @default(now())
 
   orders Order[]
@@ -363,6 +364,7 @@ model RoastBatch {
   operatorId         String?
   branchId           String?
   uploadBatchId      String?
+  isActive           Boolean    @default(true)
   createdAt          DateTime   @default(now())
 
   operator User?          @relation("BatchOperator", fields: [operatorId], references: [id])
@@ -400,6 +402,7 @@ model InventoryItem {
   avgDailyUsage Float?
   unitCost      Int? // minor units IQD, for stock valuation
   branchId      String?
+  isActive      Boolean           @default(true)
   createdAt     DateTime          @default(now())
 
   product   Product?        @relation(fields: [productId], references: [id])

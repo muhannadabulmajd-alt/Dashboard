@@ -5,6 +5,8 @@ import { prisma } from '@/server/db/client';
 import { enumLabel } from '@/lib/enums';
 import { Badge, PageHeader } from '@/components/ui/primitives';
 import { BackLink, DetailGrid, type DetailField } from '@/components/records/parts';
+import { RecordActions } from '@/components/records/RecordActions';
+import { archiveBatch, deleteBatch } from '@/server/records/batches';
 import { formatNumber, formatPercent } from '@/lib/money';
 import { formatDate } from '@/lib/dates';
 
@@ -65,6 +67,19 @@ export default async function BatchDetailPage({
     <>
       <BackLink href="/admin/records/batches" label={t('back')} />
       <PageHeader title={b.batchNumber} subtitle={b.origin} />
+      <RecordActions
+        editHref={`/admin/records/batches/${b.id}/edit`}
+        isActive={b.isActive}
+        archiveAction={archiveBatch.bind(null, b.id, locale, !b.isActive)}
+        deleteAction={deleteBatch.bind(null, b.id, locale)}
+        labels={{
+          edit: t('edit'),
+          archive: t('archive'),
+          restore: t('restore'),
+          delete: t('delete'),
+          confirm: t('confirmDelete'),
+        }}
+      />
       <DetailGrid items={items} />
     </>
   );

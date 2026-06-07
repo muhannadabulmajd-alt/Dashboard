@@ -8,6 +8,8 @@ import { formatDate } from '@/lib/dates';
 import { Badge, PageHeader } from '@/components/ui/primitives';
 import { BackLink, DetailGrid, type DetailField } from '@/components/records/parts';
 import { DataTable, type Column } from '@/components/data-table/DataTable';
+import { RecordActions } from '@/components/records/RecordActions';
+import { deleteOrder } from '@/server/records/orders';
 
 const STATUS_VARIANT: Record<string, 'success' | 'warning' | 'muted' | 'danger'> = {
   COMPLETED: 'success',
@@ -81,6 +83,17 @@ export default async function OrderDetailPage({
     <>
       <BackLink href="/admin/records/orders" label={t('back')} />
       <PageHeader title={o.orderNumber} subtitle={formatDate(o.placedAt, locale)} />
+      <RecordActions
+        editHref={`/admin/records/orders/${o.id}/edit`}
+        deleteAction={deleteOrder.bind(null, o.id, locale)}
+        labels={{
+          edit: t('edit'),
+          archive: t('archive'),
+          restore: t('restore'),
+          delete: t('delete'),
+          confirm: t('confirmDelete'),
+        }}
+      />
       <DetailGrid items={items} />
       <div className="mt-4 space-y-2">
         <h3 className="text-sm font-semibold">{t('f.items')}</h3>

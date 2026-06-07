@@ -1,0 +1,18 @@
+import { enumLabel, ROAST_LEVELS } from '@/lib/enums';
+import type { AppLocale } from '@/lib/money';
+import type { FieldDef } from '@/components/records/form';
+
+/** Form fields for creating/editing a roast batch (shared by new + edit pages). */
+export function batchFields(t: (key: string) => string, locale: AppLocale): FieldDef[] {
+  const opts = (vals: readonly string[]) => vals.map((v) => ({ value: v, label: enumLabel(v, locale) }));
+  return [
+    { name: 'batchNumber', label: t('f.batchNumber'), type: 'text', required: true },
+    { name: 'origin', label: t('f.origin'), type: 'text', required: true },
+    { name: 'roastDate', label: t('f.roastDate'), type: 'date' },
+    { name: 'roastLevel', label: t('f.roastLevel'), type: 'select', options: opts(ROAST_LEVELS) },
+    { name: 'greenInputGrams', label: t('f.green'), type: 'number', required: true },
+    { name: 'roastedOutputGrams', label: t('f.output'), type: 'number' },
+    { name: 'qcScore', label: t('f.qc'), type: 'number', step: '0.1' },
+    { name: 'qcNotes', label: t('f.qcNotes'), type: 'text' },
+  ];
+}

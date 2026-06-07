@@ -6,6 +6,8 @@ import { enumLabel } from '@/lib/enums';
 import { formatMoney } from '@/lib/money';
 import { Badge, PageHeader } from '@/components/ui/primitives';
 import { BackLink, DetailGrid, type DetailField } from '@/components/records/parts';
+import { RecordActions } from '@/components/records/RecordActions';
+import { archiveProduct, deleteProduct } from '@/server/records/products';
 
 export default async function ProductDetailPage({
   params,
@@ -43,6 +45,19 @@ export default async function ProductDetailPage({
     <>
       <BackLink href="/admin/records/products" label={t('back')} />
       <PageHeader title={name} subtitle={p.sku} />
+      <RecordActions
+        editHref={`/admin/records/products/${p.id}/edit`}
+        isActive={p.isActive}
+        archiveAction={archiveProduct.bind(null, p.id, locale, !p.isActive)}
+        deleteAction={deleteProduct.bind(null, p.id, locale)}
+        labels={{
+          edit: t('edit'),
+          archive: t('archive'),
+          restore: t('restore'),
+          delete: t('delete'),
+          confirm: t('confirmDelete'),
+        }}
+      />
       <DetailGrid items={items} />
     </>
   );

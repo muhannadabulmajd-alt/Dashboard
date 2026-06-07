@@ -31,6 +31,28 @@
     "search": "بحث",
     "total": "{n} سجل",
     "none": "لا توجد سجلات بعد.",
+    "add": "إضافة جديد",
+    "addLine": "إضافة بند",
+    "removeLine": "إزالة",
+    "edit": "تعديل",
+    "create": "إنشاء",
+    "save": "حفظ التغييرات",
+    "cancel": "إلغاء",
+    "archive": "أرشفة",
+    "restore": "استرجاع",
+    "delete": "حذف",
+    "confirmDelete": "حذف هذا السجل نهائيًا؟ لا يمكن التراجع.",
+    "archived": "مؤرشف",
+    "newTitle": "{entity} جديد",
+    "editTitle": "تعديل {entity}",
+    "err": {
+      "invalid": "يرجى مراجعة الحقول المظللة.",
+      "exists": "هذا المعرّف / الرمز موجود مسبقًا.",
+      "forbidden": "ليست لديك صلاحية للقيام بذلك.",
+      "notfound": "السجل غير موجود.",
+      "sku": "رمز منتج واحد أو أكثر غير معروف — أضف المنتج أولًا.",
+      "nolines": "أضف بندًا واحدًا على الأقل."
+    },
     "entities": {
       "products": "المنتجات",
       "customers": "العملاء",
@@ -46,7 +68,7 @@
       "batches": "سجل التحميص واستهلاك البن الأخضر"
     },
     "f": {
-      "sku": "الرمز", "name": "الاسم", "productLine": "الفئة", "size": "الحجم", "grind": "الطحن",
+      "sku": "الرمز", "name": "الاسم", "nameEn": "الاسم (EN)", "nameAr": "الاسم (AR)", "productLine": "الفئة", "size": "الحجم", "grind": "الطحن",
       "roastLevel": "التحميص", "origin": "المنشأ", "price": "السعر", "cost": "التكلفة", "status": "الحالة",
       "active": "نشط", "inactive": "مؤرشف",
       "externalId": "المعرّف", "phone": "الهاتف", "email": "البريد", "governorate": "المحافظة",
@@ -60,7 +82,7 @@
       "reorderPoint": "حد إعادة الطلب", "avgDailyUsage": "متوسط الاستهلاك اليومي", "unitCost": "كلفة الوحدة",
       "movements": "حركات المخزون", "reason": "السبب", "quantity": "الكمية", "occurredAt": "التاريخ",
       "batchNumber": "رقم الدفعة", "roastDate": "تاريخ التحميص", "green": "أخضر (غم)", "output": "ناتج (غم)",
-      "yield": "العائد", "shrinkage": "الفاقد", "qc": "الجودة", "pending": "قيد الانتظار", "roasted": "محمّص",
+      "yield": "العائد", "shrinkage": "الفاقد", "qc": "الجودة", "qcNotes": "ملاحظات الجودة", "pending": "قيد الانتظار", "roasted": "محمّص",
       "none": "—", "createdAt": "أُضيف"
     }
   },
