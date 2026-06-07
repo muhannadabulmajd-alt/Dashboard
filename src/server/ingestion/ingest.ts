@@ -177,52 +177,48 @@ export async function ingestCsv(
       if (dataset === 'purchases') {
         const { valid, errors: e } = parsePurchases(rows);
         errors.push(...e);
+        // A purchases upload fully replaces the previous one (manual entries,
+        // which have no importKey, are untouched). Index-based keys can't collide.
+        await prisma.financeEntry.deleteMany({ where: { importKey: { startsWith: 'PUR:' } } });
+        let i = 0;
         for (const p of valid) {
-          const data = {
-            date: p.date,
-            type: 'PURCHASE' as const,
-            amount: toMinor(p.amount, p.currency),
-            currency: p.currency,
-            obligation: false,
-            partyId: await partyId(p.supplier, 'SUPPLIER'),
-            reference: p.reference ?? null,
-            description: p.description,
-            importKey: p.importKey,
-            createdById: opts.userId,
-          };
-          const existing = await prisma.financeEntry.findUnique({ where: { importKey: p.importKey }, select: { id: true } });
-          if (existing) {
-            await prisma.financeEntry.update({ where: { id: existing.id }, data });
-            updated += 1;
-          } else {
-            await prisma.financeEntry.create({ data });
-            inserted += 1;
-          }
+          await prisma.financeEntry.create({
+            data: {
+              date: p.date,
+              type: 'PURCHASE',
+              amount: toMinor(p.amount, p.currency),
+              currency: p.currency,
+              obligation: false,
+              partyId: await partyId(p.supplier, 'SUPPLIER'),
+              reference: p.reference ?? null,
+              description: p.description,
+              importKey: `PUR:${i++}`,
+              createdById: opts.userId,
+            },
+          });
+          inserted += 1;
         }
       } else {
         const { valid, errors: e } = parseCapital(rows);
         errors.push(...e);
+        await prisma.financeEntry.deleteMany({ where: { importKey: { startsWith: 'CAP:' } } });
+        let i = 0;
         for (const c of valid) {
-          const data = {
-            date: c.date,
-            type: 'CAPITAL_IN' as const,
-            amount: toMinor(c.amount, c.currency),
-            currency: c.currency,
-            obligation: false,
-            partyId: await partyId(c.shareholder, 'SHAREHOLDER'),
-            reference: c.reference ?? null,
-            description: c.shareholder,
-            importKey: c.importKey,
-            createdById: opts.userId,
-          };
-          const existing = await prisma.financeEntry.findUnique({ where: { importKey: c.importKey }, select: { id: true } });
-          if (existing) {
-            await prisma.financeEntry.update({ where: { id: existing.id }, data });
-            updated += 1;
-          } else {
-            await prisma.financeEntry.create({ data });
-            inserted += 1;
-          }
+          await prisma.financeEntry.create({
+            data: {
+              date: c.date,
+              type: 'CAPITAL_IN',
+              amount: toMinor(c.amount, c.currency),
+              currency: c.currency,
+              obligation: false,
+              partyId: await partyId(c.shareholder, 'SHAREHOLDER'),
+              reference: c.reference ?? null,
+              description: c.shareholder,
+              importKey: `CAP:${i++}`,
+              createdById: opts.userId,
+            },
+          });
+          inserted += 1;
         }
       }
     } else {
