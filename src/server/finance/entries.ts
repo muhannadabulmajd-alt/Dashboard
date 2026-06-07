@@ -174,3 +174,25 @@ export async function settleEntry(
   revalidatePath('/[locale]/(dashboard)/finance/dues', 'page');
   redirect(`/${locale}/finance/dues`);
 }
+
+/**
+ * Set the paying account on imported (PUR:) purchases that have none, matching
+ * the account's currency — so cash balances reflect historical spend.
+ */
+export async function assignImportedAccount(_prev: ActionState, fd: FormData): Promise<ActionState> {
+  const user = await requireCap(CAP);
+  if (!user) return { error: 'forbidden' };
+  const accountId = reqField(fd, 'accountId');
+  const locale = reqField(fd, 'locale') || 'ar';
+  if (!accountId) return { error: 'invalid' };
+  const account = await prisma.financeAccount.findUnique({ where: { id: accountId }, select: { currency: true } });
+  if (!account) return { error: 'invalid' };
+  await prisma.financeEntry.updateMany({
+    where: { importKey: { startsWith: 'PUR:' }, currency: account.currency, accountId: null, obligation: false },
+    data: { accountId },
+  });
+  await audit(user.id, 'ASSIGN_ACCOUNT', 'FinanceEntry', { accountId, currency: account.currency });
+  revalidatePath(HUB, 'page');
+  revalidatePath(LIST, 'page');
+  redirect(`/${locale}/finance/ledger`);
+}

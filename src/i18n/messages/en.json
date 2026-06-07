@@ -47,6 +47,9 @@
     "noDues": "No outstanding dues.",
     "settleTitle": "Record a payment",
     "totalCapital": "Total capital",
+    "assignAccount": "Set paying account for imported purchases",
+    "assignHint": "Applies the chosen account to imported purchases of the same currency that don't have one yet, so cash balances reflect history.",
+    "apply": "Apply",
     "entityHints": {
       "accounts": "Cash & bank balances",
       "parties": "Suppliers, retailers, shareholders…",
