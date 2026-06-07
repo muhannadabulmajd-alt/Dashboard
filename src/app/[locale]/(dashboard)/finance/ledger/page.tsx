@@ -8,6 +8,8 @@ import { formatDate } from '@/lib/dates';
 import { Badge, PageHeader } from '@/components/ui/primitives';
 import { DataTable, type Column } from '@/components/data-table/DataTable';
 import { BackLink } from '@/components/records/parts';
+import { AssignAccountForm } from '@/components/finance/AssignAccountForm';
+import { assignImportedAccount } from '@/server/finance/entries';
 import { Link } from '@/i18n/navigation';
 
 export default async function LedgerPage({
@@ -20,12 +22,17 @@ export default async function LedgerPage({
   const { locale } = await getPageContext(params, searchParams, 'manage:finance');
   const t = await getTranslations('finance');
   const tr = await getTranslations('records');
+  const tc = await getTranslations('common');
 
-  const entries = await prisma.financeEntry.findMany({
-    orderBy: { date: 'desc' },
-    take: 300,
-    include: { party: { select: { name: true } } },
-  });
+  const [entries, accounts] = await Promise.all([
+    prisma.financeEntry.findMany({
+      orderBy: { date: 'desc' },
+      take: 300,
+      include: { party: { select: { name: true } } },
+    }),
+    prisma.financeAccount.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true, currency: true } }),
+  ]);
+  const accountOptions = accounts.map((a) => ({ value: a.id, label: `${a.name} (${a.currency})` }));
 
   const cols: Column[] = [
     { label: t('f.date') },
@@ -61,7 +68,19 @@ export default async function LedgerPage({
           {tr('add')}
         </Link>
       </div>
-      <DataTable columns={cols} rows={rows} emptyLabel={tr('none')} />
+      <AssignAccountForm
+        action={assignImportedAccount}
+        locale={locale}
+        accounts={accountOptions}
+        labels={{ title: t('assignAccount'), hint: t('assignHint'), apply: t('apply') }}
+      />
+      <DataTable
+        columns={cols}
+        rows={rows}
+        emptyLabel={tr('none')}
+        exportHref={`/api/finance/export?type=ledger&locale=${locale}`}
+        exportLabel={tc('exportCsv')}
+      />
     </>
   );
 }

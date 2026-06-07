@@ -19,6 +19,7 @@ export default async function DuesPage({
   const { locale } = await getPageContext(params, searchParams, 'view:finance');
   const t = await getTranslations('finance');
   const tr = await getTranslations('records');
+  const tc = await getTranslations('common');
 
   const obligations = await prisma.financeEntry.findMany({
     where: { obligation: true },
@@ -74,11 +75,23 @@ export default async function DuesPage({
       <PageHeader title={t('dues')} subtitle={t('subtitle')} />
       <section className="space-y-2">
         <h3 className="text-sm font-semibold">{t('payables')}</h3>
-        <DataTable columns={cols} rows={toRows(open('PAYABLE'))} emptyLabel={t('noDues')} />
+        <DataTable
+          columns={cols}
+          rows={toRows(open('PAYABLE'))}
+          emptyLabel={t('noDues')}
+          exportHref={`/api/finance/export?type=dues&kind=PAYABLE&locale=${locale}`}
+          exportLabel={tc('exportCsv')}
+        />
       </section>
       <section className="space-y-2">
         <h3 className="text-sm font-semibold">{t('receivables')}</h3>
-        <DataTable columns={cols} rows={toRows(open('RECEIVABLE'))} emptyLabel={t('noDues')} />
+        <DataTable
+          columns={cols}
+          rows={toRows(open('RECEIVABLE'))}
+          emptyLabel={t('noDues')}
+          exportHref={`/api/finance/export?type=dues&kind=RECEIVABLE&locale=${locale}`}
+          exportLabel={tc('exportCsv')}
+        />
       </section>
     </>
   );
