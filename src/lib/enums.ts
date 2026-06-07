@@ -104,6 +104,33 @@ export const ROLES = [
   'VIEWER',
 ] as const;
 
+export const CURRENCIES = ['IQD', 'USD'] as const;
+
+export const ACCOUNT_TYPES = ['CASH', 'BANK'] as const;
+
+export const PARTY_TYPES = [
+  'SUPPLIER',
+  'RETAILER',
+  'PARTNER',
+  'CUSTOMER',
+  'SHAREHOLDER',
+  'EMPLOYEE',
+  'OTHER',
+] as const;
+
+export const FINANCE_TYPES = [
+  'EXPENSE',
+  'PURCHASE',
+  'INCOME',
+  'PAYMENT_IN',
+  'PAYMENT_OUT',
+  'CAPITAL_IN',
+  'DRAWING',
+  'TRANSFER',
+] as const;
+
+export const OBLIGATION_KINDS = ['PAYABLE', 'RECEIVABLE'] as const;
+
 // --- Bilingual labels -------------------------------------------------------
 
 type Label = { en: string; ar: string };
@@ -197,6 +224,28 @@ export const ENUM_LABELS: Record<string, Label> = {
   FRANCHISEE_VIEWER: { en: 'Franchisee', ar: 'صاحب الامتياز' },
   VIEWER: { en: 'Viewer', ar: 'مشاهد' },
   PENDING: { en: 'Pending', ar: 'قيد الانتظار' },
+  // Finance — account types
+  CASH: { en: 'Cash', ar: 'نقد' },
+  BANK: { en: 'Bank', ar: 'بنك' },
+  // Finance — party types
+  SUPPLIER: { en: 'Supplier', ar: 'مورّد' },
+  RETAILER: { en: 'Retailer', ar: 'بائع تجزئة' },
+  PARTNER: { en: 'Partner', ar: 'شريك' },
+  CUSTOMER: { en: 'Customer', ar: 'عميل' },
+  SHAREHOLDER: { en: 'Shareholder', ar: 'مساهم' },
+  EMPLOYEE: { en: 'Employee', ar: 'موظف' },
+  // Finance — entry types
+  EXPENSE: { en: 'Expense', ar: 'مصروف' },
+  PURCHASE: { en: 'Purchase', ar: 'شراء' },
+  INCOME: { en: 'Income', ar: 'إيراد' },
+  PAYMENT_IN: { en: 'Payment received', ar: 'دفعة واردة' },
+  PAYMENT_OUT: { en: 'Payment made', ar: 'دفعة صادرة' },
+  CAPITAL_IN: { en: 'Capital contribution', ar: 'مساهمة رأس مال' },
+  DRAWING: { en: 'Withdrawal', ar: 'سحب' },
+  TRANSFER: { en: 'Transfer', ar: 'تحويل' },
+  // Finance — obligation kinds
+  PAYABLE: { en: 'Payable', ar: 'ذمم دائنة' },
+  RECEIVABLE: { en: 'Receivable', ar: 'ذمم مدينة' },
 };
 
 export function enumLabel(value: string | null | undefined, locale: AppLocale = 'en'): string {
