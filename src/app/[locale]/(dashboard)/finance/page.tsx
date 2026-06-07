@@ -1,5 +1,5 @@
 import { getTranslations } from 'next-intl/server';
-import { Wallet, Users, BookOpen, Plus, ChevronRight } from 'lucide-react';
+import { Wallet, Users, BookOpen, Plus, ChevronRight, Clock, PieChart } from 'lucide-react';
 import { getPageContext } from '@/server/page-context';
 import { prisma } from '@/server/db/client';
 import { enumLabel } from '@/lib/enums';
@@ -46,6 +46,8 @@ export default async function FinancePage({
     { href: '/finance/accounts', key: 'accounts', Icon: Wallet },
     { href: '/finance/parties', key: 'parties', Icon: Users },
     { href: '/finance/ledger', key: 'ledger', Icon: BookOpen },
+    { href: '/finance/dues', key: 'dues', Icon: Clock },
+    { href: '/finance/shareholders', key: 'shareholders', Icon: PieChart },
   ];
 
   return (
@@ -94,7 +96,7 @@ export default async function FinancePage({
         );
       })}
 
-      {canManage ? (
+      {(
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {cards.map(({ href, key, Icon }) => (
             <Link
@@ -113,7 +115,7 @@ export default async function FinancePage({
             </Link>
           ))}
         </div>
-      ) : null}
+      )}
     </>
   );
 }

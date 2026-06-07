@@ -12,21 +12,40 @@ export async function getExpenses(
   scope: Scope,
   range: ResolvedRange,
 ): Promise<ExpenseLike[]> {
-  const rows = await prisma.expense.findMany({
-    where: buildExpenseWhere(filters, scope, range),
-    select: {
-      amount: true,
-      currency: true,
-      incurredAt: true,
-      category: { select: { type: true } },
-    },
-  });
-  return rows.map((r) => ({
-    amount: r.amount,
-    currency: r.currency,
-    incurredAt: r.incurredAt,
-    categoryType: r.category.type,
-  }));
+  const [expenseRows, financeRows] = await Promise.all([
+    prisma.expense.findMany({
+      where: buildExpenseWhere(filters, scope, range),
+      select: {
+        amount: true,
+        currency: true,
+        incurredAt: true,
+        category: { select: { type: true } },
+      },
+    }),
+    // Finance-ledger expenses/purchases also feed the P&L (one source of truth).
+    prisma.financeEntry.findMany({
+      where: {
+        type: { in: ['EXPENSE', 'PURCHASE'] },
+        date: { gte: range.start, lte: range.end },
+        ...(scope.branchId ? { branchId: scope.branchId } : {}),
+      },
+      select: { amount: true, currency: true, date: true, categoryType: true },
+    }),
+  ]);
+  return [
+    ...expenseRows.map((r) => ({
+      amount: r.amount,
+      currency: r.currency,
+      incurredAt: r.incurredAt,
+      categoryType: r.category.type,
+    })),
+    ...financeRows.map((r) => ({
+      amount: r.amount,
+      currency: r.currency,
+      incurredAt: r.date,
+      categoryType: r.categoryType ?? 'OVERHEAD',
+    })),
+  ];
 }
 
 export async function getBatches(

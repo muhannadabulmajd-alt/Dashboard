@@ -41,6 +41,12 @@
     "dues": "الذمم",
     "shareholders": "المساهمون",
     "recordEntry": "تسجيل حركة",
+    "overdue": "متأخرة",
+    "remaining": "المتبقي",
+    "contributions": "المساهمات",
+    "noDues": "لا توجد ذمم مستحقة.",
+    "settleTitle": "تسجيل دفعة",
+    "totalCapital": "إجمالي رأس المال",
     "entityHints": {
       "accounts": "أرصدة النقد والبنوك",
       "parties": "الموردون، التجار، المساهمون…",
