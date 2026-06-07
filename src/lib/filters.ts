@@ -20,7 +20,7 @@ export const RANGE_PRESETS = [
 ] as const;
 
 export const DashboardFiltersSchema = z.object({
-  range: z.enum(RANGE_PRESETS).default('this_month'),
+  range: z.enum(RANGE_PRESETS).default('all'),
   from: z.string().optional(),
   to: z.string().optional(),
   channel: z.array(z.enum(CHANNELS)).optional(),

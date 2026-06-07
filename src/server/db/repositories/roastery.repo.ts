@@ -1,7 +1,6 @@
 import 'server-only';
 import type { RoastLevel } from '@prisma/client';
 import { prisma } from '../client';
-import { buildBatchWhere } from '@/server/filters/where-builder';
 import type { DashboardFilters } from '@/lib/filters';
 import type { ResolvedRange } from '@/lib/dates';
 
@@ -9,31 +8,26 @@ type Scope = { branchId?: string };
 
 export interface BatchRow {
   batchNumber: string;
-  roastDate: Date;
+  roastDate: Date | null;
   origin: string;
-  roastLevel: RoastLevel;
+  roastLevel: RoastLevel | null;
   greenInputGrams: number;
-  roastedOutputGrams: number;
+  roastedOutputGrams: number | null;
   qcScore: number | null;
   operatorName: string | null;
   skuCount: number;
 }
 
 export async function getBatchRows(
-  filters: DashboardFilters,
+  _filters: DashboardFilters,
   scope: Scope,
-  range: ResolvedRange,
+  _range: ResolvedRange,
 ): Promise<BatchRow[]> {
-  // Roastery analytics cover roasted batches; green-only logged batches (no
-  // roast output yet) are surfaced in the batch management screen, not here.
+  // Return every batch (branch-scoped), including green-only logged ones with no
+  // roast results yet. The page computes roast metrics from the roasted subset.
   const rows = await prisma.roastBatch.findMany({
-    where: {
-      AND: [
-        buildBatchWhere(filters, scope, range),
-        { roastDate: { not: null }, roastLevel: { not: null }, roastedOutputGrams: { not: null } },
-      ],
-    },
-    orderBy: { roastDate: 'desc' },
+    where: scope.branchId ? { branchId: scope.branchId } : {},
+    orderBy: [{ roastDate: { sort: 'desc', nulls: 'last' } }, { batchNumber: 'asc' }],
     select: {
       batchNumber: true,
       roastDate: true,
@@ -48,11 +42,11 @@ export async function getBatchRows(
   });
   return rows.map((r) => ({
     batchNumber: r.batchNumber,
-    roastDate: r.roastDate!,
+    roastDate: r.roastDate,
     origin: r.origin,
-    roastLevel: r.roastLevel!,
+    roastLevel: r.roastLevel,
     greenInputGrams: r.greenInputGrams,
-    roastedOutputGrams: r.roastedOutputGrams!,
+    roastedOutputGrams: r.roastedOutputGrams,
     qcScore: r.qcScore,
     operatorName: r.operator?.name ?? null,
     skuCount: r._count.skuLinks,
