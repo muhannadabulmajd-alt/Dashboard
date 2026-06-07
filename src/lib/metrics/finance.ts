@@ -81,7 +81,7 @@ export function financeTotals(entries: FinanceEntryLike[]): FinanceTotals {
 
   for (const e of entries) {
     if (e.type === 'EXPENSE' || e.type === 'PURCHASE') t.expenses += e.amount;
-    if (e.type === 'CAPITAL_IN' && isCashMovement(e)) t.capitalIn += e.amount;
+    if (e.type === 'CAPITAL_IN') t.capitalIn += e.amount; // capital counts even if the cash account is unknown (e.g. imports)
     if ((e.type === 'PAYMENT_IN' || e.type === 'INCOME') && isCashMovement(e)) t.received += e.amount;
 
     if (isCashMovement(e)) {

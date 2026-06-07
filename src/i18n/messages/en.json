@@ -455,7 +455,9 @@
       "customers": "Customers",
       "orders": "Orders",
       "batches": "Roast batches",
-      "inventory": "Inventory"
+      "inventory": "Inventory",
+      "purchases": "Purchases (finance)",
+      "capital": "Shareholder capital"
     },
     "inserted": "Inserted",
     "updated": "Updated",

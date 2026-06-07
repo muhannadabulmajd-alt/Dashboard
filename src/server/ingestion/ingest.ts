@@ -8,10 +8,13 @@ import {
   parseBatches,
   parseOrders,
   parseInventory,
+  parsePurchases,
+  parseCapital,
   type ImportDataset,
   type RowError,
   type IngestSummary,
 } from './parsers';
+import { toMinor } from '@/lib/money';
 
 const DATASET_TYPE: Record<ImportDataset, DatasetType> = {
   products: 'PRODUCTS',
@@ -19,6 +22,8 @@ const DATASET_TYPE: Record<ImportDataset, DatasetType> = {
   orders: 'ORDERS',
   batches: 'BATCHES',
   inventory: 'INVENTORY',
+  purchases: 'EXPENSES',
+  capital: 'CAPITAL',
 };
 
 function csvToRows(csvText: string): Record<string, string>[] {
@@ -152,6 +157,72 @@ export async function ingestCsv(
             },
             update: { quantity: qty, reason },
           });
+        }
+      }
+    } else if (dataset === 'purchases' || dataset === 'capital') {
+      // Finance imports: each row becomes a FinanceEntry, auto-creating the
+      // supplier/shareholder Party. Idempotent via importKey.
+      const partyCache = new Map<string, string>();
+      const partyId = async (name: string | undefined, type: 'SUPPLIER' | 'SHAREHOLDER') => {
+        const key = name?.trim();
+        if (!key) return null;
+        const cached = partyCache.get(key);
+        if (cached) return cached;
+        const found = await prisma.party.findFirst({ where: { name: key }, select: { id: true } });
+        const party = found ?? (await prisma.party.create({ data: { name: key, type } }));
+        partyCache.set(key, party.id);
+        return party.id;
+      };
+
+      if (dataset === 'purchases') {
+        const { valid, errors: e } = parsePurchases(rows);
+        errors.push(...e);
+        for (const p of valid) {
+          const data = {
+            date: p.date,
+            type: 'PURCHASE' as const,
+            amount: toMinor(p.amount, p.currency),
+            currency: p.currency,
+            obligation: false,
+            partyId: await partyId(p.supplier, 'SUPPLIER'),
+            reference: p.reference ?? null,
+            description: p.description,
+            importKey: p.importKey,
+            createdById: opts.userId,
+          };
+          const existing = await prisma.financeEntry.findUnique({ where: { importKey: p.importKey }, select: { id: true } });
+          if (existing) {
+            await prisma.financeEntry.update({ where: { id: existing.id }, data });
+            updated += 1;
+          } else {
+            await prisma.financeEntry.create({ data });
+            inserted += 1;
+          }
+        }
+      } else {
+        const { valid, errors: e } = parseCapital(rows);
+        errors.push(...e);
+        for (const c of valid) {
+          const data = {
+            date: c.date,
+            type: 'CAPITAL_IN' as const,
+            amount: toMinor(c.amount, c.currency),
+            currency: c.currency,
+            obligation: false,
+            partyId: await partyId(c.shareholder, 'SHAREHOLDER'),
+            reference: c.reference ?? null,
+            description: c.shareholder,
+            importKey: c.importKey,
+            createdById: opts.userId,
+          };
+          const existing = await prisma.financeEntry.findUnique({ where: { importKey: c.importKey }, select: { id: true } });
+          if (existing) {
+            await prisma.financeEntry.update({ where: { id: existing.id }, data });
+            updated += 1;
+          } else {
+            await prisma.financeEntry.create({ data });
+            inserted += 1;
+          }
         }
       }
     } else {

@@ -182,6 +182,7 @@ enum DatasetType {
   BATCHES
   INVENTORY
   EXPENSES
+  CAPITAL
   OFFERS
   SHIPMENTS
 }
@@ -678,6 +679,7 @@ model FinanceEntry {
   partyId       String?
   categoryType  ExpenseCategoryType?
   settlesId     String? // payment that settles an obligation (partial allowed)
+  importKey     String? @unique // idempotent bulk import (re-uploads upsert)
   description   String?
   reference     String?
   branchId      String?
