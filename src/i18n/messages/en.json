@@ -31,6 +31,28 @@
     "search": "Search",
     "total": "{n} records",
     "none": "Nothing here yet.",
+    "add": "Add new",
+    "addLine": "Add item",
+    "removeLine": "Remove",
+    "edit": "Edit",
+    "create": "Create",
+    "save": "Save changes",
+    "cancel": "Cancel",
+    "archive": "Archive",
+    "restore": "Restore",
+    "delete": "Delete",
+    "confirmDelete": "Delete this record permanently? This can't be undone.",
+    "archived": "Archived",
+    "newTitle": "New {entity}",
+    "editTitle": "Edit {entity}",
+    "err": {
+      "invalid": "Please check the highlighted fields.",
+      "exists": "That ID / SKU already exists.",
+      "forbidden": "You don't have permission to do that.",
+      "notfound": "Record not found.",
+      "sku": "One or more SKUs are unknown — add the product first.",
+      "nolines": "Add at least one line item."
+    },
     "entities": {
       "products": "Products",
       "customers": "Customers",
@@ -46,7 +68,7 @@
       "batches": "Roasting log and green-coffee usage"
     },
     "f": {
-      "sku": "SKU", "name": "Name", "productLine": "Line", "size": "Size", "grind": "Grind",
+      "sku": "SKU", "name": "Name", "nameEn": "Name (EN)", "nameAr": "Name (AR)", "productLine": "Line", "size": "Size", "grind": "Grind",
       "roastLevel": "Roast", "origin": "Origin", "price": "Price", "cost": "Cost", "status": "Status",
       "active": "Active", "inactive": "Archived",
       "externalId": "ID", "phone": "Phone", "email": "Email", "governorate": "Governorate",
@@ -60,7 +82,7 @@
       "reorderPoint": "Reorder point", "avgDailyUsage": "Avg daily use", "unitCost": "Unit cost",
       "movements": "Stock movements", "reason": "Reason", "quantity": "Quantity", "occurredAt": "Date",
       "batchNumber": "Batch #", "roastDate": "Roast date", "green": "Green (g)", "output": "Output (g)",
-      "yield": "Yield", "shrinkage": "Shrinkage", "qc": "QC", "pending": "Pending", "roasted": "Roasted",
+      "yield": "Yield", "shrinkage": "Shrinkage", "qc": "QC", "qcNotes": "QC notes", "pending": "Pending", "roasted": "Roasted",
       "none": "—", "createdAt": "Added"
     }
   },

@@ -5,6 +5,8 @@ import { prisma } from '@/server/db/client';
 import { enumLabel } from '@/lib/enums';
 import { PageHeader } from '@/components/ui/primitives';
 import { BackLink, DetailGrid, type DetailField } from '@/components/records/parts';
+import { RecordActions } from '@/components/records/RecordActions';
+import { archiveCustomer, deleteCustomer } from '@/server/records/customers';
 import { formatDate } from '@/lib/dates';
 
 export default async function CustomerDetailPage({
@@ -38,6 +40,19 @@ export default async function CustomerDetailPage({
     <>
       <BackLink href="/admin/records/customers" label={t('back')} />
       <PageHeader title={name} subtitle={c.externalId || c.phone || ''} />
+      <RecordActions
+        editHref={`/admin/records/customers/${c.id}/edit`}
+        isActive={c.isActive}
+        archiveAction={archiveCustomer.bind(null, c.id, locale, !c.isActive)}
+        deleteAction={deleteCustomer.bind(null, c.id, locale)}
+        labels={{
+          edit: t('edit'),
+          archive: t('archive'),
+          restore: t('restore'),
+          delete: t('delete'),
+          confirm: t('confirmDelete'),
+        }}
+      />
       <DetailGrid items={items} />
     </>
   );

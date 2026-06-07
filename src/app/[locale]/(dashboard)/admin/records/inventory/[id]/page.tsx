@@ -8,6 +8,8 @@ import { formatDate } from '@/lib/dates';
 import { PageHeader } from '@/components/ui/primitives';
 import { BackLink, DetailGrid, type DetailField } from '@/components/records/parts';
 import { DataTable, type Column } from '@/components/data-table/DataTable';
+import { RecordActions } from '@/components/records/RecordActions';
+import { archiveInventory, deleteInventory } from '@/server/records/inventory';
 
 export default async function InventoryDetailPage({
   params,
@@ -63,6 +65,19 @@ export default async function InventoryDetailPage({
     <>
       <BackLink href="/admin/records/inventory" label={t('back')} />
       <PageHeader title={name} subtitle={enumLabel(item.category, locale)} />
+      <RecordActions
+        editHref={`/admin/records/inventory/${item.id}/edit`}
+        isActive={item.isActive}
+        archiveAction={archiveInventory.bind(null, item.id, locale, !item.isActive)}
+        deleteAction={deleteInventory.bind(null, item.id, locale)}
+        labels={{
+          edit: t('edit'),
+          archive: t('archive'),
+          restore: t('restore'),
+          delete: t('delete'),
+          confirm: t('confirmDelete'),
+        }}
+      />
       <DetailGrid items={items} />
       <div className="mt-4 space-y-2">
         <h3 className="text-sm font-semibold">{t('f.movements')}</h3>

@@ -5,6 +5,7 @@ import { enumLabel } from '@/lib/enums';
 import { formatNumber } from '@/lib/money';
 import { PageHeader } from '@/components/ui/primitives';
 import { DataTable, type Column } from '@/components/data-table/DataTable';
+import { Plus } from 'lucide-react';
 import { BackLink } from '@/components/records/parts';
 import { Link } from '@/i18n/navigation';
 
@@ -47,7 +48,16 @@ export default async function InventoryRecordsPage({
   return (
     <>
       <BackLink href="/admin/records" label={t('back')} />
-      <PageHeader title={t('entities.inventory')} subtitle={t('total', { n: items.length })} />
+      <div className="flex items-center justify-between gap-3">
+        <PageHeader title={t('entities.inventory')} subtitle={t('total', { n: items.length })} />
+        <Link
+          href="/admin/records/inventory/new"
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:opacity-95"
+        >
+          <Plus className="size-4" />
+          {t('add')}
+        </Link>
+      </div>
       <DataTable columns={cols} rows={rows} emptyLabel={t('none')} />
     </>
   );

@@ -8,6 +8,7 @@ import { DataTable, type Column } from '@/components/data-table/DataTable';
 import { BackLink } from '@/components/records/parts';
 import { Link } from '@/i18n/navigation';
 import { formatDate } from '@/lib/dates';
+import { Plus } from 'lucide-react';
 
 const STATUS_VARIANT: Record<string, 'success' | 'warning' | 'muted' | 'danger'> = {
   COMPLETED: 'success',
@@ -68,7 +69,16 @@ export default async function OrdersRecordsPage({
   return (
     <>
       <BackLink href="/admin/records" label={t('back')} />
-      <PageHeader title={t('entities.orders')} subtitle={t('total', { n: orders.length })} />
+      <div className="flex items-center justify-between gap-3">
+        <PageHeader title={t('entities.orders')} subtitle={t('total', { n: orders.length })} />
+        <Link
+          href="/admin/records/orders/new"
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:opacity-95"
+        >
+          <Plus className="size-4" />
+          {t('add')}
+        </Link>
+      </div>
       <DataTable columns={cols} rows={rows} emptyLabel={t('none')} />
     </>
   );
