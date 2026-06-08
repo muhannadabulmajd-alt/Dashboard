@@ -2,9 +2,10 @@ import { getTranslations } from 'next-intl/server';
 import { ArrowLeft, Download, Coffee } from 'lucide-react';
 import { requireCapability } from '@/server/auth/rbac';
 import { prisma } from '@/server/db/client';
-import { formatMoney, type AppLocale } from '@/lib/money';
+import { formatMoney, convertToIqd, type AppLocale } from '@/lib/money';
 import { formatDate } from '@/lib/dates';
 import { accountBalance, financeTotals, type FinanceEntryLike } from '@/lib/metrics/finance';
+import { getUsdToIqd } from '@/server/settings';
 import { PrintButton } from '@/components/PrintButton';
 
 export default async function BalanceSheetPage({ params }: { params: Promise<{ locale: string }> }) {
@@ -25,6 +26,23 @@ export default async function BalanceSheetPage({ params }: { params: Promise<{ l
   const entries = entriesRaw as FinanceEntryLike[];
   const currencies = Array.from(new Set([...accounts.map((a) => a.currency), ...entries.map((e) => e.currency)]));
   if (!currencies.length) currencies.push('IQD');
+
+  const rate = await getUsdToIqd();
+  const comb = { cashBank: 0, receivables: 0, payables: 0, capital: 0 };
+  for (const cur of currencies) {
+    const ce = entries.filter((e) => e.currency === cur);
+    const ca = accounts.filter((a) => a.currency === cur);
+    const tot = financeTotals(ce);
+    const cashBank = ca.reduce((s, a) => s + accountBalance(a, ce), 0);
+    comb.cashBank += convertToIqd(cashBank, cur, rate);
+    comb.receivables += convertToIqd(tot.outstandingReceivable, cur, rate);
+    comb.payables += convertToIqd(tot.outstandingPayable, cur, rate);
+    comb.capital += convertToIqd(tot.capitalIn, cur, rate);
+  }
+  const combAssets = comb.cashBank + comb.receivables;
+  const combRetained = combAssets - comb.payables - comb.capital;
+  const showCombined = currencies.length > 1;
+  const iqd = (n: number) => formatMoney(n, 'IQD', loc);
 
   const Row = ({ label, value, strong }: { label: string; value: string; strong?: boolean }) => (
     <div className={`flex justify-between gap-6 py-1 ${strong ? 'border-t font-bold' : 'text-sm'}`}>
@@ -62,6 +80,28 @@ export default async function BalanceSheetPage({ params }: { params: Promise<{ l
           </div>
           <div className="text-sm text-muted-foreground">{t('asOf', { date: formatDate(new Date(), loc) })}</div>
         </div>
+
+        {showCombined ? (
+          <div className="mt-6 rounded-lg border bg-muted/20 p-4">
+            <div className="mb-2 text-xs font-bold uppercase tracking-wide text-primary">{t('allInIqd')}</div>
+            <div className="grid gap-6 sm:grid-cols-2">
+              <div>
+                <div className="mb-1 text-sm font-semibold text-primary">{t('assets')}</div>
+                <Row label={t('cashBank')} value={iqd(comb.cashBank)} />
+                <Row label={t('receivables')} value={iqd(comb.receivables)} />
+                <Row label={t('totalAssets')} value={iqd(combAssets)} strong />
+              </div>
+              <div>
+                <div className="mb-1 text-sm font-semibold text-primary">{t('liabilities')}</div>
+                <Row label={t('payables')} value={iqd(comb.payables)} />
+                <div className="mb-1 mt-4 text-sm font-semibold text-primary">{t('equity')}</div>
+                <Row label={t('capital')} value={iqd(comb.capital)} />
+                <Row label={t('retained')} value={iqd(combRetained)} />
+                <Row label={t('totalEquity')} value={iqd(comb.capital + combRetained)} strong />
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         {currencies.map((cur) => {
           const ce = entries.filter((e) => e.currency === cur);

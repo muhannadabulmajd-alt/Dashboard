@@ -27,6 +27,7 @@ export default async function OrdersRecordsPage({
 }) {
   const { locale } = await getPageContext(params, searchParams, 'manage:orders');
   const t = await getTranslations('records');
+  const ti = await getTranslations('invoice');
   const orders = await prisma.order.findMany({
     orderBy: { placedAt: 'desc' },
     include: { customer: true },
@@ -56,13 +57,19 @@ export default async function OrdersRecordsPage({
       <Badge key="s" variant={STATUS_VARIANT[o.status] ?? 'muted'}>
         {enumLabel(o.status, locale)}
       </Badge>,
-      <Link
-        key="o"
-        href={`/admin/records/orders/${o.id}`}
-        className="font-medium text-primary hover:underline"
-      >
-        {t('open')}
-      </Link>,
+      <span key="a" className="flex items-center justify-end gap-3">
+        <a
+          href={`/${locale}/invoice/${o.id}?print=1`}
+          target="_blank"
+          rel="noopener"
+          className="font-medium text-primary hover:underline"
+        >
+          {ti('title')}
+        </a>
+        <Link href={`/admin/records/orders/${o.id}`} className="font-medium text-primary hover:underline">
+          {t('open')}
+        </Link>
+      </span>,
     ];
   });
 

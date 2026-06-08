@@ -10,10 +10,13 @@ import { InvoiceToolbar } from '@/components/InvoiceToolbar';
 
 export default async function InvoicePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ locale: string; id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { locale, id } = await params;
+  const sp = await searchParams;
   await requireCapability(locale, 'view:sales');
   const t = await getTranslations('invoice');
   const loc = locale as AppLocale;
@@ -44,7 +47,12 @@ export default async function InvoicePage({
 
   return (
     <div className="min-h-screen bg-muted/30">
-      <InvoiceToolbar backHref={`/${locale}/admin/records/orders/${o.id}`} printLabel={t('print')} backLabel={t('back')} />
+      <InvoiceToolbar
+        backHref={`/${locale}/admin/records/orders/${o.id}`}
+        printLabel={t('print')}
+        backLabel={t('back')}
+        autoPrint={sp.print === '1'}
+      />
 
       <div className="invoice-paper mx-auto my-2 max-w-[820px] bg-card p-8 shadow-sm print:my-0 print:max-w-none print:shadow-none">
         {/* Header */}

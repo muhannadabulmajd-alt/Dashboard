@@ -17,13 +17,19 @@ import {
 import { getPageContext } from '@/server/page-context';
 import { prisma } from '@/server/db/client';
 import { enumLabel } from '@/lib/enums';
-import { formatMoney } from '@/lib/money';
+import { formatMoney, convertToIqd } from '@/lib/money';
 import { can } from '@/lib/rbac';
 import { cn } from '@/lib/utils';
 import { accountBalance, financeTotals, type FinanceEntryLike } from '@/lib/metrics/finance';
+import { getUsdToIqd } from '@/server/settings';
+import { setUsdToIqd } from '@/server/finance/settings';
+import { RateEditor } from '@/components/finance/RateEditor';
 import { PageHeader } from '@/components/ui/primitives';
 import { DataTable, type Column } from '@/components/data-table/DataTable';
 import { Link } from '@/i18n/navigation';
+import type { Currency } from '@prisma/client';
+
+type Vals = { cash: number; capitalIn: number; expenses: number; received: number; payable: number; receivable: number };
 
 type Tone = 'in' | 'out' | 'neutral' | 'warn';
 const TONES: Record<Tone, string> = {
@@ -93,6 +99,49 @@ export default async function FinancePage({
   const currencies = Array.from(new Set([...accounts.map((a) => a.currency), ...entries.map((e) => e.currency)]));
   if (currencies.length === 0) currencies.push('IQD');
 
+  const rate = await getUsdToIqd();
+  const byCur = currencies.map((cur) => {
+    const ce = entries.filter((e) => e.currency === cur);
+    const ca = accounts.filter((a) => a.currency === cur);
+    const tot = financeTotals(ce);
+    const cash = ca.reduce((s, a) => s + accountBalance(a, ce), 0);
+    const vals: Vals = {
+      cash,
+      capitalIn: tot.capitalIn,
+      expenses: tot.expenses,
+      received: tot.received,
+      payable: tot.outstandingPayable,
+      receivable: tot.outstandingReceivable,
+    };
+    return { cur, ce, ca, vals };
+  });
+  const combined: Vals = byCur.reduce<Vals>(
+    (acc, x) => {
+      (Object.keys(acc) as (keyof Vals)[]).forEach((k) => {
+        acc[k] += convertToIqd(x.vals[k], x.cur, rate);
+      });
+      return acc;
+    },
+    { cash: 0, capitalIn: 0, expenses: 0, received: 0, payable: 0, receivable: 0 },
+  );
+  const showCombined = currencies.length > 1;
+
+  const tiles = (v: Vals): { label: string; value: number; Icon: LucideIcon; tone: Tone; href: string }[] => [
+    { label: t('cashOnHand'), value: v.cash, Icon: Wallet, tone: 'neutral', href: '/finance/accounts' },
+    { label: t('capital'), value: v.capitalIn, Icon: Landmark, tone: 'in', href: '/finance/shareholders' },
+    { label: t('spent'), value: v.expenses, Icon: TrendingDown, tone: 'out', href: '/finance/ledger' },
+    { label: t('received'), value: v.received, Icon: TrendingUp, tone: 'in', href: '/finance/ledger' },
+    { label: t('payables'), value: v.payable, Icon: Clock, tone: 'warn', href: '/finance/dues' },
+    { label: t('receivables'), value: v.receivable, Icon: HandCoins, tone: 'in', href: '/finance/dues' },
+  ];
+  const KpiRow = ({ v, cur }: { v: Vals; cur: string }) => (
+    <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+      {tiles(v).map((tile) => (
+        <Kpi key={tile.label} label={tile.label} value={formatMoney(tile.value, cur as Currency, locale)} Icon={tile.Icon} tone={tile.tone} href={tile.href} />
+      ))}
+    </div>
+  );
+
   const accCols: Column[] = [
     { label: t('f.name') },
     { label: t('f.type') },
@@ -123,56 +172,47 @@ export default async function FinancePage({
         ) : null}
       </div>
 
-      {currencies.map((cur) => {
-        const ce = entries.filter((e) => e.currency === cur);
-        const ca = accounts.filter((a) => a.currency === cur);
-        const tot = financeTotals(ce);
-        const cash = ca.reduce((s, a) => s + accountBalance(a, ce), 0);
-        const tiles: { label: string; value: number; Icon: LucideIcon; tone: Tone; href?: string }[] = [
-          { label: t('cashOnHand'), value: cash, Icon: Wallet, tone: 'neutral', href: '/finance/accounts' },
-          { label: t('capital'), value: tot.capitalIn, Icon: Landmark, tone: 'in', href: '/finance/shareholders' },
-          { label: t('spent'), value: tot.expenses, Icon: TrendingDown, tone: 'out', href: '/finance/ledger' },
-          { label: t('received'), value: tot.received, Icon: TrendingUp, tone: 'in', href: '/finance/ledger' },
-          { label: t('payables'), value: tot.outstandingPayable, Icon: Clock, tone: 'warn', href: '/finance/dues' },
-          { label: t('receivables'), value: tot.outstandingReceivable, Icon: HandCoins, tone: 'in', href: '/finance/dues' },
-        ];
-        return (
-          <section key={cur} className="space-y-3">
-            <div className="flex items-center gap-2">
-              <span className="rounded-md border bg-card px-2 py-0.5 text-xs font-bold tracking-wide text-muted-foreground">
-                {cur}
-              </span>
-              <div className="h-px flex-1 bg-border" />
+      {canManage ? (
+        <RateEditor action={setUsdToIqd} locale={locale} rate={rate} label={t('rate')} apply={t('apply')} />
+      ) : null}
+
+      {showCombined ? (
+        <section className="space-y-3">
+          <div className="flex items-center gap-2">
+            <span className="rounded-md bg-primary/10 px-2 py-0.5 text-xs font-bold tracking-wide text-primary">
+              {t('allInIqd')}
+            </span>
+            <div className="h-px flex-1 bg-border" />
+          </div>
+          <KpiRow v={combined} cur="IQD" />
+        </section>
+      ) : null}
+
+      {byCur.map(({ cur, ce, ca, vals }) => (
+        <section key={cur} className="space-y-3">
+          <div className="flex items-center gap-2">
+            <span className="rounded-md border bg-card px-2 py-0.5 text-xs font-bold tracking-wide text-muted-foreground">
+              {cur}
+            </span>
+            <div className="h-px flex-1 bg-border" />
+          </div>
+          <KpiRow v={vals} cur={cur} />
+          {ca.length ? (
+            <div className="space-y-1.5">
+              <div className="text-xs font-medium text-muted-foreground">{t('byAccount')}</div>
+              <DataTable
+                columns={accCols}
+                rows={ca.map((a) => [
+                  a.name,
+                  enumLabel(a.type, locale),
+                  formatMoney(accountBalance(a, ce), cur, locale),
+                ])}
+                emptyLabel="—"
+              />
             </div>
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-              {tiles.map((tile) => (
-                <Kpi
-                  key={tile.label}
-                  label={tile.label}
-                  value={formatMoney(tile.value, cur, locale)}
-                  Icon={tile.Icon}
-                  tone={tile.tone}
-                  href={tile.href}
-                />
-              ))}
-            </div>
-            {ca.length ? (
-              <div className="space-y-1.5">
-                <div className="text-xs font-medium text-muted-foreground">{t('byAccount')}</div>
-                <DataTable
-                  columns={accCols}
-                  rows={ca.map((a) => [
-                    a.name,
-                    enumLabel(a.type, locale),
-                    formatMoney(accountBalance(a, ce), cur, locale),
-                  ])}
-                  emptyLabel="—"
-                />
-              </div>
-            ) : null}
-          </section>
-        );
-      })}
+          ) : null}
+        </section>
+      ))}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {cards.map(({ href, key, Icon }) => (
