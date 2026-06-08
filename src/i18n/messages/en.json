@@ -27,6 +27,8 @@
   "finance": {
     "title": "Finance",
     "subtitle": "Money in and out, balances, dues, and capital — all in one place.",
+    "allInIqd": "All in IQD",
+    "rate": "Conversion rate",
     "cashOnHand": "Cash on hand",
     "capital": "Capital contributed",
     "spent": "Total spent",

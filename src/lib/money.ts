@@ -75,3 +75,9 @@ export function formatPercent(ratio: number, locale: AppLocale = 'en', digits = 
 export function iqdToUsdMinor(iqdAmountMinor: number): number {
   return Math.round(iqdAmountMinor * USD_PER_IQD * 100);
 }
+
+/** Convert any amount (minor units) into IQD minor units at the given USD→IQD rate. */
+export function convertToIqd(amountMinor: number, currency: Currency, usdToIqd: number): number {
+  if (currency === 'IQD') return amountMinor;
+  return Math.round((amountMinor / 100) * usdToIqd); // USD cents → dollars → IQD dinars
+}
