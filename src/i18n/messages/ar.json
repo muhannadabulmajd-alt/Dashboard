@@ -22,7 +22,14 @@
     "branches": "الفروع",
     "users": "المستخدمون",
     "section": "اللوحات",
-    "admin": "الإدارة"
+    "admin": "الإدارة",
+    "group": {
+      "overview": "نظرة عامة",
+      "sales": "المبيعات والعملاء",
+      "operations": "العمليات",
+      "finance": "المالية",
+      "admin": "الإدارة"
+    }
   },
   "finance": {
     "title": "المالية",

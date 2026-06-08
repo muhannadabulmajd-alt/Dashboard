@@ -22,7 +22,14 @@
     "branches": "Branches",
     "users": "Users",
     "section": "Dashboards",
-    "admin": "Administration"
+    "admin": "Administration",
+    "group": {
+      "overview": "Overview",
+      "sales": "Sales & Customers",
+      "operations": "Operations",
+      "finance": "Finance",
+      "admin": "Administration"
+    }
   },
   "finance": {
     "title": "Finance",

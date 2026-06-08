@@ -126,29 +126,41 @@ export function can(role: Role, capability: Capability): boolean {
   return ROLE_CAPABILITIES[role]?.includes(capability) ?? false;
 }
 
+export type NavGroupKey = 'overview' | 'sales' | 'operations' | 'finance' | 'admin';
+
 export interface NavItem {
   href: string;
   key: string; // i18n key under `nav`
   icon: string; // lucide icon name
   capability: Capability;
+  group: NavGroupKey;
 }
 
-// Navigation. Each entry is gated by a capability.
+// Sidebar groups, in display order. Admin starts collapsed (secondary tooling).
+export const NAV_GROUPS: { key: NavGroupKey; defaultOpen: boolean }[] = [
+  { key: 'overview', defaultOpen: true },
+  { key: 'sales', defaultOpen: true },
+  { key: 'operations', defaultOpen: true },
+  { key: 'finance', defaultOpen: true },
+  { key: 'admin', defaultOpen: false },
+];
+
+// Navigation. Each entry is gated by a capability and lives in one group.
 export const NAV_ITEMS: NavItem[] = [
-  { href: '/', key: 'executive', icon: 'LayoutDashboard', capability: 'view:dashboard' },
-  { href: '/sales', key: 'sales', icon: 'ShoppingBag', capability: 'view:sales' },
-  { href: '/roastery', key: 'roastery', icon: 'Flame', capability: 'view:roastery' },
-  { href: '/inventory', key: 'inventory', icon: 'Package', capability: 'view:inventory' },
-  { href: '/customers', key: 'customers', icon: 'UsersRound', capability: 'view:customers' },
-  { href: '/fulfillment', key: 'fulfillment', icon: 'Truck', capability: 'view:fulfillment' },
-  { href: '/offers', key: 'offers', icon: 'Percent', capability: 'view:offers' },
-  { href: '/pnl', key: 'pnl', icon: 'TrendingUp', capability: 'view:financial' },
-  { href: '/finance', key: 'finance', icon: 'Wallet', capability: 'view:finance' },
-  { href: '/compare', key: 'compare', icon: 'Scale', capability: 'view:dashboard' },
-  { href: '/franchise', key: 'franchise', icon: 'Store', capability: 'view:franchise' },
-  { href: '/admin/records', key: 'records', icon: 'Database', capability: 'view:records' },
-  { href: '/admin/uploads', key: 'uploads', icon: 'Upload', capability: 'upload:data' },
-  { href: '/admin/connectors', key: 'connectors', icon: 'Cable', capability: 'manage:connectors' },
-  { href: '/admin/branches', key: 'branches', icon: 'Building2', capability: 'manage:branches' },
-  { href: '/admin/users', key: 'users', icon: 'Users', capability: 'manage:users' },
+  { href: '/', key: 'executive', icon: 'LayoutDashboard', capability: 'view:dashboard', group: 'overview' },
+  { href: '/compare', key: 'compare', icon: 'Scale', capability: 'view:dashboard', group: 'overview' },
+  { href: '/franchise', key: 'franchise', icon: 'Store', capability: 'view:franchise', group: 'overview' },
+  { href: '/sales', key: 'sales', icon: 'ShoppingBag', capability: 'view:sales', group: 'sales' },
+  { href: '/customers', key: 'customers', icon: 'UsersRound', capability: 'view:customers', group: 'sales' },
+  { href: '/offers', key: 'offers', icon: 'Percent', capability: 'view:offers', group: 'sales' },
+  { href: '/fulfillment', key: 'fulfillment', icon: 'Truck', capability: 'view:fulfillment', group: 'sales' },
+  { href: '/roastery', key: 'roastery', icon: 'Flame', capability: 'view:roastery', group: 'operations' },
+  { href: '/inventory', key: 'inventory', icon: 'Package', capability: 'view:inventory', group: 'operations' },
+  { href: '/pnl', key: 'pnl', icon: 'TrendingUp', capability: 'view:financial', group: 'finance' },
+  { href: '/finance', key: 'finance', icon: 'Wallet', capability: 'view:finance', group: 'finance' },
+  { href: '/admin/records', key: 'records', icon: 'Database', capability: 'view:records', group: 'admin' },
+  { href: '/admin/uploads', key: 'uploads', icon: 'Upload', capability: 'upload:data', group: 'admin' },
+  { href: '/admin/connectors', key: 'connectors', icon: 'Cable', capability: 'manage:connectors', group: 'admin' },
+  { href: '/admin/branches', key: 'branches', icon: 'Building2', capability: 'manage:branches', group: 'admin' },
+  { href: '/admin/users', key: 'users', icon: 'Users', capability: 'manage:users', group: 'admin' },
 ];
