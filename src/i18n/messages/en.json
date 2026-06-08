@@ -193,7 +193,8 @@
       "movements": "Stock movements", "reason": "Reason", "quantity": "Quantity", "occurredAt": "Date",
       "batchNumber": "Batch #", "roastDate": "Roast date", "green": "Green (g)", "output": "Output (g)",
       "yield": "Yield", "shrinkage": "Shrinkage", "qc": "QC", "qcNotes": "QC notes", "pending": "Pending", "roasted": "Roasted",
-      "none": "—", "createdAt": "Added"
+      "none": "—", "createdAt": "Added",
+      "address1": "Address", "street": "Street / landmark", "notes": "Notes", "source": "Source"
     }
   },
   "common": {

@@ -193,7 +193,8 @@
       "movements": "حركات المخزون", "reason": "السبب", "quantity": "الكمية", "occurredAt": "التاريخ",
       "batchNumber": "رقم الدفعة", "roastDate": "تاريخ التحميص", "green": "أخضر (غم)", "output": "ناتج (غم)",
       "yield": "العائد", "shrinkage": "الفاقد", "qc": "الجودة", "qcNotes": "ملاحظات الجودة", "pending": "قيد الانتظار", "roasted": "محمّص",
-      "none": "—", "createdAt": "أُضيف"
+      "none": "—", "createdAt": "أُضيف",
+      "address1": "العنوان", "street": "الشارع / أقرب نقطة دالة", "notes": "ملاحظات", "source": "المصدر"
     }
   },
   "common": {

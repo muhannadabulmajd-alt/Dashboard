@@ -61,6 +61,19 @@ export const CUSTOMER_SEGMENTS = [
   'FRANCHISE',
 ] as const;
 
+// CR-6: customer acquisition sources. Plain strings (not a DB enum) so the list
+// can grow without a migration; the value is stored as-is in campaignSource.
+export const CUSTOMER_SOURCES = [
+  'Instagram',
+  'Facebook',
+  'Website',
+  'WhatsApp',
+  'Referral',
+  'Offline',
+  'Manual',
+  'Other',
+] as const;
+
 export const FULFILLMENT_METHODS = [
   'PICKUP',
   'COURIER',

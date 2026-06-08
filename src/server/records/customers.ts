@@ -17,6 +17,9 @@ const schema = z.object({
   phone: z.string().optional(),
   email: z.string().optional(),
   governorate: z.enum(GOVERNORATES).optional(),
+  address1: z.string().optional(),
+  street: z.string().optional(),
+  notes: z.string().optional(),
   segment: z.enum(CUSTOMER_SEGMENTS),
   campaignSource: z.string().optional(),
 });
@@ -29,6 +32,9 @@ function parse(fd: FormData) {
     phone: optField(fd, 'phone'),
     email: optField(fd, 'email'),
     governorate: optField(fd, 'governorate'),
+    address1: optField(fd, 'address1'),
+    street: optField(fd, 'street'),
+    notes: optField(fd, 'notes'),
     segment: reqField(fd, 'segment'),
     campaignSource: optField(fd, 'campaignSource'),
   });

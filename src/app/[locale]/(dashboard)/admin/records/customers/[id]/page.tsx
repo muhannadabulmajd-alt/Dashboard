@@ -29,11 +29,14 @@ export default async function CustomerDetailPage({
     { label: t('f.phone'), value: c.phone },
     { label: t('f.email'), value: c.email },
     { label: t('f.governorate'), value: enumLabel(c.governorate, locale) },
+    { label: t('f.address1'), value: c.address1 },
+    { label: t('f.street'), value: c.street },
     { label: t('f.segment'), value: enumLabel(c.segment, locale) },
+    { label: t('f.source'), value: c.campaignSource },
     { label: t('f.ordersCount'), value: c.ordersCount },
     { label: t('f.firstOrder'), value: c.firstOrderAt ? formatDate(c.firstOrderAt, locale) : '—' },
     { label: t('f.lastOrder'), value: c.lastOrderAt ? formatDate(c.lastOrderAt, locale) : '—' },
-    { label: t('f.campaign'), value: c.campaignSource },
+    { label: t('f.notes'), value: c.notes },
   ];
 
   return (

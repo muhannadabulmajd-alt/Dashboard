@@ -5,6 +5,7 @@ import { prisma } from '@/server/db/client';
 import { PageHeader } from '@/components/ui/primitives';
 import { RecordForm } from '@/components/records/form';
 import { BackLink } from '@/components/records/parts';
+import { CUSTOMER_SOURCES } from '@/lib/enums';
 import { updateCustomer } from '@/server/records/customers';
 import { customerFields } from '../../_fields';
 
@@ -29,9 +30,17 @@ export default async function EditCustomerPage({
     phone: c.phone ?? '',
     email: c.email ?? '',
     governorate: c.governorate ?? '',
+    address1: c.address1 ?? '',
+    street: c.street ?? '',
+    notes: c.notes ?? '',
     segment: c.segment,
     campaignSource: c.campaignSource ?? '',
   };
+  // Keep any legacy/custom source value selectable so editing never wipes it.
+  const sources =
+    c.campaignSource && !CUSTOMER_SOURCES.includes(c.campaignSource as (typeof CUSTOMER_SOURCES)[number])
+      ? [...CUSTOMER_SOURCES, c.campaignSource]
+      : CUSTOMER_SOURCES;
   const errors = { invalid: t('err.invalid'), exists: t('err.exists'), forbidden: t('err.forbidden') };
 
   return (
@@ -40,7 +49,7 @@ export default async function EditCustomerPage({
       <PageHeader title={t('editTitle', { entity: t('entities.customers') })} subtitle={c.externalId ?? ''} />
       <RecordForm
         action={updateCustomer.bind(null, id)}
-        fields={customerFields(tk, locale, 'edit')}
+        fields={customerFields(tk, locale, 'edit', sources)}
         initial={initial}
         locale={locale}
         submitLabel={t('save')}

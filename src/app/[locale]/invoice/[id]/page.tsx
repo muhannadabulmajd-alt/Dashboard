@@ -33,6 +33,9 @@ export default async function InvoicePage({
     o.customer?.nameAr ||
     o.customer?.externalId ||
     t('walkIn');
+  // CR-7: customer address on the invoice (city + address line + street).
+  const city = o.customer?.governorate ? enumLabel(o.customer.governorate, loc) : '';
+  const addressLine = [city, o.customer?.address1, o.customer?.street].filter(Boolean).join(' · ');
   const subtotal = o.grossAmount;
   const grandTotal = o.grossAmount - o.discountAmount + o.deliveryFee;
   const m = (n: number) => formatMoney(n, o.currency, loc);
@@ -84,11 +87,15 @@ export default async function InvoicePage({
           <div>
             <div className="text-xs font-semibold uppercase text-muted-foreground">{t('billTo')}</div>
             <div className="mt-1 text-sm font-semibold text-foreground">{customerName}</div>
+            {o.customer?.externalId ? (
+              <div className="font-mono text-xs text-muted-foreground">{o.customer.externalId}</div>
+            ) : null}
             {o.customer?.phone ? (
               <div className="text-sm text-muted-foreground">
                 {t('phone')}: {o.customer.phone}
               </div>
             ) : null}
+            {addressLine ? <div className="text-sm text-muted-foreground">{addressLine}</div> : null}
           </div>
           <div className="text-end text-sm">
             <span className="text-muted-foreground">{t('status')}: </span>

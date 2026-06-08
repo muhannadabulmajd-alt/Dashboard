@@ -1,4 +1,4 @@
-import { enumLabel, GOVERNORATES, CUSTOMER_SEGMENTS } from '@/lib/enums';
+import { enumLabel, GOVERNORATES, CUSTOMER_SEGMENTS, CUSTOMER_SOURCES } from '@/lib/enums';
 import type { AppLocale } from '@/lib/money';
 import type { FieldDef } from '@/components/records/form';
 
@@ -11,6 +11,7 @@ export function customerFields(
   t: (key: string) => string,
   locale: AppLocale,
   mode: 'new' | 'edit' = 'new',
+  sources: readonly string[] = CUSTOMER_SOURCES,
 ): FieldDef[] {
   const opts = (vals: readonly string[]) => vals.map((v) => ({ value: v, label: enumLabel(v, locale) }));
   return [
@@ -22,7 +23,10 @@ export function customerFields(
     { name: 'phone', label: t('f.phone'), type: 'text' },
     { name: 'email', label: t('f.email'), type: 'email' },
     { name: 'governorate', label: t('f.governorate'), type: 'select', options: opts(GOVERNORATES) },
+    { name: 'address1', label: t('f.address1'), type: 'text' },
+    { name: 'street', label: t('f.street'), type: 'text' },
     { name: 'segment', label: t('f.segment'), type: 'select', required: true, options: opts(CUSTOMER_SEGMENTS) },
-    { name: 'campaignSource', label: t('f.campaign'), type: 'text' },
+    { name: 'campaignSource', label: t('f.source'), type: 'select', options: sources.map((s) => ({ value: s, label: s })) },
+    { name: 'notes', label: t('f.notes'), type: 'text' },
   ];
 }

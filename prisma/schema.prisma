@@ -276,8 +276,11 @@ model Customer {
   nameEn         String?
   nameAr         String?
   governorate    Governorate?
+  address1       String? // CR-6: street address line
+  street         String? // CR-6: extra street / landmark details
+  notes          String? // CR-6: free-form customer notes
   segment        CustomerSegment @default(NEW)
-  campaignSource String?
+  campaignSource String? // CR-6: acquisition source (Instagram/Facebook/…)
   firstOrderAt   DateTime?
   lastOrderAt    DateTime?
   ordersCount    Int             @default(0)
