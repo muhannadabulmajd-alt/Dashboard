@@ -20,7 +20,7 @@ import { enumLabel } from '@/lib/enums';
 import { formatMoney, convertToIqd } from '@/lib/money';
 import { can } from '@/lib/rbac';
 import { cn } from '@/lib/utils';
-import { accountBalance, netCash, financeTotals, type FinanceEntryLike } from '@/lib/metrics/finance';
+import { accountBalance, netCash, unassignedCash, financeTotals, type FinanceEntryLike } from '@/lib/metrics/finance';
 import { getUsdToIqd } from '@/server/settings';
 import { setUsdToIqd } from '@/server/finance/settings';
 import { RateEditor } from '@/components/finance/RateEditor';
@@ -232,16 +232,21 @@ export default async function FinancePage({
             <div className="h-px flex-1 bg-border" />
           </div>
           <KpiRow v={vals} cur={cur} />
-          {ca.length ? (
+          {ca.length || unassignedCash(ce) ? (
             <div className="space-y-1.5">
               <div className="text-xs font-medium text-muted-foreground">{t('byAccount')}</div>
               <DataTable
                 columns={accCols}
-                rows={ca.map((a) => [
-                  a.name,
-                  enumLabel(a.type, locale),
-                  formatMoney(accountBalance(a, ce), cur, locale),
-                ])}
+                rows={[
+                  ...ca.map((a) => [
+                    a.name,
+                    enumLabel(a.type, locale),
+                    formatMoney(accountBalance(a, ce), cur, locale),
+                  ]),
+                  ...(unassignedCash(ce)
+                    ? [[t('unassigned'), '—', formatMoney(unassignedCash(ce), cur, locale)]]
+                    : []),
+                ]}
                 emptyLabel="—"
               />
             </div>
