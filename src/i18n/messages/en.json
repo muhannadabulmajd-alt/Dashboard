@@ -21,6 +21,7 @@
     "connectors": "Connectors",
     "branches": "Branches",
     "users": "Users",
+    "audit": "Audit log",
     "section": "Dashboards",
     "admin": "Administration",
     "group": {
@@ -576,6 +577,16 @@
       "verdictClean": "No duplicate imported rows. The \"Unassigned (imported)\" total is simply imported purchases that aren't tied to a cash account, minus account-less capital — not duplication. Assign those purchases to a cash account from Finance → Ledger, or record the funding capital, to resolve it.",
       "verdictDupes": "Found exact-duplicate imported rows — usually from mixing manual entry with imports. Removing them keeps the earliest of each identical set."
     }
+  },
+  "audit": {
+    "title": "Audit log",
+    "subtitle": "Every create, edit, and delete — who changed what, and when.",
+    "when": "When",
+    "user": "User",
+    "action": "Action",
+    "entity": "Record",
+    "details": "Details",
+    "system": "System"
   },
   "invoice": {
     "title": "Invoice",

@@ -142,3 +142,8 @@ export function monthProgress(now: Date = new Date()): { dayOfMonth: number; day
 export function formatDate(date: Date, locale: 'ar' | 'en' = 'en'): string {
   return formatInTimeZone(date, TZ, 'dd/MM/yyyy');
 }
+
+/** Date + time (Baghdad), DD/MM/YYYY HH:mm — e.g. for the audit log. */
+export function formatDateTime(date: Date, locale: 'ar' | 'en' = 'en'): string {
+  return formatInTimeZone(date, TZ, 'dd/MM/yyyy HH:mm');
+}

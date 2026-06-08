@@ -18,6 +18,7 @@ import {
   Cable,
   Database,
   Wallet,
+  History,
   ChevronDown,
   type LucideIcon,
 } from 'lucide-react';
@@ -41,6 +42,7 @@ const ICONS: Record<string, LucideIcon> = {
   Cable,
   Database,
   Wallet,
+  History,
 };
 
 export interface NavLinkItem {

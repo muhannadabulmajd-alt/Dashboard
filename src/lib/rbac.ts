@@ -163,4 +163,5 @@ export const NAV_ITEMS: NavItem[] = [
   { href: '/admin/connectors', key: 'connectors', icon: 'Cable', capability: 'manage:connectors', group: 'admin' },
   { href: '/admin/branches', key: 'branches', icon: 'Building2', capability: 'manage:branches', group: 'admin' },
   { href: '/admin/users', key: 'users', icon: 'Users', capability: 'manage:users', group: 'admin' },
+  { href: '/admin/audit', key: 'audit', icon: 'History', capability: 'manage:users', group: 'admin' },
 ];
