@@ -5,7 +5,7 @@ import { getExpenses, getBatches } from '@/server/db/repositories/finance.repo';
 import * as M from '@/lib/metrics';
 import { enumLabel } from '@/lib/enums';
 import { buildExportHref } from '@/lib/filters';
-import { formatMoney, formatNumber, formatPercent, iqdToUsdMinor } from '@/lib/money';
+import { formatMoney, formatNumber, formatPercent } from '@/lib/money';
 import { monthProgress } from '@/lib/dates';
 import { KpiCard } from '@/components/kpi/KpiCard';
 import { WaterfallChart, BarChartCard, type WaterfallStep } from '@/components/charts/Charts';
@@ -95,16 +95,11 @@ export default async function PnlPage({
       <PageHeader title={t('title')} subtitle={t('subtitle')} />
 
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <KpiCard
-          label={tk('netSales')}
-          value={formatMoney(net, 'IQD', locale)}
-          sub={formatMoney(iqdToUsdMinor(net), 'USD', locale)}
-          locale={locale}
-        />
+        <KpiCard label={tk('netSales')} value={formatMoney(net, 'IQD', locale)} locale={locale} />
         <KpiCard label={tk('cogs')} value={formatMoney(cogs, 'IQD', locale)} locale={locale} invertDelta />
         <KpiCard label={tk('grossMargin')} value={formatPercent(margin.pct, locale)} sub={formatMoney(margin.amount, 'IQD', locale)} locale={locale} />
         <KpiCard label={tk('contributionMargin')} value={formatMoney(contribution, 'IQD', locale)} locale={locale} />
-        <KpiCard label={tk('cashBurn')} value={formatMoney(profit, 'IQD', locale)} sub={formatMoney(iqdToUsdMinor(profit), 'USD', locale)} locale={locale} invertDelta />
+        <KpiCard label={tk('cashBurn')} value={formatMoney(profit, 'IQD', locale)} locale={locale} invertDelta />
         <KpiCard label={tk('runRate')} value={formatMoney(runRate, 'IQD', locale)} locale={locale} />
         <KpiCard label={t('perKg')} value={formatMoney(costPerKg, 'IQD', locale)} locale={locale} invertDelta />
         <KpiCard label={t('perCup')} value={formatMoney(costPerCup, 'IQD', locale)} locale={locale} invertDelta />

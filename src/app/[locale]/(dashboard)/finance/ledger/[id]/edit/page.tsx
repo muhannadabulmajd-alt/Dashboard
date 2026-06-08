@@ -27,10 +27,14 @@ export default async function EditEntryPage({
   ]);
   if (!entry) notFound();
 
+  // Entries are stored in IQD; if one was paid in a foreign currency, edit it
+  // back in that currency + rate so saving re-applies the same conversion.
+  const paidUsd = entry.origCurrency === 'USD' && entry.origAmount != null;
   const initial = {
     type: entry.type,
-    amount: toMajor(entry.amount, entry.currency),
-    currency: entry.currency,
+    amount: paidUsd ? toMajor(entry.origAmount as number, 'USD') : toMajor(entry.amount, 'IQD'),
+    currency: paidUsd ? 'USD' : 'IQD',
+    rate: entry.fxRate ?? '',
     date: entry.date.toISOString().slice(0, 10),
     obligation: entry.obligation ? 'yes' : 'no',
     obligationKind: entry.obligationKind ?? '',

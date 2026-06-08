@@ -367,8 +367,9 @@ export function parseInventory(rows: Raw[]): ParseResult<InventoryInput> {
 const curField = z.preprocess(blank, z.enum(CURRENCIES).default('IQD'));
 
 export interface PurchaseInput {
-  amount: number; // major units (converted to minor on ingest)
+  amount: number; // major units in `currency` (converted to IQD on ingest)
   currency: (typeof CURRENCIES)[number];
+  rate?: number; // IQD per $1 on the purchase date (used only when currency=USD)
   date: Date;
   supplier?: string;
   reference?: string;
@@ -403,6 +404,7 @@ const purchaseSchema = z
     unitPrice: optStr,
     amount: z.preprocess(blank, z.coerce.number().nonnegative().optional()),
     currency: curField,
+    rate: z.preprocess(blank, z.coerce.number().positive().optional()),
     date: dateField,
     invoice: optStr,
     doc: optStr,
@@ -420,6 +422,7 @@ const purchaseSchema = z
     return {
       amount,
       currency: r.currency,
+      rate: r.rate,
       date: r.date,
       supplier: r.supplier,
       reference: ref,
@@ -597,8 +600,8 @@ export const TEMPLATES: Record<ImportDataset, { headers: string[]; example: stri
     example: ['قهوة خام برازيل ريو ميناس', 'GREEN_COFFEE', 'GRAM', '0', '30000', '5000', '15', '5000', '200'],
   },
   purchases: {
-    headers: ['item', 'supplier', 'qty', 'unit', 'unitPrice', 'amount', 'currency', 'date', 'invoice', 'doc', 'deliveryCompany'],
-    example: ['قهوة خام برازيل', 'بوابة الرافدين', '30', 'كيلو', '15000', '450000', 'IQD', '2026-03-15', '1572307', 'DOC000102', 'سما السندباد'],
+    headers: ['item', 'supplier', 'qty', 'unit', 'unitPrice', 'amount', 'currency', 'rate', 'date', 'invoice', 'doc', 'deliveryCompany'],
+    example: ['قهوة خام برازيل', 'بوابة الرافدين', '30', 'كيلو', '15000', '450000', 'IQD', '', '2026-03-15', '1572307', 'DOC000102', 'سما السندباد'],
   },
   capital: {
     headers: ['shareholder', 'amount', 'date', 'currency', 'reference'],

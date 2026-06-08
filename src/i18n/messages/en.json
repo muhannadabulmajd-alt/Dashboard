@@ -81,7 +81,9 @@
       "description": "Description", "reference": "Reference", "status": "Status", "paid": "Paid", "due": "Due",
       "outstanding": "Outstanding", "kind": "Kind", "obligation": "Record as a due (not paid yet)",
       "phone": "Phone", "email": "Email", "notes": "Notes", "equityShare": "Ownership %", "settle": "Settle",
-      "settles": "Settles", "none": "—"
+      "settles": "Settles", "none": "—",
+      "rate": "Rate (IQD per $1)", "ratePlaceholder": "Only for USD payments, e.g. 1500",
+      "origPaid": "Paid in USD (× rate)"
     }
   },
   "records": {
@@ -285,7 +287,7 @@
   },
   "pnl": {
     "title": "P&L & Unit Economics",
-    "subtitle": "From revenue to operating profit, in IQD and USD.",
+    "subtitle": "From revenue to operating profit, in IQD.",
     "waterfall": "Revenue to profit",
     "revenue": "Gross revenue",
     "discounts": "Discounts",

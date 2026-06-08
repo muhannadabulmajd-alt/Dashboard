@@ -15,7 +15,8 @@ import {
   type RowError,
   type IngestSummary,
 } from './parsers';
-import { toMinor } from '@/lib/money';
+import { toMinor, convertToIqd } from '@/lib/money';
+import { getUsdToIqd } from '@/server/settings';
 
 const DATASET_TYPE: Record<ImportDataset, DatasetType> = {
   products: 'PRODUCTS',
@@ -198,14 +199,23 @@ export async function ingestCsv(
         // A purchases upload fully replaces the previous one (manual entries,
         // which have no importKey, are untouched). Index-based keys can't collide.
         await prisma.financeEntry.deleteMany({ where: { importKey: { startsWith: 'PUR:' } } });
+        const fallbackRate = await getUsdToIqd();
         let i = 0;
         for (const p of valid) {
+          // Store every purchase in IQD. A USD purchase is converted at the
+          // row's rate (or the configured default), keeping the original.
+          const payMinor = toMinor(p.amount, p.currency);
+          const usd = p.currency === 'USD';
+          const rate = usd ? Math.round(p.rate ?? fallbackRate) : null;
           await prisma.financeEntry.create({
             data: {
               date: p.date,
               type: 'PURCHASE',
-              amount: toMinor(p.amount, p.currency),
-              currency: p.currency,
+              amount: usd ? convertToIqd(payMinor, 'USD', rate as number) : payMinor,
+              currency: 'IQD',
+              origCurrency: usd ? 'USD' : null,
+              origAmount: usd ? payMinor : null,
+              fxRate: rate,
               obligation: false,
               partyId: await partyId(p.supplier, 'SUPPLIER'),
               categoryType: p.categoryType ?? null,
@@ -221,14 +231,23 @@ export async function ingestCsv(
         const { valid, errors: e } = parseCapital(rows);
         errors.push(...e);
         await prisma.financeEntry.deleteMany({ where: { importKey: { startsWith: 'CAP:' } } });
+        const fallbackRate = await getUsdToIqd();
         let i = 0;
         for (const c of valid) {
+          // Capital is stored in IQD too; a USD contribution converts at the
+          // configured rate (use the entry form for a date-specific rate).
+          const payMinor = toMinor(c.amount, c.currency);
+          const usd = c.currency === 'USD';
+          const rate = usd ? Math.round(fallbackRate) : null;
           await prisma.financeEntry.create({
             data: {
               date: c.date,
               type: 'CAPITAL_IN',
-              amount: toMinor(c.amount, c.currency),
-              currency: c.currency,
+              amount: usd ? convertToIqd(payMinor, 'USD', rate as number) : payMinor,
+              currency: 'IQD',
+              origCurrency: usd ? 'USD' : null,
+              origAmount: usd ? payMinor : null,
+              fxRate: rate,
               obligation: false,
               partyId: await partyId(c.shareholder, 'SHAREHOLDER'),
               reference: c.reference ?? null,

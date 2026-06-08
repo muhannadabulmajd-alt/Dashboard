@@ -31,6 +31,9 @@ export default async function EntryDetailPage({
   const items: DetailField[] = [
     { label: t('f.type'), value: enumLabel(e.type, locale) },
     { label: t('f.amount'), value: formatMoney(e.amount, e.currency, locale) },
+    ...(e.origCurrency === 'USD' && e.origAmount != null
+      ? [{ label: t('f.origPaid'), value: `${formatMoney(e.origAmount, 'USD', locale)} × ${e.fxRate ?? '—'}` }]
+      : []),
     { label: t('f.date'), value: formatDate(e.date, locale) },
     {
       label: t('f.status'),

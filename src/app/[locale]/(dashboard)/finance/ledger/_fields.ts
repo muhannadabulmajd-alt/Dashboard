@@ -16,6 +16,7 @@ export function entryFields(
     { name: 'type', label: t('f.type'), type: 'select', required: true, options: opts(FINANCE_TYPES) },
     { name: 'amount', label: t('f.amount'), type: 'number', required: true },
     { name: 'currency', label: t('f.currency'), type: 'select', required: true, options: CURRENCIES.map((c) => ({ value: c, label: c })) },
+    { name: 'rate', label: t('f.rate'), type: 'number', step: '1', placeholder: t('f.ratePlaceholder') },
     { name: 'date', label: t('f.date'), type: 'date', required: true },
     {
       name: 'obligation',

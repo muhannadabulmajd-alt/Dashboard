@@ -667,8 +667,14 @@ model FinanceEntry {
   id            String               @id @default(cuid())
   date          DateTime
   type          FinanceType
-  amount        Int // minor units, positive
+  amount        Int // minor units, positive — ALWAYS the IQD value
   currency      Currency             @default(IQD)
+  // Original payment when made in a foreign currency (e.g. paid in USD).
+  // `amount`/`currency` stay IQD; these preserve "I paid origAmount origCurrency
+  // at fxRate IQD per 1 unit" for the audit trail. Null for native-IQD entries.
+  origCurrency  Currency?
+  origAmount    Int? // minor units in origCurrency (USD cents)
+  fxRate        Int? // IQD per 1 unit of origCurrency on the entry date
   // When obligation=true this is a payable/receivable that has NOT moved cash.
   // When false it is an actual cash movement on `account` (and `toAccount` for transfers).
   obligation    Boolean              @default(false)
