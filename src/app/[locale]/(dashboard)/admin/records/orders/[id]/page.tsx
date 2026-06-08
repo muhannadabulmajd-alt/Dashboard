@@ -1,5 +1,6 @@
 import { notFound } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
+import { FileText } from 'lucide-react';
 import { getPageContext } from '@/server/page-context';
 import { prisma } from '@/server/db/client';
 import { enumLabel } from '@/lib/enums';
@@ -29,6 +30,7 @@ export default async function OrderDetailPage({
   const { locale } = await getPageContext(params, searchParams, 'manage:orders');
   const { id } = await params;
   const t = await getTranslations('records');
+  const ti = await getTranslations('invoice');
 
   const o = await prisma.order.findUnique({
     where: { id },
@@ -83,17 +85,28 @@ export default async function OrderDetailPage({
     <>
       <BackLink href="/admin/records/orders" label={t('back')} />
       <PageHeader title={o.orderNumber} subtitle={formatDate(o.placedAt, locale)} />
-      <RecordActions
-        editHref={`/admin/records/orders/${o.id}/edit`}
-        deleteAction={deleteOrder.bind(null, o.id, locale)}
-        labels={{
-          edit: t('edit'),
-          archive: t('archive'),
-          restore: t('restore'),
-          delete: t('delete'),
-          confirm: t('confirmDelete'),
-        }}
-      />
+      <div className="flex flex-wrap items-center gap-2">
+        <RecordActions
+          editHref={`/admin/records/orders/${o.id}/edit`}
+          deleteAction={deleteOrder.bind(null, o.id, locale)}
+          labels={{
+            edit: t('edit'),
+            archive: t('archive'),
+            restore: t('restore'),
+            delete: t('delete'),
+            confirm: t('confirmDelete'),
+          }}
+        />
+        <a
+          href={`/${locale}/invoice/${o.id}`}
+          target="_blank"
+          rel="noopener"
+          className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium hover:bg-muted"
+        >
+          <FileText className="size-3.5" />
+          {ti('title')}
+        </a>
+      </div>
       <DetailGrid items={items} />
       <div className="mt-4 space-y-2">
         <h3 className="text-sm font-semibold">{t('f.items')}</h3>

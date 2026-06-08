@@ -11,6 +11,7 @@ import {
   PieChart,
   Plus,
   ChevronRight,
+  Scale,
   type LucideIcon,
 } from 'lucide-react';
 import { getPageContext } from '@/server/page-context';
@@ -102,6 +103,7 @@ export default async function FinancePage({
     { href: '/finance/ledger', key: 'ledger', Icon: BookOpen },
     { href: '/finance/dues', key: 'dues', Icon: Clock },
     { href: '/finance/shareholders', key: 'shareholders', Icon: PieChart },
+    { href: '/balance-sheet', key: 'balanceSheet', Icon: Scale },
     { href: '/finance/accounts', key: 'accounts', Icon: Wallet },
     { href: '/finance/parties', key: 'parties', Icon: Users },
   ];
