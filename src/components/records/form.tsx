@@ -3,17 +3,19 @@
 import { useActionState, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { Link } from '@/i18n/navigation';
+import { cn } from '@/lib/utils';
 import type { ActionState } from '@/server/records/shared';
 
 /** Show a field only while another field holds one of these values. */
 type ShowWhen = { field: string; in: string[] };
 
 export type FieldDef =
-  | { name: string; label: string; type: 'text' | 'number' | 'email' | 'date'; required?: boolean; placeholder?: string; step?: string; showWhen?: ShowWhen }
-  | { name: string; label: string; type: 'select'; required?: boolean; options: { value: string; label: string }[]; showWhen?: ShowWhen };
+  | { name: string; label: string; type: 'text' | 'number' | 'email' | 'date'; required?: boolean; placeholder?: string; step?: string; showWhen?: ShowWhen; disabled?: boolean }
+  | { name: string; label: string; type: 'select'; required?: boolean; options: { value: string; label: string }[]; showWhen?: ShowWhen; disabled?: boolean };
 
 const input =
   'w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:border-primary';
+const disabledInput = 'cursor-not-allowed bg-muted text-muted-foreground';
 
 type Action = (prev: ActionState, fd: FormData) => Promise<ActionState>;
 
@@ -81,8 +83,9 @@ export function RecordForm({
                 name={f.name}
                 defaultValue={dv}
                 required={f.required}
+                disabled={f.disabled}
                 onChange={track ? (e) => track(e.target.value) : undefined}
-                className={input}
+                className={cn(input, f.disabled && disabledInput)}
               >
                 {!f.required ? <option value="">—</option> : null}
                 {f.options.map((o) => (
@@ -97,12 +100,17 @@ export function RecordForm({
                 type={f.type}
                 defaultValue={dv}
                 required={f.required}
+                disabled={f.disabled}
                 placeholder={'placeholder' in f ? f.placeholder : undefined}
                 step={'step' in f ? f.step : undefined}
                 onChange={track ? (e) => track(e.target.value) : undefined}
-                className={input}
+                className={cn(input, f.disabled && disabledInput)}
               />
             )}
+            {/* Disabled controls don't submit; carry their (immutable) value so
+                validation still passes. The server is the source of truth and
+                ignores changes to immutable keys regardless. */}
+            {f.disabled ? <input type="hidden" name={f.name} value={dv} /> : null}
           </div>
         );
       })}

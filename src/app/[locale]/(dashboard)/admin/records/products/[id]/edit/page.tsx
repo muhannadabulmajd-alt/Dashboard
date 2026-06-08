@@ -42,7 +42,7 @@ export default async function EditProductPage({
       <PageHeader title={t('editTitle', { entity: t('entities.products') })} subtitle={p.sku} />
       <RecordForm
         action={updateProduct.bind(null, id)}
-        fields={productFields(tk, locale)}
+        fields={productFields(tk, locale, 'edit')}
         initial={initial}
         locale={locale}
         submitLabel={t('save')}

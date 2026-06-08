@@ -64,10 +64,10 @@ export async function updateProduct(
   const r = parse(fd);
   if (!r.success) return { error: 'invalid' };
   const locale = reqField(fd, 'locale') || 'ar';
-  const dup = await prisma.product.findUnique({ where: { sku: r.data.sku }, select: { id: true } });
-  if (dup && dup.id !== id) return { error: 'exists' };
-  await prisma.product.update({ where: { id }, data: r.data });
-  await audit(user.id, 'UPDATE', 'Product', { id, sku: r.data.sku });
+  // SKU is the permanent key — immutable after creation (CR-5).
+  const { sku: _immutable, ...data } = r.data;
+  await prisma.product.update({ where: { id }, data });
+  await audit(user.id, 'UPDATE', 'Product', { id });
   revalidatePath(LIST, 'page');
   redirect(`/${locale}/admin/records/products/${id}`);
 }

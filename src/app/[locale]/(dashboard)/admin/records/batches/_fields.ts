@@ -2,11 +2,18 @@ import { enumLabel, ROAST_LEVELS } from '@/lib/enums';
 import type { AppLocale } from '@/lib/money';
 import type { FieldDef } from '@/components/records/form';
 
-/** Form fields for creating/editing a roast batch (shared by new + edit pages). */
-export function batchFields(t: (key: string) => string, locale: AppLocale): FieldDef[] {
+/**
+ * Form fields for creating/editing a roast batch (shared by new + edit pages).
+ * Batch number is the permanent key — immutable after creation (CR-5).
+ */
+export function batchFields(
+  t: (key: string) => string,
+  locale: AppLocale,
+  mode: 'new' | 'edit' = 'new',
+): FieldDef[] {
   const opts = (vals: readonly string[]) => vals.map((v) => ({ value: v, label: enumLabel(v, locale) }));
   return [
-    { name: 'batchNumber', label: t('f.batchNumber'), type: 'text', required: true },
+    { name: 'batchNumber', label: t('f.batchNumber'), type: 'text', required: true, disabled: mode === 'edit' },
     { name: 'origin', label: t('f.origin'), type: 'text', required: true },
     { name: 'roastDate', label: t('f.roastDate'), type: 'date' },
     { name: 'roastLevel', label: t('f.roastLevel'), type: 'select', options: opts(ROAST_LEVELS) },

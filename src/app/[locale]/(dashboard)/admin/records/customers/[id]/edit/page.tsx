@@ -40,7 +40,7 @@ export default async function EditCustomerPage({
       <PageHeader title={t('editTitle', { entity: t('entities.customers') })} subtitle={c.externalId ?? ''} />
       <RecordForm
         action={updateCustomer.bind(null, id)}
-        fields={customerFields(tk, locale)}
+        fields={customerFields(tk, locale, 'edit')}
         initial={initial}
         locale={locale}
         submitLabel={t('save')}

@@ -30,6 +30,7 @@ export default async function CustomersRecordsPage({
   ];
 
   const cols: Column[] = [
+    { label: t('f.externalId') },
     { label: t('f.name') },
     { label: t('f.phone') },
     { label: t('f.governorate') },
@@ -40,6 +41,7 @@ export default async function CustomersRecordsPage({
   const rows = customers.map((c) => {
     const name = (locale === 'ar' ? c.nameAr : c.nameEn) || c.nameEn || c.nameAr || c.externalId || '—';
     return [
+      <span key="id" className="font-mono text-xs text-muted-foreground">{c.externalId ?? '—'}</span>,
       name,
       c.phone,
       enumLabel(c.governorate, locale),

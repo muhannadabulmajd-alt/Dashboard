@@ -2,11 +2,18 @@ import { enumLabel, PRODUCT_LINES, GRINDS, ROAST_LEVELS } from '@/lib/enums';
 import type { AppLocale } from '@/lib/money';
 import type { FieldDef } from '@/components/records/form';
 
-/** Form fields for creating/editing a product (shared by new + edit pages). */
-export function productFields(t: (key: string) => string, locale: AppLocale): FieldDef[] {
+/**
+ * Form fields for creating/editing a product (shared by new + edit pages).
+ * SKU is the permanent key — editable on create, immutable afterwards (CR-5).
+ */
+export function productFields(
+  t: (key: string) => string,
+  locale: AppLocale,
+  mode: 'new' | 'edit' = 'new',
+): FieldDef[] {
   const opts = (vals: readonly string[]) => vals.map((v) => ({ value: v, label: enumLabel(v, locale) }));
   return [
-    { name: 'sku', label: t('f.sku'), type: 'text', required: true },
+    { name: 'sku', label: t('f.sku'), type: 'text', required: true, disabled: mode === 'edit' },
     { name: 'nameEn', label: t('f.nameEn'), type: 'text', required: true },
     { name: 'nameAr', label: t('f.nameAr'), type: 'text', required: true },
     { name: 'productLine', label: t('f.productLine'), type: 'select', required: true, options: opts(PRODUCT_LINES) },

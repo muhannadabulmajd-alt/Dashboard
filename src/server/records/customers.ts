@@ -11,7 +11,7 @@ const LIST = '/[locale]/(dashboard)/admin/records/customers';
 const CAP = 'manage:customers' as const;
 
 const schema = z.object({
-  externalId: z.string().min(1),
+  externalId: z.string().optional(), // auto-generated on create, immutable after (CR-4)
   nameEn: z.string().optional(),
   nameAr: z.string().optional(),
   phone: z.string().optional(),
@@ -23,7 +23,7 @@ const schema = z.object({
 
 function parse(fd: FormData) {
   return schema.safeParse({
-    externalId: reqField(fd, 'externalId'),
+    externalId: optField(fd, 'externalId'),
     nameEn: optField(fd, 'nameEn'),
     nameAr: optField(fd, 'nameAr'),
     phone: optField(fd, 'phone'),
@@ -34,18 +34,46 @@ function parse(fd: FormData) {
   });
 }
 
+const isUniqueViolation = (e: unknown) =>
+  typeof e === 'object' && e !== null && 'code' in e && (e as { code?: string }).code === 'P2002';
+
+/** Next sequential customer code, e.g. CL-000001. Spans legacy CL-1 and padded forms. */
+async function nextCustomerCode(): Promise<string> {
+  const rows = await prisma.customer.findMany({ select: { externalId: true } });
+  let max = 0;
+  for (const { externalId } of rows) {
+    const m = externalId?.match(/^CL-0*(\d+)$/i);
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  return `CL-${String(max + 1).padStart(6, '0')}`;
+}
+
 export async function createCustomer(_prev: ActionState, fd: FormData): Promise<ActionState> {
   const user = await requireCap(CAP);
   if (!user) return { error: 'forbidden' };
   const r = parse(fd);
   if (!r.success) return { error: 'invalid' };
   const locale = reqField(fd, 'locale') || 'ar';
-  if (await prisma.customer.findUnique({ where: { externalId: r.data.externalId }, select: { id: true } }))
+  // Customer ID is auto-generated (CR-4). A manually supplied value is honored
+  // but must be unique; otherwise we generate the next code, retrying on races.
+  const provided = r.data.externalId?.trim();
+  if (provided && (await prisma.customer.findUnique({ where: { externalId: provided }, select: { id: true } })))
     return { error: 'exists' };
-  const c = await prisma.customer.create({ data: r.data });
-  await audit(user.id, 'CREATE', 'Customer', { externalId: r.data.externalId });
+  const { externalId: _omit, ...rest } = r.data;
+  let created;
+  for (let attempt = 0; ; attempt++) {
+    const externalId = provided || (await nextCustomerCode());
+    try {
+      created = await prisma.customer.create({ data: { ...rest, externalId } });
+      break;
+    } catch (e) {
+      if (!provided && isUniqueViolation(e) && attempt < 5) continue;
+      throw e;
+    }
+  }
+  await audit(user.id, 'CREATE', 'Customer', { externalId: created.externalId });
   revalidatePath(LIST, 'page');
-  redirect(`/${locale}/admin/records/customers/${c.id}`);
+  redirect(`/${locale}/admin/records/customers/${created.id}`);
 }
 
 export async function updateCustomer(
@@ -58,10 +86,10 @@ export async function updateCustomer(
   const r = parse(fd);
   if (!r.success) return { error: 'invalid' };
   const locale = reqField(fd, 'locale') || 'ar';
-  const dup = await prisma.customer.findUnique({ where: { externalId: r.data.externalId }, select: { id: true } });
-  if (dup && dup.id !== id) return { error: 'exists' };
-  await prisma.customer.update({ where: { id }, data: r.data });
-  await audit(user.id, 'UPDATE', 'Customer', { id, externalId: r.data.externalId });
+  // externalId is immutable after creation (CR-4) — never update it.
+  const { externalId: _immutable, ...data } = r.data;
+  await prisma.customer.update({ where: { id }, data });
+  await audit(user.id, 'UPDATE', 'Customer', { id });
   revalidatePath(LIST, 'page');
   redirect(`/${locale}/admin/records/customers/${id}`);
 }

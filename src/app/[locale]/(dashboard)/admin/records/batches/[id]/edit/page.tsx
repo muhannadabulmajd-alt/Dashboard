@@ -40,7 +40,7 @@ export default async function EditBatchPage({
       <PageHeader title={t('editTitle', { entity: t('entities.batches') })} subtitle={b.origin} />
       <RecordForm
         action={updateBatch.bind(null, id)}
-        fields={batchFields(tk, locale)}
+        fields={batchFields(tk, locale, 'edit')}
         initial={initial}
         locale={locale}
         submitLabel={t('save')}

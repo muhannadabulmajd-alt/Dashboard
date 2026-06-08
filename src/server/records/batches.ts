@@ -58,10 +58,10 @@ export async function updateBatch(
   const r = parse(fd);
   if (!r.success) return { error: 'invalid' };
   const locale = reqField(fd, 'locale') || 'ar';
-  const dup = await prisma.roastBatch.findUnique({ where: { batchNumber: r.data.batchNumber }, select: { id: true } });
-  if (dup && dup.id !== id) return { error: 'exists' };
-  await prisma.roastBatch.update({ where: { id }, data: r.data });
-  await audit(user.id, 'UPDATE', 'RoastBatch', { id, batchNumber: r.data.batchNumber });
+  // Batch number is the permanent key — immutable after creation (CR-5).
+  const { batchNumber: _immutable, ...data } = r.data;
+  await prisma.roastBatch.update({ where: { id }, data });
+  await audit(user.id, 'UPDATE', 'RoastBatch', { id });
   revalidatePath(LIST, 'page');
   redirect(`/${locale}/admin/records/batches/${id}`);
 }
