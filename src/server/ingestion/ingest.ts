@@ -124,13 +124,29 @@ export async function ingestCsv(
         if (existing) {
           await prisma.inventoryItem.update({
             where: { id: existing.id },
-            data: { category: it.category, unit: it.unit, nameEn: it.nameEn },
+            data: {
+              category: it.category,
+              unit: it.unit,
+              nameEn: it.nameEn,
+              unitCost: it.unitCost,
+              reorderPoint: it.reorderPoint,
+              avgDailyUsage: it.avgDailyUsage,
+            },
           });
           itemId = existing.id;
           updated += 1;
         } else {
           const created = await prisma.inventoryItem.create({
-            data: { category: it.category, nameEn: it.nameEn, nameAr: it.nameAr, unit: it.unit, branchId },
+            data: {
+              category: it.category,
+              nameEn: it.nameEn,
+              nameAr: it.nameAr,
+              unit: it.unit,
+              branchId,
+              unitCost: it.unitCost,
+              reorderPoint: it.reorderPoint,
+              avgDailyUsage: it.avgDailyUsage,
+            },
           });
           itemId = created.id;
           inserted += 1;

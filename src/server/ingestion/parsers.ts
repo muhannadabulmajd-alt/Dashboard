@@ -300,6 +300,9 @@ export interface InventoryInput {
   opening: number;
   additions: number;
   deductions: number;
+  unitCost?: number;
+  reorderPoint?: number;
+  avgDailyUsage?: number;
 }
 
 const INVENTORY_CATEGORY_ALIASES: Record<string, (typeof INVENTORY_CATEGORIES)[number]> = {
@@ -319,6 +322,9 @@ const invInt = z.preprocess(
   z.coerce.number().int().nonnegative(),
 );
 
+const invOptInt = z.preprocess(blank, z.coerce.number().int().nonnegative().optional());
+const invOptNum = z.preprocess(blank, z.coerce.number().nonnegative().optional());
+
 const inventorySchema = z
   .object({
     item: z.string().min(1),
@@ -327,6 +333,9 @@ const inventorySchema = z
     opening: invInt,
     additions: invInt,
     deductions: invInt,
+    unitcost: invOptInt,
+    reorderpoint: invOptInt,
+    avgdailyusage: invOptNum,
   })
   .transform((r): InventoryInput => ({
     nameEn: r.item.trim(),
@@ -336,6 +345,9 @@ const inventorySchema = z
     opening: r.opening,
     additions: r.additions,
     deductions: r.deductions,
+    unitCost: r.unitcost,
+    reorderPoint: r.reorderpoint,
+    avgDailyUsage: r.avgdailyusage,
   }));
 
 /** Inventory rows; header matching is case-insensitive (Item/item both work). */
@@ -534,8 +546,8 @@ export const TEMPLATES: Record<ImportDataset, { headers: string[]; example: stri
     example: ['LH-2026-0100', '2026-06-01', '2026-06-02', 'Ethiopia', 'LIGHT', '30000', '25500', '86.5', 'Bright, floral'],
   },
   inventory: {
-    headers: ['item', 'category', 'unit', 'opening', 'additions', 'deductions'],
-    example: ['قهوة خام برازيل ريو ميناس', 'GREEN_COFFEE', 'GRAM', '0', '30000', '5000'],
+    headers: ['item', 'category', 'unit', 'opening', 'additions', 'deductions', 'unitCost', 'reorderPoint', 'avgDailyUsage'],
+    example: ['قهوة خام برازيل ريو ميناس', 'GREEN_COFFEE', 'GRAM', '0', '30000', '5000', '15', '5000', '200'],
   },
   purchases: {
     headers: ['item', 'supplier', 'qty', 'unit', 'unitPrice', 'amount', 'currency', 'date', 'invoice', 'doc', 'deliveryCompany'],

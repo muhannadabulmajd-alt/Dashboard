@@ -26,10 +26,16 @@ import { setUsdToIqd } from '@/server/finance/settings';
 import { RateEditor } from '@/components/finance/RateEditor';
 import { PageHeader } from '@/components/ui/primitives';
 import { DataTable, type Column } from '@/components/data-table/DataTable';
+import { BarChartCard, DonutChartCard } from '@/components/charts/Charts';
 import { Link } from '@/i18n/navigation';
-import type { Currency } from '@prisma/client';
+import type { Currency, ExpenseCategoryType } from '@prisma/client';
 
 type Vals = { cash: number; capitalIn: number; expenses: number; received: number; payable: number; receivable: number };
+type ChartEntry = FinanceEntryLike & {
+  date: Date;
+  categoryType: ExpenseCategoryType | null;
+  party: { name: string } | null;
+};
 
 type Tone = 'in' | 'out' | 'neutral' | 'warn';
 const TONES: Record<Tone, string> = {
@@ -91,10 +97,11 @@ export default async function FinancePage({
       select: {
         id: true, type: true, amount: true, currency: true, obligation: true,
         obligationKind: true, accountId: true, toAccountId: true, settlesId: true,
+        date: true, categoryType: true, party: { select: { name: true } },
       },
     }),
   ]);
-  const entries = entriesRaw as FinanceEntryLike[];
+  const entries = entriesRaw as ChartEntry[];
 
   const currencies = Array.from(new Set([...accounts.map((a) => a.currency), ...entries.map((e) => e.currency)]));
   if (currencies.length === 0) currencies.push('IQD');
@@ -125,6 +132,34 @@ export default async function FinancePage({
     { cash: 0, capitalIn: 0, expenses: 0, received: 0, payable: 0, receivable: 0 },
   );
   const showCombined = currencies.length > 1;
+
+  // Charts (all converted to IQD at the rate).
+  const iqd = (e: ChartEntry) => convertToIqd(e.amount, e.currency, rate);
+  const isSpend = (e: ChartEntry) => e.type === 'EXPENSE' || e.type === 'PURCHASE';
+  const spendByMonth = (() => {
+    const map = new Map<string, number>();
+    for (const e of entries.filter(isSpend)) {
+      const k = e.date.toISOString().slice(0, 7);
+      map.set(k, (map.get(k) ?? 0) + iqd(e));
+    }
+    return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([label, value]) => ({ label, value }));
+  })();
+  const spendByCategory = (() => {
+    const map = new Map<string, number>();
+    for (const e of entries.filter(isSpend)) {
+      const key = e.categoryType ? enumLabel(e.categoryType, locale) : '—';
+      map.set(key, (map.get(key) ?? 0) + iqd(e));
+    }
+    return [...map.entries()].map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
+  })();
+  const topParties = (() => {
+    const map = new Map<string, number>();
+    for (const e of entries.filter((x) => isSpend(x) || x.type === 'PAYMENT_OUT')) {
+      if (!e.party?.name) continue;
+      map.set(e.party.name, (map.get(e.party.name) ?? 0) + iqd(e));
+    }
+    return [...map.entries()].map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value).slice(0, 8);
+  })();
 
   const tiles = (v: Vals): { label: string; value: number; Icon: LucideIcon; tone: Tone; href: string }[] => [
     { label: t('cashOnHand'), value: v.cash, Icon: Wallet, tone: 'neutral', href: '/finance/accounts' },
@@ -213,6 +248,18 @@ export default async function FinancePage({
           ) : null}
         </section>
       ))}
+
+      {spendByCategory.length ? (
+        <section className="space-y-4">
+          <div className="grid gap-4 lg:grid-cols-2">
+            <BarChartCard title={t('spendByMonth')} data={spendByMonth} locale={locale} valueKind="iqd" />
+            <DonutChartCard title={t('spendByCategory')} data={spendByCategory} locale={locale} valueKind="iqd" />
+          </div>
+          {topParties.length ? (
+            <BarChartCard title={t('topSuppliers')} data={topParties} locale={locale} valueKind="iqd" horizontal />
+          ) : null}
+        </section>
+      ) : null}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {cards.map(({ href, key, Icon }) => (
