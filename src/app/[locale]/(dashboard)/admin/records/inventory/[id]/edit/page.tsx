@@ -20,14 +20,19 @@ export default async function EditInventoryPage({
   const { id } = await params;
   const t = await getTranslations('records');
   const tk = (k: string) => t(k);
-  const item = await prisma.inventoryItem.findUnique({ where: { id } });
+  const [item, productRows] = await Promise.all([
+    prisma.inventoryItem.findUnique({ where: { id } }),
+    prisma.product.findMany({ where: { isActive: true }, orderBy: { sku: 'asc' } }),
+  ]);
   if (!item) notFound();
+  const products = productRows.map((p) => ({ value: p.id, label: `${p.sku} · ${locale === 'ar' ? p.nameAr : p.nameEn}` }));
 
   const initial = {
     nameEn: item.nameEn,
     nameAr: item.nameAr,
     category: item.category,
     unit: item.unit,
+    productId: item.productId ?? '',
     reorderPoint: item.reorderPoint ?? '',
     avgDailyUsage: item.avgDailyUsage ?? '',
     unitCost: item.unitCost ?? '',
@@ -40,7 +45,7 @@ export default async function EditInventoryPage({
       <PageHeader title={t('editTitle', { entity: t('entities.inventory') })} subtitle={enumLabel(item.category, locale)} />
       <RecordForm
         action={updateInventory.bind(null, id)}
-        fields={inventoryFields(tk, locale)}
+        fields={inventoryFields(tk, locale, products)}
         initial={initial}
         locale={locale}
         submitLabel={t('save')}

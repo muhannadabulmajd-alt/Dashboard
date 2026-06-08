@@ -209,7 +209,7 @@
       "product": "المنتج", "qty": "الكمية", "unitPrice": "سعر الوحدة", "lineTotal": "إجمالي البند",
       "subtotal": "المجموع الفرعي", "total": "الإجمالي", "orderDiscount": "خصم الطلب", "extraCharges": "رسوم إضافية",
       "item": "الصنف", "category": "التصنيف", "unit": "الوحدة", "currentStock": "الرصيد الحالي",
-      "reorderPoint": "حد إعادة الطلب", "avgDailyUsage": "متوسط الاستهلاك اليومي", "unitCost": "كلفة الوحدة",
+      "reorderPoint": "حد إعادة الطلب", "avgDailyUsage": "متوسط الاستهلاك اليومي", "unitCost": "كلفة الوحدة", "linkedVariation": "التنويع المرتبط (يُخصم عند البيع)",
       "movements": "حركات المخزون", "reason": "السبب", "quantity": "الكمية", "occurredAt": "التاريخ",
       "batchNumber": "رقم الدفعة", "roastDate": "تاريخ التحميص", "green": "أخضر (غم)", "output": "ناتج (غم)",
       "yield": "العائد", "shrinkage": "الفاقد", "qc": "الجودة", "qcNotes": "ملاحظات الجودة", "pending": "قيد الانتظار", "roasted": "محمّص",

@@ -15,6 +15,7 @@ const schema = z.object({
   nameAr: z.string().min(1),
   category: z.enum(INVENTORY_CATEGORIES),
   unit: z.string().min(1),
+  productId: z.string().optional(), // linked variation: sales deduct this item (§18)
   reorderPoint: z.coerce.number().int().nonnegative().optional(),
   avgDailyUsage: z.coerce.number().nonnegative().optional(),
   unitCost: z.coerce.number().int().nonnegative().optional(),
@@ -26,11 +27,15 @@ function parse(fd: FormData) {
     nameAr: reqField(fd, 'nameAr'),
     category: reqField(fd, 'category'),
     unit: reqField(fd, 'unit'),
+    productId: optField(fd, 'productId'),
     reorderPoint: optField(fd, 'reorderPoint'),
     avgDailyUsage: optField(fd, 'avgDailyUsage'),
     unitCost: optField(fd, 'unitCost'),
   });
 }
+
+// Blank linked-product selection → null (unlinked / raw material).
+const withProduct = <T extends { productId?: string }>(data: T) => ({ ...data, productId: data.productId || null });
 
 export async function createInventory(_prev: ActionState, fd: FormData): Promise<ActionState> {
   const user = await requireCap(CAP);
@@ -38,7 +43,7 @@ export async function createInventory(_prev: ActionState, fd: FormData): Promise
   const r = parse(fd);
   if (!r.success) return { error: 'invalid' };
   const locale = reqField(fd, 'locale') || 'ar';
-  const item = await prisma.inventoryItem.create({ data: r.data });
+  const item = await prisma.inventoryItem.create({ data: withProduct(r.data) });
   await audit(user.id, 'CREATE', 'InventoryItem', { id: item.id });
   revalidatePath(LIST, 'page');
   redirect(`/${locale}/admin/records/inventory/${item.id}`);
@@ -54,7 +59,7 @@ export async function updateInventory(
   const r = parse(fd);
   if (!r.success) return { error: 'invalid' };
   const locale = reqField(fd, 'locale') || 'ar';
-  await prisma.inventoryItem.update({ where: { id }, data: r.data });
+  await prisma.inventoryItem.update({ where: { id }, data: withProduct(r.data) });
   await audit(user.id, 'UPDATE', 'InventoryItem', { id });
   revalidatePath(LIST, 'page');
   redirect(`/${locale}/admin/records/inventory/${id}`);

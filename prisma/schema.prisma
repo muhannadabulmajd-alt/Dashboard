@@ -342,11 +342,12 @@ model Order {
   uploadBatchId     String?
   createdAt         DateTime          @default(now())
 
-  lines    OrderLine[]
-  customer Customer?   @relation(fields: [customerId], references: [id])
-  branch   Branch?     @relation(fields: [branchId], references: [id])
-  offer    Offer?      @relation(fields: [offerId], references: [id])
-  shipment Shipment?
+  lines          OrderLine[]
+  customer       Customer?       @relation(fields: [customerId], references: [id])
+  branch         Branch?         @relation(fields: [branchId], references: [id])
+  offer          Offer?          @relation(fields: [offerId], references: [id])
+  shipment       Shipment?
+  stockMovements StockMovement[]
 
   @@index([placedAt])
   @@index([channel])
@@ -452,13 +453,16 @@ model StockMovement {
   expiryDate      DateTime?
   branchId        String?
   uploadBatchId   String?
+  orderId         String? // sales deduction source (variations module §18)
   createdAt       DateTime       @default(now())
 
   inventoryItem InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
   branch        Branch?       @relation(fields: [branchId], references: [id])
+  order         Order?        @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@index([inventoryItemId, occurredAt])
   @@index([reason])
+  @@index([orderId])
 }
 
 // ---------------------------------------------------------------------------

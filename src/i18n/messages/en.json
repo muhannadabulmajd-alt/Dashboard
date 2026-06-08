@@ -209,7 +209,7 @@
       "product": "Product", "qty": "Qty", "unitPrice": "Unit price", "lineTotal": "Line total",
       "subtotal": "Subtotal", "total": "Total", "orderDiscount": "Order discount", "extraCharges": "Extra charges",
       "item": "Item", "category": "Category", "unit": "Unit", "currentStock": "Current stock",
-      "reorderPoint": "Reorder point", "avgDailyUsage": "Avg daily use", "unitCost": "Unit cost",
+      "reorderPoint": "Reorder point", "avgDailyUsage": "Avg daily use", "unitCost": "Unit cost", "linkedVariation": "Linked variation (deduct on sale)",
       "movements": "Stock movements", "reason": "Reason", "quantity": "Quantity", "occurredAt": "Date",
       "batchNumber": "Batch #", "roastDate": "Roast date", "green": "Green (g)", "output": "Output (g)",
       "yield": "Yield", "shrinkage": "Shrinkage", "qc": "QC", "qcNotes": "QC notes", "pending": "Pending", "roasted": "Roasted",
