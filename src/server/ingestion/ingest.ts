@@ -12,6 +12,7 @@ import {
   parseCapital,
   parseShipments,
   type ImportDataset,
+  type ProductInput,
   type RowError,
   type IngestSummary,
 } from './parsers';
@@ -69,14 +70,41 @@ export async function ingestCsv(
     if (dataset === 'products') {
       const { valid, errors: e } = parseProducts(rows);
       errors.push(...e);
+      // Resolve (or auto-create) parent product groups referenced by the `group`
+      // column, so importing products also builds the variation hierarchy.
+      const groupCache = new Map<string, string>();
+      let seq = (await prisma.productGroup.findMany({ select: { code: true } })).reduce((m, { code }) => {
+        const x = code.match(/^PG-0*(\d+)$/i);
+        return x ? Math.max(m, Number(x[1])) : m;
+      }, 0);
+      const resolveGroup = async (name: string, productLine: ProductInput['productLine']): Promise<string> => {
+        const key = name.toLowerCase();
+        const cached = groupCache.get(key);
+        if (cached) return cached;
+        const found = await prisma.productGroup.findFirst({
+          where: { OR: [{ code: name }, { nameEn: { equals: name, mode: 'insensitive' } }, { nameAr: name }] },
+          select: { id: true },
+        });
+        const id =
+          found?.id ??
+          (
+            await prisma.productGroup.create({
+              data: { code: `PG-${String(++seq).padStart(6, '0')}`, nameEn: name, nameAr: name, productLine },
+            })
+          ).id;
+        groupCache.set(key, id);
+        return id;
+      };
       for (const p of valid) {
-        const { sku, ...rest } = p;
+        const { sku, group, ...rest } = p;
+        const groupId = group ? await resolveGroup(group, rest.productLine) : undefined;
+        const data = groupId ? { ...rest, groupId } : rest;
         const existing = await prisma.product.findUnique({ where: { sku }, select: { id: true } });
         if (existing) {
-          await prisma.product.update({ where: { sku }, data: rest });
+          await prisma.product.update({ where: { sku }, data });
           updated += 1;
         } else {
-          await prisma.product.create({ data: { sku, ...rest } });
+          await prisma.product.create({ data: { sku, ...data } });
           inserted += 1;
         }
       }

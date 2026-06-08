@@ -17,6 +17,8 @@ const DATASET_CAPABILITY: Record<string, Capability> = {
   top_products: 'view:sales',
   product_margin: 'export:financial',
   inventory: 'view:inventory',
+  variations: 'manage:products',
+  sales_by_group: 'view:sales',
 };
 
 export async function GET(req: NextRequest) {
@@ -78,6 +80,30 @@ export async function GET(req: NextRequest) {
           row.value,
         ];
       });
+      break;
+    }
+    case 'variations': {
+      const products = await prisma.product.findMany({
+        orderBy: { sku: 'asc' },
+        include: { group: { select: { nameEn: true, nameAr: true } } },
+      });
+      headers = ['SKU', 'Product', 'Group', 'Size', 'Grind', 'SellingPrice_IQD', 'Cost_IQD', 'Status'];
+      rows = products.map((p) => [
+        p.sku,
+        locale === 'ar' ? p.nameAr : p.nameEn,
+        p.group ? (locale === 'ar' ? p.group.nameAr : p.group.nameEn) : '',
+        p.sizeLabel,
+        enumLabel(p.grind, locale),
+        p.sellingPrice,
+        p.cogsPerUnit,
+        p.isActive ? 'Active' : 'Inactive',
+      ]);
+      break;
+    }
+    case 'sales_by_group': {
+      const lines = await getOrderLines(filters, scope, range);
+      headers = ['Group', 'NetSales_IQD', 'Units'];
+      rows = M.salesByGroup(lines).map((g) => [locale === 'ar' ? g.nameAr : g.nameEn, g.netSales, g.units]);
       break;
     }
     default: {

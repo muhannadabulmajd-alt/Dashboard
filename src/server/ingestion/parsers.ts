@@ -153,6 +153,7 @@ export interface ProductInput {
   grind: (typeof GRINDS)[number];
   roastLevel?: (typeof ROAST_LEVELS)[number];
   origin?: string;
+  group?: string; // parent group name/code; auto-created + linked on import
   sellingPrice: number;
   cogsPerUnit: number;
   isActive: boolean;
@@ -205,6 +206,7 @@ const productSchema = z
     grind: grindField,
     roastLevel: optEnum(ROAST_LEVELS),
     origin: optStr,
+    group: optStr,
     sellingPrice: reqInt.pipe(z.number().int().nonnegative()),
     cogsPerUnit: reqInt.pipe(z.number().int().nonnegative()),
     active: boolField,
@@ -226,6 +228,7 @@ const productSchema = z
       grind: r.grind,
       roastLevel: r.roastLevel,
       origin: r.origin,
+      group: r.group?.trim() || undefined,
       sellingPrice: r.sellingPrice,
       cogsPerUnit: r.cogsPerUnit,
       isActive: r.active,
@@ -580,8 +583,8 @@ export function parseOrders(rows: Raw[]): ParseResult<OrderInput> {
 
 export const TEMPLATES: Record<ImportDataset, { headers: string[]; example: string[] }> = {
   products: {
-    headers: ['sku', 'nameEn', 'nameAr', 'productLine', 'sizeLabel', 'sizeGrams', 'grind', 'roastLevel', 'origin', 'sellingPrice', 'cogsPerUnit', 'active'],
-    example: ['LH-ESP-SPRING-250-WB', 'Espresso Spring 250g', 'إسبريسو الربيع', 'ESPRESSO', '250g', '250', 'WHOLE_BEAN', 'MEDIUM_DARK', 'Blend', '13000', '6000', 'Active'],
+    headers: ['sku', 'nameEn', 'nameAr', 'productLine', 'sizeLabel', 'sizeGrams', 'grind', 'roastLevel', 'origin', 'group', 'sellingPrice', 'cogsPerUnit', 'active'],
+    example: ['LH-ESP-SPRING-250-WB', 'Espresso Spring 250g', 'إسبريسو الربيع', 'ESPRESSO', '250g', '250', 'WHOLE_BEAN', 'MEDIUM_DARK', 'Blend', 'Espresso Spring', '13000', '6000', 'Active'],
   },
   customers: {
     headers: ['externalId', 'phone', 'email', 'nameEn', 'nameAr', 'governorate', 'segment', 'campaignSource'],

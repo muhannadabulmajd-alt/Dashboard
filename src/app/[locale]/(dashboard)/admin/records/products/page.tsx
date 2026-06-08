@@ -28,6 +28,7 @@ export default async function ProductsRecordsPage({
 }) {
   const { locale } = await getPageContext(params, searchParams, 'manage:products');
   const t = await getTranslations('records');
+  const tc = await getTranslations('common');
   const sp = await searchParams;
   const q = typeof sp.q === 'string' ? sp.q.trim() : '';
   const line = typeof sp.line === 'string' ? sp.line : '';
@@ -104,7 +105,13 @@ export default async function ProductsRecordsPage({
         sorts={sortOpts}
         sortLabel={t('tools.sort')}
       />
-      <DataTable columns={cols} rows={rows} emptyLabel={t('none')} />
+      <DataTable
+        columns={cols}
+        rows={rows}
+        emptyLabel={t('none')}
+        exportHref={`/api/export?dataset=variations&locale=${locale}`}
+        exportLabel={tc('exportCsv')}
+      />
     </>
   );
 }
