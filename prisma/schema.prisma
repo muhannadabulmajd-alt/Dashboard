@@ -242,6 +242,7 @@ model Product {
   nameEn          String
   nameAr          String
   productLine     ProductLine
+  groupId         String? // CR/BRD: parent product group (variations module)
   sizeGrams       Int?
   sizeLabel       String
   grind           Grind       @default(NONE)
@@ -258,9 +259,30 @@ model Product {
   orderLines     OrderLine[]
   batchLinks     BatchSkuLink[]
   inventoryItems InventoryItem[]
+  group          ProductGroup?   @relation(fields: [groupId], references: [id])
 
   @@index([productLine])
   @@index([grind])
+  @@index([isActive])
+  @@index([groupId])
+}
+
+// Parent product (Products Variations Module): groups the sellable products
+// (variations) such as "Espresso Spring" → its 200g/500g/1kg, ground/whole-bean
+// SKUs. The variation = Product; the variation ID = the product's immutable SKU.
+model ProductGroup {
+  id          String      @id @default(cuid())
+  code        String      @unique // auto-generated, immutable: PG-000001
+  nameEn      String
+  nameAr      String
+  productLine ProductLine
+  description String?
+  isActive    Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  products Product[]
+
   @@index([isActive])
 }
 

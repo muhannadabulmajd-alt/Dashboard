@@ -155,6 +155,7 @@
     },
     "entities": {
       "products": "المنتجات",
+      "productGroups": "مجموعات المنتجات",
       "customers": "العملاء",
       "orders": "الطلبات",
       "inventory": "المخزون",
@@ -163,6 +164,7 @@
     },
     "entityHints": {
       "products": "أصناف الكتالوج والأسعار والتكاليف",
+      "productGroups": "المنتجات الأصل التي تجمّع تنويعاتها",
       "customers": "الأشخاص والجهات التي تطلب",
       "orders": "كل طلب وبنوده",
       "inventory": "أصناف المخزون والحركات",
@@ -211,7 +213,8 @@
       "batchNumber": "رقم الدفعة", "roastDate": "تاريخ التحميص", "green": "أخضر (غم)", "output": "ناتج (غم)",
       "yield": "العائد", "shrinkage": "الفاقد", "qc": "الجودة", "qcNotes": "ملاحظات الجودة", "pending": "قيد الانتظار", "roasted": "محمّص",
       "none": "—", "createdAt": "أُضيف",
-      "address1": "العنوان", "street": "الشارع / أقرب نقطة دالة", "notes": "ملاحظات", "source": "المصدر"
+      "address1": "العنوان", "street": "الشارع / أقرب نقطة دالة", "notes": "ملاحظات", "source": "المصدر",
+      "code": "الرمز", "description": "الوصف", "variations": "التنويعات", "group": "مجموعة المنتج"
     }
   },
   "common": {

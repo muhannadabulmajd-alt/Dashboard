@@ -19,14 +19,19 @@ export default async function EditProductPage({
   const { id } = await params;
   const t = await getTranslations('records');
   const tk = (k: string) => t(k);
-  const p = await prisma.product.findUnique({ where: { id } });
+  const [p, groupRows] = await Promise.all([
+    prisma.product.findUnique({ where: { id } }),
+    prisma.productGroup.findMany({ where: { isActive: true }, orderBy: { code: 'asc' } }),
+  ]);
   if (!p) notFound();
+  const groups = groupRows.map((g) => ({ value: g.id, label: `${g.code} · ${locale === 'ar' ? g.nameAr : g.nameEn}` }));
 
   const initial = {
     sku: p.sku,
     nameEn: p.nameEn,
     nameAr: p.nameAr,
     productLine: p.productLine,
+    groupId: p.groupId ?? '',
     sizeLabel: p.sizeLabel,
     grind: p.grind,
     roastLevel: p.roastLevel ?? '',
@@ -42,7 +47,7 @@ export default async function EditProductPage({
       <PageHeader title={t('editTitle', { entity: t('entities.products') })} subtitle={p.sku} />
       <RecordForm
         action={updateProduct.bind(null, id)}
-        fields={productFields(tk, locale, 'edit')}
+        fields={productFields(tk, locale, 'edit', groups)}
         initial={initial}
         locale={locale}
         submitLabel={t('save')}

@@ -21,7 +21,7 @@ export default async function ProductDetailPage({
   const { locale } = await getPageContext(params, searchParams, 'manage:products');
   const { id } = await params;
   const t = await getTranslations('records');
-  const p = await prisma.product.findUnique({ where: { id } });
+  const p = await prisma.product.findUnique({ where: { id }, include: { group: true } });
   if (!p) notFound();
 
   // Effective cost history (CR-3): the COGS snapshots actually applied to past
@@ -49,6 +49,7 @@ export default async function ProductDetailPage({
     { label: t('f.sku'), value: p.sku },
     { label: t('f.name'), value: `${p.nameEn} / ${p.nameAr}` },
     { label: t('f.productLine'), value: enumLabel(p.productLine, locale) },
+    { label: t('f.group'), value: p.group ? `${p.group.code} · ${locale === 'ar' ? p.group.nameAr : p.group.nameEn}` : '—' },
     { label: t('f.size'), value: p.sizeLabel },
     { label: t('f.grind'), value: enumLabel(p.grind, locale) },
     { label: t('f.roastLevel'), value: p.roastLevel ? enumLabel(p.roastLevel, locale) : '—' },

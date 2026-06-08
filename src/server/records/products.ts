@@ -20,6 +20,7 @@ const schema = z.object({
   grind: z.enum(GRINDS),
   roastLevel: z.enum(ROAST_LEVELS).optional(),
   origin: z.string().optional(),
+  groupId: z.string().optional(), // parent product group (variations module)
   sellingPrice: z.coerce.number().int().nonnegative(),
   cogsPerUnit: z.coerce.number().int().nonnegative(),
 });
@@ -35,10 +36,14 @@ function parse(fd: FormData) {
     grind: reqField(fd, 'grind'),
     roastLevel: optField(fd, 'roastLevel'),
     origin: optField(fd, 'origin'),
+    groupId: optField(fd, 'groupId'),
     sellingPrice: reqField(fd, 'sellingPrice'),
     cogsPerUnit: reqField(fd, 'cogsPerUnit'),
   });
 }
+
+// Normalize a blank group selection to null (unassigned / standalone).
+const withGroup = <T extends { groupId?: string }>(data: T) => ({ ...data, groupId: data.groupId || null });
 
 export async function createProduct(_prev: ActionState, fd: FormData): Promise<ActionState> {
   const user = await requireCap(CAP);
@@ -48,7 +53,7 @@ export async function createProduct(_prev: ActionState, fd: FormData): Promise<A
   const locale = reqField(fd, 'locale') || 'ar';
   if (await prisma.product.findUnique({ where: { sku: r.data.sku }, select: { id: true } }))
     return { error: 'exists' };
-  const p = await prisma.product.create({ data: r.data });
+  const p = await prisma.product.create({ data: withGroup(r.data) });
   await audit(user.id, 'CREATE', 'Product', { sku: r.data.sku });
   revalidatePath(LIST, 'page');
   redirect(`/${locale}/admin/records/products/${p.id}`);
@@ -69,7 +74,7 @@ export async function updateProduct(
   // Record cost/price changes for the cost-history view (CR-3). Past orders keep
   // their own COGS snapshot, so this only affects future transactions.
   const before = await prisma.product.findUnique({ where: { id }, select: { cogsPerUnit: true, sellingPrice: true } });
-  await prisma.product.update({ where: { id }, data });
+  await prisma.product.update({ where: { id }, data: withGroup(data) });
   await audit(user.id, 'UPDATE', 'Product', { id });
   if (before && (before.cogsPerUnit !== data.cogsPerUnit || before.sellingPrice !== data.sellingPrice)) {
     await audit(user.id, 'COST_CHANGE', 'Product', {

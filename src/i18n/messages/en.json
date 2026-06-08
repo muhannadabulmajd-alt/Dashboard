@@ -155,6 +155,7 @@
     },
     "entities": {
       "products": "Products",
+      "productGroups": "Product groups",
       "customers": "Customers",
       "orders": "Orders",
       "inventory": "Inventory",
@@ -163,6 +164,7 @@
     },
     "entityHints": {
       "products": "Catalog items, prices and costs",
+      "productGroups": "Parent products grouping their variations",
       "customers": "People and businesses who order",
       "orders": "Every order and its line items",
       "inventory": "Stock items and movements",
@@ -211,7 +213,8 @@
       "batchNumber": "Batch #", "roastDate": "Roast date", "green": "Green (g)", "output": "Output (g)",
       "yield": "Yield", "shrinkage": "Shrinkage", "qc": "QC", "qcNotes": "QC notes", "pending": "Pending", "roasted": "Roasted",
       "none": "—", "createdAt": "Added",
-      "address1": "Address", "street": "Street / landmark", "notes": "Notes", "source": "Source"
+      "address1": "Address", "street": "Street / landmark", "notes": "Notes", "source": "Source",
+      "code": "Code", "description": "Description", "variations": "Variations", "group": "Product group"
     }
   },
   "common": {

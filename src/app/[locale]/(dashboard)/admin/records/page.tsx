@@ -1,5 +1,5 @@
 import { getTranslations } from 'next-intl/server';
-import { Package, Users, ShoppingBag, Boxes, Flame, ChevronRight, ListChecks } from 'lucide-react';
+import { Package, Layers, Users, ShoppingBag, Boxes, Flame, ChevronRight, ListChecks } from 'lucide-react';
 import { getPageContext } from '@/server/page-context';
 import { can, type Capability } from '@/lib/rbac';
 import { Link } from '@/i18n/navigation';
@@ -7,6 +7,7 @@ import { PageHeader } from '@/components/ui/primitives';
 
 const ENTITIES: { key: string; href: string; cap: Capability; Icon: typeof Package }[] = [
   { key: 'products', href: '/admin/records/products', cap: 'manage:products', Icon: Package },
+  { key: 'productGroups', href: '/admin/records/product-groups', cap: 'manage:products', Icon: Layers },
   { key: 'customers', href: '/admin/records/customers', cap: 'manage:customers', Icon: Users },
   { key: 'orders', href: '/admin/records/orders', cap: 'manage:orders', Icon: ShoppingBag },
   { key: 'inventory', href: '/admin/records/inventory', cap: 'manage:inventory', Icon: Boxes },

@@ -10,6 +10,7 @@ export function productFields(
   t: (key: string) => string,
   locale: AppLocale,
   mode: 'new' | 'edit' = 'new',
+  groups: { value: string; label: string }[] = [],
 ): FieldDef[] {
   const opts = (vals: readonly string[]) => vals.map((v) => ({ value: v, label: enumLabel(v, locale) }));
   return [
@@ -17,6 +18,7 @@ export function productFields(
     { name: 'nameEn', label: t('f.nameEn'), type: 'text', required: true },
     { name: 'nameAr', label: t('f.nameAr'), type: 'text', required: true },
     { name: 'productLine', label: t('f.productLine'), type: 'select', required: true, options: opts(PRODUCT_LINES) },
+    { name: 'groupId', label: t('f.group'), type: 'select', options: groups },
     { name: 'sizeLabel', label: t('f.size'), type: 'text', required: true },
     { name: 'grind', label: t('f.grind'), type: 'select', required: true, options: opts(GRINDS) },
     { name: 'roastLevel', label: t('f.roastLevel'), type: 'select', options: opts(ROAST_LEVELS) },
