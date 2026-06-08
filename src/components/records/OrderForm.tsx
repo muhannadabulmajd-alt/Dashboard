@@ -83,6 +83,11 @@ export function OrderForm({
   const [state, formAction, pending] = useActionState<ActionState, FormData>(action, undefined);
   const [lines, setLines] = useState<OrderLineInput[]>(initial?.lines?.length ? initial.lines : [{ ...emptyLine }]);
   const h = initial?.header ?? {};
+  // Order-level adjustments are controlled so the live total reflects them.
+  const [adj, setAdj] = useState({
+    orderDiscount: initial?.header?.orderDiscount ?? '0',
+    extraCharges: initial?.header?.extraCharges ?? '0',
+  });
 
   const setLine = (i: number, k: keyof OrderLineInput, v: string) =>
     setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, [k]: v } : l)));
@@ -90,9 +95,11 @@ export function OrderForm({
   // Live recalculation so the user sees the new total before saving (CR-2/8).
   const totals = useMemo(() => {
     const subtotal = lines.reduce((s, l) => s + (Number(l.unitGrossPrice) || 0) * (Number(l.quantity) || 0), 0);
-    const discount = lines.reduce((s, l) => s + (Number(l.lineDiscount) || 0), 0);
-    return { subtotal, discount, net: subtotal - discount };
-  }, [lines]);
+    const lineDisc = lines.reduce((s, l) => s + (Number(l.lineDiscount) || 0), 0);
+    const discount = lineDisc + (Number(adj.orderDiscount) || 0);
+    const extra = Number(adj.extraCharges) || 0;
+    return { subtotal, discount, extra, net: subtotal - discount + extra };
+  }, [lines, adj]);
   const fmt = (n: number) => new Intl.NumberFormat(locale === 'ar' ? 'ar-IQ' : 'en-US').format(n);
 
   return (
@@ -110,6 +117,7 @@ export function OrderForm({
         <HeaderSelect name="status" label={labels.status} options={statusOptions} defaultValue={h.status} />
         <HeaderField name="deliveryFee" label={labels.deliveryFee} type="number" defaultValue={h.deliveryFee} />
         <HeaderField name="deliveryCost" label={labels.deliveryCost} type="number" defaultValue={h.deliveryCost} />
+        <HeaderField name="notes" label={labels.notes} defaultValue={h.notes} />
       </div>
 
       <div className="rounded-[var(--radius)] border bg-card p-4">
@@ -155,9 +163,33 @@ export function OrderForm({
           ))}
         </div>
 
+        <div className="mt-3 grid gap-2 border-t pt-3 sm:max-w-sm">
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-muted-foreground">{labels.orderDiscount}</label>
+            <input
+              type="number"
+              name="orderDiscount"
+              value={adj.orderDiscount}
+              onChange={(e) => setAdj((a) => ({ ...a, orderDiscount: e.target.value }))}
+              className={input}
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-muted-foreground">{labels.extraCharges}</label>
+            <input
+              type="number"
+              name="extraCharges"
+              value={adj.extraCharges}
+              onChange={(e) => setAdj((a) => ({ ...a, extraCharges: e.target.value }))}
+              className={input}
+            />
+          </div>
+        </div>
+
         <div className="mt-3 flex flex-wrap justify-end gap-x-6 gap-y-1 border-t pt-3 text-sm">
           <span className="text-muted-foreground">{labels.subtotal}: <span className="font-semibold tabular-nums text-foreground">{fmt(totals.subtotal)}</span></span>
           <span className="text-muted-foreground">{labels.discount}: <span className="font-semibold tabular-nums text-foreground">{fmt(totals.discount)}</span></span>
+          {totals.extra ? <span className="text-muted-foreground">{labels.extraCharges}: <span className="font-semibold tabular-nums text-foreground">{fmt(totals.extra)}</span></span> : null}
           <span className="text-muted-foreground">{labels.total}: <span className="font-bold tabular-nums text-foreground">{fmt(totals.net)}</span></span>
         </div>
       </div>

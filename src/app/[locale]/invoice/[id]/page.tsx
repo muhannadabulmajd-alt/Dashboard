@@ -37,7 +37,7 @@ export default async function InvoicePage({
   const city = o.customer?.governorate ? enumLabel(o.customer.governorate, loc) : '';
   const addressLine = [city, o.customer?.address1, o.customer?.street].filter(Boolean).join(' · ');
   const subtotal = o.grossAmount;
-  const grandTotal = o.grossAmount - o.discountAmount + o.deliveryFee;
+  const grandTotal = o.grossAmount - o.discountAmount + o.deliveryFee + o.extraCharges;
   const m = (n: number) => formatMoney(n, o.currency, loc);
 
   const cell = 'px-3 py-2 align-top';
@@ -134,9 +134,17 @@ export default async function InvoicePage({
             {totalRow(t('subtotal'), m(subtotal))}
             {o.discountAmount ? totalRow(t('discount'), `- ${m(o.discountAmount)}`) : null}
             {o.deliveryFee ? totalRow(t('delivery'), m(o.deliveryFee)) : null}
+            {o.extraCharges ? totalRow(t('extraCharges'), m(o.extraCharges)) : null}
             {totalRow(t('grandTotal'), m(grandTotal), true)}
           </div>
         </div>
+
+        {o.notes ? (
+          <div className="mt-6 rounded-lg bg-muted/40 p-3 text-sm">
+            <span className="font-semibold">{t('notes')}: </span>
+            <span className="text-muted-foreground">{o.notes}</span>
+          </div>
+        ) : null}
 
         <div className="mt-10 border-t pt-4 text-center text-xs text-muted-foreground">{t('thanks')}</div>
       </div>

@@ -37,6 +37,9 @@ export default async function EditOrderPage({
       status: o.status,
       deliveryFee: String(o.deliveryFee),
       deliveryCost: String(o.deliveryCost),
+      orderDiscount: String(o.orderDiscount),
+      extraCharges: String(o.extraCharges),
+      notes: o.notes ?? '',
     },
     lines: o.lines.map(
       (l): OrderLineInput => ({
@@ -65,6 +68,9 @@ export default async function EditOrderPage({
     discount: t('f.discount'),
     subtotal: t('f.subtotal'),
     total: t('f.total'),
+    orderDiscount: t('f.orderDiscount'),
+    extraCharges: t('f.extraCharges'),
+    notes: t('f.notes'),
     addLine: t('addLine'),
     removeLine: t('removeLine'),
     cancel: t('cancel'),

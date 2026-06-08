@@ -20,6 +20,9 @@ const headerSchema = z.object({
   status: z.enum(ORDER_STATUSES),
   deliveryFee: z.coerce.number().int().nonnegative().default(0),
   deliveryCost: z.coerce.number().int().nonnegative().default(0),
+  orderDiscount: z.coerce.number().int().nonnegative().default(0),
+  extraCharges: z.coerce.number().int().nonnegative().default(0),
+  notes: z.string().optional(),
 });
 
 const lineSchema = z.array(
@@ -42,6 +45,9 @@ function parseHeader(fd: FormData) {
     status: reqField(fd, 'status'),
     deliveryFee: optField(fd, 'deliveryFee'),
     deliveryCost: optField(fd, 'deliveryCost'),
+    orderDiscount: optField(fd, 'orderDiscount'),
+    extraCharges: optField(fd, 'extraCharges'),
+    notes: optField(fd, 'notes'),
   });
 }
 
@@ -94,7 +100,7 @@ export async function createOrder(_prev: ActionState, fd: FormData): Promise<Act
     : null;
   const branch = await prisma.branch.findFirst({ orderBy: { createdAt: 'asc' }, select: { id: true } });
   const gross = lineData.reduce((s, l) => s + l.unitGrossPrice * l.quantity, 0);
-  const discount = lineData.reduce((s, l) => s + l.lineDiscount, 0);
+  const discount = lineData.reduce((s, l) => s + l.lineDiscount, 0) + h.data.orderDiscount;
 
   const order = await prisma.order.create({
     data: {
@@ -108,6 +114,9 @@ export async function createOrder(_prev: ActionState, fd: FormData): Promise<Act
       status: h.data.status,
       grossAmount: gross,
       discountAmount: discount,
+      orderDiscount: h.data.orderDiscount,
+      extraCharges: h.data.extraCharges,
+      notes: h.data.notes ?? null,
       refundAmount: refundFor(h.data.status, gross, discount),
       deliveryFee: h.data.deliveryFee,
       deliveryCost: h.data.deliveryCost,
@@ -158,7 +167,7 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
     ? await prisma.customer.findUnique({ where: { externalId: h.data.customerExternalId }, select: { id: true } })
     : null;
   const gross = lineData.reduce((s, l) => s + l.unitGrossPrice * l.quantity, 0);
-  const discount = lineData.reduce((s, l) => s + l.lineDiscount, 0);
+  const discount = lineData.reduce((s, l) => s + l.lineDiscount, 0) + h.data.orderDiscount;
 
   // Replace lines + update header + recompute totals atomically. orderNumber is
   // immutable (CR-5), so it is never changed here.
@@ -175,6 +184,9 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
         status: h.data.status,
         grossAmount: gross,
         discountAmount: discount,
+        orderDiscount: h.data.orderDiscount,
+        extraCharges: h.data.extraCharges,
+        notes: h.data.notes ?? null,
         refundAmount: refundFor(h.data.status, gross, discount),
         deliveryFee: h.data.deliveryFee,
         deliveryCost: h.data.deliveryCost,

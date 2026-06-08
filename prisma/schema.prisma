@@ -309,10 +309,13 @@ model Order {
   status            OrderStatus       @default(COMPLETED)
   currency          Currency          @default(IQD)
   grossAmount       Int               @default(0)
-  discountAmount    Int               @default(0)
+  discountAmount    Int               @default(0) // total: line discounts + orderDiscount
+  orderDiscount     Int               @default(0) // CR-2: order-level discount (part of discountAmount)
+  extraCharges      Int               @default(0) // CR-2: extra charges added to the invoice total
   refundAmount      Int               @default(0)
   deliveryFee       Int               @default(0)
   deliveryCost      Int               @default(0)
+  notes             String? // CR-2: free-form order notes
   offerId           String?
   uploadBatchId     String?
   createdAt         DateTime          @default(now())

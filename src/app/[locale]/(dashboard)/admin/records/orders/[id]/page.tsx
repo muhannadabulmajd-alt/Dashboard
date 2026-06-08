@@ -62,9 +62,11 @@ export default async function OrderDetailPage({
     },
     { label: t('f.gross'), value: formatMoney(o.grossAmount, o.currency, locale) },
     { label: t('f.discount'), value: formatMoney(o.discountAmount, o.currency, locale) },
+    ...(o.extraCharges ? [{ label: t('f.extraCharges'), value: formatMoney(o.extraCharges, o.currency, locale) }] : []),
     { label: t('f.net'), value: formatMoney(net, o.currency, locale) },
     { label: t('f.deliveryFee'), value: formatMoney(o.deliveryFee, o.currency, locale) },
     { label: t('f.deliveryCost'), value: formatMoney(o.deliveryCost, o.currency, locale) },
+    ...(o.notes ? [{ label: t('f.notes'), value: o.notes }] : []),
   ];
 
   const lineCols: Column[] = [
