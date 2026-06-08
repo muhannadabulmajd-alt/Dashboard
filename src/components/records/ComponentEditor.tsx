@@ -6,14 +6,16 @@ import { Link } from '@/i18n/navigation';
 import type { ActionState } from '@/server/records/shared';
 
 const input = 'w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:border-primary';
-export type ComponentRow = { name: string; quantity: string; unitCost: string };
-const empty: ComponentRow = { name: '', quantity: '1', unitCost: '0' };
+export type ComponentRow = { inventoryItemId: string; name: string; quantity: string; unitCost: string };
+export type ItemOption = { value: string; label: string; cost: number };
+const empty: ComponentRow = { inventoryItemId: '', name: '', quantity: '1', unitCost: '0' };
 
 /** Cost-recipe (BOM) editor: components × unit cost → recomputed variation cost. */
 export function ComponentEditor({
   action,
   locale,
   initial,
+  items = [],
   labels,
   errors,
   cancelHref,
@@ -21,6 +23,7 @@ export function ComponentEditor({
   action: (prev: ActionState, fd: FormData) => Promise<ActionState>;
   locale: string;
   initial: ComponentRow[];
+  items?: ItemOption[];
   labels: Record<string, string>;
   errors: Record<string, string>;
   cancelHref: string;
@@ -29,6 +32,17 @@ export function ComponentEditor({
   const [rows, setRows] = useState<ComponentRow[]>(initial.length ? initial : [{ ...empty }]);
   const set = (i: number, k: keyof ComponentRow, v: string) =>
     setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, [k]: v } : r)));
+
+  // Linking a row to a stock item fills its name + (live) cost; cost is taken
+  // from the item again on save, so it stays dynamic.
+  const pickItem = (i: number, id: string) =>
+    setRows((rs) =>
+      rs.map((r, idx) => {
+        if (idx !== i) return r;
+        const it = items.find((x) => x.value === id);
+        return it ? { ...r, inventoryItemId: id, name: it.label, unitCost: String(it.cost) } : { ...r, inventoryItemId: '' };
+      }),
+    );
 
   const total = useMemo(
     () => rows.reduce((s, r) => s + (Number(r.quantity) || 0) * (Number(r.unitCost) || 0), 0),
@@ -55,7 +69,21 @@ export function ComponentEditor({
         </div>
         <div className="space-y-2">
           {rows.map((r, i) => (
-            <div key={i} className="grid grid-cols-[2fr_1fr_1fr_auto] items-end gap-2">
+            <div key={i} className="grid grid-cols-[1.5fr_1.5fr_1fr_1fr_auto] items-end gap-2">
+              <div className="flex flex-col gap-1">
+                {i === 0 ? <label className="text-xs text-muted-foreground">{labels.item}</label> : null}
+                <select value={r.inventoryItemId} onChange={(e) => pickItem(i, e.target.value)} className={input}>
+                  <option value="">{labels.manual}</option>
+                  {items.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                  {r.inventoryItemId && !items.some((o) => o.value === r.inventoryItemId) ? (
+                    <option value={r.inventoryItemId}>{r.name}</option>
+                  ) : null}
+                </select>
+              </div>
               <div className="flex flex-col gap-1">
                 {i === 0 ? <label className="text-xs text-muted-foreground">{labels.name}</label> : null}
                 <input value={r.name} onChange={(e) => set(i, 'name', e.target.value)} className={input} />

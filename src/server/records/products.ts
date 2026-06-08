@@ -116,6 +116,7 @@ export async function deleteProduct(id: string, locale: string): Promise<void> {
 
 const componentSchema = z.array(
   z.object({
+    inventoryItemId: z.string().optional(),
     name: z.string().min(1),
     quantity: z.coerce.number().int().nonnegative(),
     unitCost: z.coerce.number().int().nonnegative(),
@@ -123,10 +124,11 @@ const componentSchema = z.array(
 );
 
 /**
- * Save a variation's cost recipe (BOM, §16 component cost) and recompute its
- * cogsPerUnit = Σ(quantity × unitCost). Because COGS is snapshotted per order
- * line, this only affects future orders. An empty recipe clears the components
- * and leaves the cost untouched.
+ * Save a variation's cost recipe (BOM, §6) and recompute its cogsPerUnit =
+ * Σ(quantity × unitCost). Components may link to an InventoryItem — then the
+ * live item cost is used (dynamic). Because COGS is snapshotted per order line,
+ * this only affects future orders. An empty recipe clears components, leaving
+ * the cost untouched.
  */
 export async function saveProductComponents(productId: string, _prev: ActionState, fd: FormData): Promise<ActionState> {
   const user = await requireCap(CAP);
@@ -141,18 +143,29 @@ export async function saveProductComponents(productId: string, _prev: ActionStat
   const parsed = componentSchema.safeParse(raw);
   if (!parsed.success) return { error: 'invalid' };
   const components = parsed.data.filter((c) => c.name.trim());
-  const cost = components.reduce((s, c) => s + c.quantity * c.unitCost, 0);
+  // Linked components take their cost from the live inventory item.
+  const linkedIds = components.map((c) => c.inventoryItemId).filter((x): x is string => Boolean(x));
+  const items = linkedIds.length
+    ? await prisma.inventoryItem.findMany({ where: { id: { in: linkedIds } }, select: { id: true, unitCost: true } })
+    : [];
+  const costById = new Map(items.map((i) => [i.id, i.unitCost ?? 0]));
+  const rows = components.map((c) => ({
+    productId,
+    inventoryItemId: c.inventoryItemId || null,
+    name: c.name.trim(),
+    quantity: c.quantity,
+    unitCost: c.inventoryItemId ? (costById.get(c.inventoryItemId) ?? c.unitCost) : c.unitCost,
+  }));
+  const cost = rows.reduce((s, c) => s + c.quantity * c.unitCost, 0);
   await prisma.$transaction(async (tx) => {
     await tx.productComponent.deleteMany({ where: { productId } });
-    if (components.length) {
-      await tx.productComponent.createMany({
-        data: components.map((c) => ({ productId, name: c.name.trim(), quantity: c.quantity, unitCost: c.unitCost })),
-      });
+    if (rows.length) {
+      await tx.productComponent.createMany({ data: rows });
       await tx.product.update({ where: { id: productId }, data: { cogsPerUnit: cost } });
     }
   });
-  if (components.length) {
-    await audit(user.id, 'COST_CHANGE', 'Product', { id: productId, source: 'recipe', cogsTo: cost, components: components.length });
+  if (rows.length) {
+    await audit(user.id, 'COST_CHANGE', 'Product', { id: productId, source: 'recipe', cogsTo: cost, components: rows.length });
   }
   revalidatePath(LIST, 'page');
   redirect(`/${locale}/admin/records/products/${productId}`);

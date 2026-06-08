@@ -18,19 +18,31 @@ export default async function ProductCostPage({
   const { locale } = await getPageContext(params, searchParams, 'manage:products');
   const { id } = await params;
   const t = await getTranslations('records');
-  const p = await prisma.product.findUnique({
-    where: { id },
-    include: { components: { orderBy: { id: 'asc' } } },
-  });
+  const [p, itemRows] = await Promise.all([
+    prisma.product.findUnique({ where: { id }, include: { components: { orderBy: { id: 'asc' } } } }),
+    prisma.inventoryItem.findMany({
+      where: { isActive: true },
+      orderBy: { nameEn: 'asc' },
+      select: { id: true, nameEn: true, nameAr: true, unit: true, unitCost: true },
+    }),
+  ]);
   if (!p) notFound();
+  const items = itemRows.map((it) => ({
+    value: it.id,
+    label: `${locale === 'ar' ? it.nameAr : it.nameEn} (${it.unit})`,
+    cost: it.unitCost ?? 0,
+  }));
 
   const initial: ComponentRow[] = p.components.map((c) => ({
+    inventoryItemId: c.inventoryItemId ?? '',
     name: c.name,
     quantity: String(c.quantity),
     unitCost: String(c.unitCost),
   }));
   const labels = {
     components: t('costRecipe'),
+    item: t('f.item'),
+    manual: t('manual'),
     name: t('f.name'),
     quantity: t('f.qty'),
     unitCost: t('f.unitCost'),
@@ -51,6 +63,7 @@ export default async function ProductCostPage({
         action={saveProductComponents.bind(null, id)}
         locale={locale}
         initial={initial}
+        items={items}
         labels={labels}
         errors={errors}
         cancelHref={`/admin/records/products/${id}`}

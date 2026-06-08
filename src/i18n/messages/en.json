@@ -109,7 +109,10 @@
     "costHistory": "Cost history",
     "costHistoryHint": "The cost applied to past orders is preserved. Changing the product cost only affects future orders.",
     "costRecipe": "Cost recipe",
-    "costRecipeHint": "List the components (beans, packaging, labels…). Saving sets this variation's cost to the sum — applied to future orders only; past orders keep their snapshot.",
+    "costRecipeHint": "List the components (beans, packaging, labels…). Link a component to a stock item to use its live cost and track production capacity; leave it Manual for labor/overhead. Saving sets this variation's cost to the sum — future orders only; past orders keep their snapshot.",
+    "manual": "Manual",
+    "capacity": "Producible now",
+    "limitedBy": "Limited by {name}",
     "ungrouped": "Ungrouped",
     "k": {
       "total": "Total",

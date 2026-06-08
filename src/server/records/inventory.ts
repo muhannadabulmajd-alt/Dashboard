@@ -59,10 +59,28 @@ export async function updateInventory(
   const r = parse(fd);
   if (!r.success) return { error: 'invalid' };
   const locale = reqField(fd, 'locale') || 'ar';
+  const before = await prisma.inventoryItem.findUnique({ where: { id }, select: { unitCost: true } });
   await prisma.inventoryItem.update({ where: { id }, data: withProduct(r.data) });
   await audit(user.id, 'UPDATE', 'InventoryItem', { id });
+  // Dynamic recalculation (§4.3): a changed component cost recomputes the cost
+  // of every product whose recipe links this item.
+  if (r.data.unitCost != null && before && r.data.unitCost !== before.unitCost) {
+    await propagateItemCost(id, r.data.unitCost);
+  }
   revalidatePath(LIST, 'page');
   redirect(`/${locale}/admin/records/inventory/${id}`);
+}
+
+/** Push a new component cost into linked recipes and recompute product costs. */
+async function propagateItemCost(itemId: string, newCost: number): Promise<void> {
+  const affected = await prisma.productComponent.findMany({ where: { inventoryItemId: itemId }, select: { productId: true } });
+  if (!affected.length) return;
+  await prisma.productComponent.updateMany({ where: { inventoryItemId: itemId }, data: { unitCost: newCost } });
+  for (const productId of [...new Set(affected.map((a) => a.productId))]) {
+    const comps = await prisma.productComponent.findMany({ where: { productId }, select: { quantity: true, unitCost: true } });
+    const cost = comps.reduce((s, c) => s + c.quantity * c.unitCost, 0);
+    await prisma.product.update({ where: { id: productId }, data: { cogsPerUnit: cost } });
+  }
 }
 
 export async function archiveInventory(id: string, locale: string, active: boolean): Promise<void> {

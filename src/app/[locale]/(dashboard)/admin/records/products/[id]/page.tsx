@@ -5,6 +5,7 @@ import { prisma } from '@/server/db/client';
 import { enumLabel } from '@/lib/enums';
 import { formatMoney, formatNumber } from '@/lib/money';
 import { formatDate } from '@/lib/dates';
+import { productionCapacity } from '@/lib/metrics/inventory';
 import { Badge, PageHeader } from '@/components/ui/primitives';
 import { DataTable, type Column } from '@/components/data-table/DataTable';
 import { BackLink, DetailGrid, type DetailField } from '@/components/records/parts';
@@ -24,9 +25,21 @@ export default async function ProductDetailPage({
   const t = await getTranslations('records');
   const p = await prisma.product.findUnique({
     where: { id },
-    include: { group: true, components: { select: { id: true } } },
+    include: { group: true, components: { select: { id: true, inventoryItemId: true, quantity: true, name: true } } },
   });
   if (!p) notFound();
+
+  // Production capacity (§7): max producible units from the linked components' stock.
+  const linkedIds = p.components.map((c) => c.inventoryItemId).filter((x): x is string => Boolean(x));
+  const stockRows = linkedIds.length
+    ? await prisma.stockMovement.groupBy({ by: ['inventoryItemId'], where: { inventoryItemId: { in: linkedIds } }, _sum: { quantity: true } })
+    : [];
+  const stockByItem = new Map(stockRows.map((s) => [s.inventoryItemId, s._sum.quantity ?? 0]));
+  const capacity = productionCapacity(
+    p.components.map((c) => ({ inventoryItemId: c.inventoryItemId, quantity: c.quantity })),
+    stockByItem,
+  );
+  const limitingName = capacity.limiting ? (p.components.find((c) => c.inventoryItemId === capacity.limiting)?.name ?? '') : '';
 
   // Effective cost history (CR-3): the COGS snapshots actually applied to past
   // orders, proving historical costs are preserved when the product cost changes.
@@ -60,6 +73,15 @@ export default async function ProductDetailPage({
     { label: t('f.origin'), value: p.origin },
     { label: t('f.price'), value: formatMoney(p.sellingPrice, p.sellingCurrency, locale) },
     { label: t('f.cost'), value: formatMoney(p.cogsPerUnit, p.sellingCurrency, locale) },
+    {
+      label: t('capacity'),
+      value:
+        capacity.producible == null
+          ? '—'
+          : capacity.producible > 0 && limitingName
+            ? `${formatNumber(capacity.producible, locale)} · ${t('limitedBy', { name: limitingName })}`
+            : formatNumber(capacity.producible, locale),
+    },
     {
       label: t('f.status'),
       value: (

@@ -6,6 +6,34 @@ export function currentStock(movements: MovementLike[]): number {
   return movements.reduce((s, m) => s + m.quantity, 0);
 }
 
+export interface RecipeComponent {
+  inventoryItemId: string | null; // null = unlinked (labor/overhead) — doesn't constrain capacity
+  quantity: number; // required per produced unit
+}
+export interface CapacityResult {
+  /** Max whole units producible; null when no linked components (not tracked). */
+  producible: number | null;
+  limiting: string | null; // inventoryItemId of the binding component
+  perComponent: { inventoryItemId: string; available: number; required: number; possible: number }[];
+}
+
+/**
+ * How many units of a product can be produced from current component stock
+ * (§7). The producible quantity is the minimum across linked components; the
+ * limiting component is the one at that minimum. Unlinked rows are ignored.
+ */
+export function productionCapacity(components: RecipeComponent[], stockByItem: Map<string, number>): CapacityResult {
+  const linked = components.filter((c) => c.inventoryItemId && c.quantity > 0);
+  if (!linked.length) return { producible: null, limiting: null, perComponent: [] };
+  const perComponent = linked.map((c) => {
+    const available = stockByItem.get(c.inventoryItemId as string) ?? 0;
+    return { inventoryItemId: c.inventoryItemId as string, available, required: c.quantity, possible: Math.floor(available / c.quantity) };
+  });
+  const producible = Math.min(...perComponent.map((p) => p.possible));
+  const limiting = perComponent.find((p) => p.possible === producible)?.inventoryItemId ?? null;
+  return { producible, limiting, perComponent };
+}
+
 /** Opening / additions / deductions / closing over a window. */
 export function openingClosing(
   movements: MovementLike[],

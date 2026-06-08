@@ -7,6 +7,7 @@ import {
   reorderAlerts,
   nearExpiry,
   stockValueByCategory,
+  productionCapacity,
 } from '@/lib/metrics/inventory';
 import { makeItem, makeMovement } from '../fixtures/builders';
 
@@ -85,5 +86,28 @@ describe('inventory metrics', () => {
     expect(vals.find((v) => v.category === 'ROASTED')!.value).toBe(1_000);
     // sorted descending
     expect(vals[0].category).toBe('GREEN_COFFEE');
+  });
+
+  it('productionCapacity = min producible across linked components (§7)', () => {
+    const stock = new Map([
+      ['beans', 10_000], // 250g each → 40
+      ['bags', 1_000], //   1 each → 1000
+      ['labels', 35], //    1 each → 35 (limiting)
+    ]);
+    const cap = productionCapacity(
+      [
+        { inventoryItemId: 'beans', quantity: 250 },
+        { inventoryItemId: 'bags', quantity: 1 },
+        { inventoryItemId: 'labels', quantity: 1 },
+        { inventoryItemId: null, quantity: 1 }, // labor — ignored
+      ],
+      stock,
+    );
+    expect(cap.producible).toBe(35);
+    expect(cap.limiting).toBe('labels');
+  });
+
+  it('productionCapacity is null when no linked components', () => {
+    expect(productionCapacity([{ inventoryItemId: null, quantity: 1 }], new Map()).producible).toBeNull();
   });
 });
