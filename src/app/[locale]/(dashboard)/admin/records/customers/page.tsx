@@ -1,14 +1,23 @@
 import { getTranslations } from 'next-intl/server';
+import type { Prisma } from '@prisma/client';
 import { getPageContext } from '@/server/page-context';
 import { prisma } from '@/server/db/client';
-import { enumLabel } from '@/lib/enums';
+import { enumLabel, CUSTOMER_SEGMENTS } from '@/lib/enums';
 import { formatNumber } from '@/lib/money';
 import { PageHeader } from '@/components/ui/primitives';
 import { DataTable, type Column } from '@/components/data-table/DataTable';
 import { RecordsSummary, type SummaryStat } from '@/components/records/Summary';
+import { TableToolbar } from '@/components/records/TableToolbar';
 import { Plus } from 'lucide-react';
 import { BackLink } from '@/components/records/parts';
 import { Link } from '@/i18n/navigation';
+
+const CUSTOMER_SORTS: Record<string, Prisma.CustomerOrderByWithRelationInput> = {
+  ordersDesc: { ordersCount: 'desc' },
+  newest: { createdAt: 'desc' },
+  oldest: { createdAt: 'asc' },
+  nameAsc: { nameEn: 'asc' },
+};
 
 export default async function CustomersRecordsPage({
   params,
@@ -19,15 +28,41 @@ export default async function CustomersRecordsPage({
 }) {
   const { locale } = await getPageContext(params, searchParams, 'manage:customers');
   const t = await getTranslations('records');
-  const customers = await prisma.customer.findMany({ orderBy: { ordersCount: 'desc' } });
+  const sp = await searchParams;
+  const q = typeof sp.q === 'string' ? sp.q.trim() : '';
+  const segment = typeof sp.segment === 'string' ? sp.segment : '';
+  const sort = typeof sp.sort === 'string' ? sp.sort : '';
 
-  const withOrders = customers.filter((c) => c.ordersCount > 0).length;
-  const repeat = customers.filter((c) => c.ordersCount > 1).length;
+  const where: Prisma.CustomerWhereInput = {
+    AND: [
+      q
+        ? {
+            OR: [
+              { nameEn: { contains: q, mode: 'insensitive' } },
+              { nameAr: { contains: q, mode: 'insensitive' } },
+              { phone: { contains: q, mode: 'insensitive' } },
+              { externalId: { contains: q, mode: 'insensitive' } },
+            ],
+          }
+        : {},
+      segment ? { segment: segment as (typeof CUSTOMER_SEGMENTS)[number] } : {},
+    ],
+  };
+
+  const [total, withOrders, repeat, customers] = await Promise.all([
+    prisma.customer.count(),
+    prisma.customer.count({ where: { ordersCount: { gt: 0 } } }),
+    prisma.customer.count({ where: { ordersCount: { gt: 1 } } }),
+    prisma.customer.findMany({ where, orderBy: CUSTOMER_SORTS[sort] ?? CUSTOMER_SORTS.ordersDesc, take: 500 }),
+  ]);
+
   const stats: SummaryStat[] = [
-    { label: t('k.total'), value: formatNumber(customers.length, locale) },
+    { label: t('k.total'), value: formatNumber(total, locale) },
     { label: t('k.withOrders'), value: formatNumber(withOrders, locale), tone: 'success' },
     { label: t('k.repeat'), value: formatNumber(repeat, locale) },
   ];
+  const sortOpts = ['ordersDesc', 'newest', 'oldest', 'nameAsc'].map((v) => ({ value: v, label: t(`tools.${v}`) }));
+  const segmentOpts = CUSTOMER_SEGMENTS.map((s) => ({ value: s, label: enumLabel(s, locale) }));
 
   const cols: Column[] = [
     { label: t('f.externalId') },
@@ -67,6 +102,12 @@ export default async function CustomersRecordsPage({
         </Link>
       </div>
       <RecordsSummary stats={stats} />
+      <TableToolbar
+        searchPlaceholder={t('tools.search')}
+        filters={[{ name: 'segment', label: t('f.segment'), options: segmentOpts }]}
+        sorts={sortOpts}
+        sortLabel={t('tools.sort')}
+      />
       <DataTable columns={cols} rows={rows} emptyLabel={t('none')} />
     </>
   );

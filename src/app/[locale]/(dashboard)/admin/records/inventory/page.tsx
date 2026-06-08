@@ -1,11 +1,12 @@
 import { getTranslations } from 'next-intl/server';
 import { getPageContext } from '@/server/page-context';
 import { prisma } from '@/server/db/client';
-import { enumLabel } from '@/lib/enums';
+import { enumLabel, INVENTORY_CATEGORIES } from '@/lib/enums';
 import { formatNumber, formatMoney } from '@/lib/money';
 import { PageHeader } from '@/components/ui/primitives';
 import { DataTable, type Column } from '@/components/data-table/DataTable';
 import { RecordsSummary, type SummaryStat } from '@/components/records/Summary';
+import { TableToolbar } from '@/components/records/TableToolbar';
 import { Plus } from 'lucide-react';
 import { BackLink } from '@/components/records/parts';
 import { Link } from '@/i18n/navigation';
@@ -33,6 +34,24 @@ export default async function InventoryRecordsPage({
     { label: t('k.reorder'), value: formatNumber(reorderCount, locale), tone: reorderCount > 0 ? 'danger' : 'default' },
   ];
 
+  // Inventory is small and stock is computed in JS, so filter/sort in memory.
+  const sp = await searchParams;
+  const q = (typeof sp.q === 'string' ? sp.q.trim() : '').toLowerCase();
+  const cat = typeof sp.category === 'string' ? sp.category : '';
+  const sort = typeof sp.sort === 'string' ? sp.sort : '';
+  const visible = items
+    .filter((it) => {
+      const name = `${it.nameEn ?? ''} ${it.nameAr ?? ''}`.toLowerCase();
+      return (!q || name.includes(q)) && (!cat || it.category === cat);
+    })
+    .sort((a, b) => {
+      if (sort === 'nameAsc') return (a.nameEn ?? '').localeCompare(b.nameEn ?? '');
+      if (sort === 'stockDesc') return currentStock(b) - currentStock(a);
+      return 0;
+    });
+  const sortOpts = ['nameAsc', 'stockDesc'].map((v) => ({ value: v, label: t(`tools.${v}`) }));
+  const catOpts = INVENTORY_CATEGORIES.map((c) => ({ value: c, label: enumLabel(c, locale) }));
+
   const cols: Column[] = [
     { label: t('f.item') },
     { label: t('f.category') },
@@ -41,7 +60,7 @@ export default async function InventoryRecordsPage({
     { label: '', align: 'end' },
   ];
 
-  const rows = items.map((it) => {
+  const rows = visible.map((it) => {
     const name = locale === 'ar' ? it.nameAr : it.nameEn;
     const current = it.movements.reduce((s, m) => s + m.quantity, 0);
     return [
@@ -69,6 +88,12 @@ export default async function InventoryRecordsPage({
         </Link>
       </div>
       <RecordsSummary stats={stats} />
+      <TableToolbar
+        searchPlaceholder={t('tools.search')}
+        filters={[{ name: 'category', label: t('f.category'), options: catOpts }]}
+        sorts={sortOpts}
+        sortLabel={t('tools.sort')}
+      />
       <DataTable columns={cols} rows={rows} emptyLabel={t('none')} />
     </>
   );

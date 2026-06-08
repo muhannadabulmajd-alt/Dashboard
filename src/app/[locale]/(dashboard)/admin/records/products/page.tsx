@@ -1,14 +1,23 @@
 import { getTranslations } from 'next-intl/server';
+import type { Prisma } from '@prisma/client';
 import { getPageContext } from '@/server/page-context';
 import { prisma } from '@/server/db/client';
-import { enumLabel } from '@/lib/enums';
+import { enumLabel, PRODUCT_LINES } from '@/lib/enums';
 import { formatMoney, formatNumber } from '@/lib/money';
 import { Badge, PageHeader } from '@/components/ui/primitives';
 import { DataTable, type Column } from '@/components/data-table/DataTable';
 import { RecordsSummary, type SummaryStat } from '@/components/records/Summary';
+import { TableToolbar } from '@/components/records/TableToolbar';
 import { Plus } from 'lucide-react';
 import { BackLink } from '@/components/records/parts';
 import { Link } from '@/i18n/navigation';
+
+const PRODUCT_SORTS: Record<string, Prisma.ProductOrderByWithRelationInput> = {
+  skuAsc: { sku: 'asc' },
+  nameAsc: { nameEn: 'asc' },
+  amountDesc: { sellingPrice: 'desc' },
+  amountAsc: { sellingPrice: 'asc' },
+};
 
 export default async function ProductsRecordsPage({
   params,
@@ -19,14 +28,38 @@ export default async function ProductsRecordsPage({
 }) {
   const { locale } = await getPageContext(params, searchParams, 'manage:products');
   const t = await getTranslations('records');
-  const products = await prisma.product.findMany({ orderBy: { sku: 'asc' } });
+  const sp = await searchParams;
+  const q = typeof sp.q === 'string' ? sp.q.trim() : '';
+  const line = typeof sp.line === 'string' ? sp.line : '';
+  const sort = typeof sp.sort === 'string' ? sp.sort : '';
 
-  const active = products.filter((p) => p.isActive).length;
+  const where: Prisma.ProductWhereInput = {
+    AND: [
+      q
+        ? {
+            OR: [
+              { sku: { contains: q, mode: 'insensitive' } },
+              { nameEn: { contains: q, mode: 'insensitive' } },
+              { nameAr: { contains: q, mode: 'insensitive' } },
+            ],
+          }
+        : {},
+      line ? { productLine: line as (typeof PRODUCT_LINES)[number] } : {},
+    ],
+  };
+
+  const [total, active, products] = await Promise.all([
+    prisma.product.count(),
+    prisma.product.count({ where: { isActive: true } }),
+    prisma.product.findMany({ where, orderBy: PRODUCT_SORTS[sort] ?? PRODUCT_SORTS.skuAsc, take: 500 }),
+  ]);
   const stats: SummaryStat[] = [
-    { label: t('k.total'), value: formatNumber(products.length, locale) },
+    { label: t('k.total'), value: formatNumber(total, locale) },
     { label: t('k.active'), value: formatNumber(active, locale), tone: 'success' },
-    { label: t('k.inactive'), value: formatNumber(products.length - active, locale), tone: 'warning' },
+    { label: t('k.inactive'), value: formatNumber(total - active, locale), tone: 'warning' },
   ];
+  const sortOpts = ['nameAsc', 'amountDesc', 'amountAsc'].map((v) => ({ value: v, label: t(`tools.${v}`) }));
+  const lineOpts = PRODUCT_LINES.map((l) => ({ value: l, label: enumLabel(l, locale) }));
 
   const cols: Column[] = [
     { label: t('f.sku') },
@@ -65,6 +98,12 @@ export default async function ProductsRecordsPage({
         </Link>
       </div>
       <RecordsSummary stats={stats} />
+      <TableToolbar
+        searchPlaceholder={t('tools.search')}
+        filters={[{ name: 'line', label: t('f.productLine'), options: lineOpts }]}
+        sorts={sortOpts}
+        sortLabel={t('tools.sort')}
+      />
       <DataTable columns={cols} rows={rows} emptyLabel={t('none')} />
     </>
   );
