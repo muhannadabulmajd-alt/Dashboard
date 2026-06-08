@@ -11,6 +11,7 @@ import {
   INVENTORY_CATEGORIES,
   CURRENCIES,
   EXPENSE_CATEGORY_TYPES,
+  SHIPMENT_STATUSES,
 } from '@/lib/enums';
 
 export type ImportDataset =
@@ -20,7 +21,8 @@ export type ImportDataset =
   | 'batches'
   | 'inventory'
   | 'purchases'
-  | 'capital';
+  | 'capital'
+  | 'shipments';
 
 export interface RowError {
   row: number;
@@ -457,6 +459,51 @@ const capitalSchema = z
 
 export const parseCapital = (rows: Raw[]) => parseEach(rows, capitalSchema);
 
+// --- Shipments (courier delivery report) ------------------------------------
+
+export interface ShipmentInput {
+  orderNumber: string;
+  courier?: string;
+  status: (typeof SHIPMENT_STATUSES)[number];
+  governorate?: (typeof GOVERNORATES)[number];
+  shippingCost: number;
+  dispatchedAt?: Date;
+  deliveredAt?: Date;
+  failureReason?: string;
+}
+
+// Courier reports describe the delivery lifecycle in their own words (Arabic and
+// English). Normalize to the Shipment status enum; anything unknown stays as-is
+// and is rejected so it surfaces in the error report rather than silently wrong.
+const SHIPMENT_STATUS_ALIASES: Record<string, (typeof SHIPMENT_STATUSES)[number]> = {
+  DELIVERED: 'DELIVERED', DONE: 'DELIVERED', COMPLETED: 'DELIVERED', SUCCESS: 'DELIVERED',
+  DISPATCHED: 'DISPATCHED', SENT: 'DISPATCHED', SHIPPED: 'DISPATCHED', PICKED_UP: 'DISPATCHED',
+  IN_TRANSIT: 'IN_TRANSIT', OUT_FOR_DELIVERY: 'IN_TRANSIT', ON_THE_WAY: 'IN_TRANSIT',
+  PROCESSING: 'IN_TRANSIT', AT_WAREHOUSE: 'IN_TRANSIT',
+  FAILED: 'FAILED', CANCELLED: 'FAILED', CANCELED: 'FAILED', POSTPONED: 'FAILED', REJECTED: 'FAILED',
+  RETURNED: 'RETURNED', RETURN: 'RETURNED',
+};
+const shipStatusField = z.preprocess((v) => {
+  if (typeof v !== 'string' || v.trim() === '') return 'DISPATCHED';
+  const up = normEnum(v);
+  return SHIPMENT_STATUS_ALIASES[up] ?? up;
+}, z.enum(SHIPMENT_STATUSES));
+
+const shipmentSchema = z
+  .object({
+    orderNumber: z.string().min(1),
+    courier: optStr,
+    status: shipStatusField,
+    governorate: optGovernorate,
+    shippingCost: optMoney0,
+    dispatchedAt: optDate,
+    deliveredAt: optDate,
+    failureReason: optStr,
+  })
+  .transform((r): ShipmentInput => ({ ...r, orderNumber: r.orderNumber.trim() }));
+
+export const parseShipments = (rows: Raw[]) => parseEach(rows, shipmentSchema);
+
 // --- Orders (one CSV row per order line) ------------------------------------
 
 export interface OrderLineInput {
@@ -557,6 +604,10 @@ export const TEMPLATES: Record<ImportDataset, { headers: string[]; example: stri
     headers: ['shareholder', 'amount', 'date', 'currency', 'reference'],
     example: ['مهند منجد', '1000000', '2026-01-15', 'IQD', 'DOC000149'],
   },
+  shipments: {
+    headers: ['orderNumber', 'courier', 'status', 'governorate', 'shippingCost', 'dispatchedAt', 'deliveredAt', 'failureReason'],
+    example: ['LH-O-90001', 'سما السندباد', 'DELIVERED', 'BAGHDAD', '5000', '2026-06-01', '2026-06-03', ''],
+  },
 };
 
 export const IMPORT_DATASETS: ImportDataset[] = [
@@ -567,4 +618,5 @@ export const IMPORT_DATASETS: ImportDataset[] = [
   'inventory',
   'purchases',
   'capital',
+  'shipments',
 ];

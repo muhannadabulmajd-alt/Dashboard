@@ -508,7 +508,8 @@
       "batches": "Roast batches",
       "inventory": "Inventory",
       "purchases": "Purchases (finance)",
-      "capital": "Shareholder capital"
+      "capital": "Shareholder capital",
+      "shipments": "Shipments (courier)"
     },
     "inserted": "Inserted",
     "updated": "Updated",
