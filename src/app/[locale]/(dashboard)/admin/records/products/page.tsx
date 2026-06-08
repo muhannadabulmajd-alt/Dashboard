@@ -2,9 +2,10 @@ import { getTranslations } from 'next-intl/server';
 import { getPageContext } from '@/server/page-context';
 import { prisma } from '@/server/db/client';
 import { enumLabel } from '@/lib/enums';
-import { formatMoney } from '@/lib/money';
+import { formatMoney, formatNumber } from '@/lib/money';
 import { Badge, PageHeader } from '@/components/ui/primitives';
 import { DataTable, type Column } from '@/components/data-table/DataTable';
+import { RecordsSummary, type SummaryStat } from '@/components/records/Summary';
 import { Plus } from 'lucide-react';
 import { BackLink } from '@/components/records/parts';
 import { Link } from '@/i18n/navigation';
@@ -19,6 +20,13 @@ export default async function ProductsRecordsPage({
   const { locale } = await getPageContext(params, searchParams, 'manage:products');
   const t = await getTranslations('records');
   const products = await prisma.product.findMany({ orderBy: { sku: 'asc' } });
+
+  const active = products.filter((p) => p.isActive).length;
+  const stats: SummaryStat[] = [
+    { label: t('k.total'), value: formatNumber(products.length, locale) },
+    { label: t('k.active'), value: formatNumber(active, locale), tone: 'success' },
+    { label: t('k.inactive'), value: formatNumber(products.length - active, locale), tone: 'warning' },
+  ];
 
   const cols: Column[] = [
     { label: t('f.sku') },
@@ -56,6 +64,7 @@ export default async function ProductsRecordsPage({
           {t('add')}
         </Link>
       </div>
+      <RecordsSummary stats={stats} />
       <DataTable columns={cols} rows={rows} emptyLabel={t('none')} />
     </>
   );

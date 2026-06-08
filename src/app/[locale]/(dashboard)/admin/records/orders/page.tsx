@@ -2,9 +2,10 @@ import { getTranslations } from 'next-intl/server';
 import { getPageContext } from '@/server/page-context';
 import { prisma } from '@/server/db/client';
 import { enumLabel } from '@/lib/enums';
-import { formatMoney } from '@/lib/money';
+import { formatMoney, formatNumber } from '@/lib/money';
 import { Badge, PageHeader } from '@/components/ui/primitives';
 import { DataTable, type Column } from '@/components/data-table/DataTable';
+import { RecordsSummary, type SummaryStat } from '@/components/records/Summary';
 import { BackLink } from '@/components/records/parts';
 import { Link } from '@/i18n/navigation';
 import { formatDate } from '@/lib/dates';
@@ -35,6 +36,19 @@ export default async function OrdersRecordsPage({
 
   const customerName = (c: typeof orders[number]['customer']) =>
     (locale === 'ar' ? c?.nameAr : c?.nameEn) || c?.nameEn || c?.nameAr || c?.externalId || '—';
+
+  // Summary strip: status mix + realized revenue, so the page reads at a glance.
+  const count = (s: string) => orders.filter((o) => o.status === s).length;
+  const netRevenue = orders
+    .filter((o) => o.status !== 'CANCELLED' && o.status !== 'PENDING')
+    .reduce((sum, o) => sum + (o.grossAmount - o.discountAmount - o.refundAmount), 0);
+  const stats: SummaryStat[] = [
+    { label: t('k.total'), value: formatNumber(orders.length, locale) },
+    { label: enumLabel('COMPLETED', locale), value: formatNumber(count('COMPLETED'), locale), tone: 'success' },
+    { label: enumLabel('PENDING', locale), value: formatNumber(count('PENDING'), locale), tone: 'warning' },
+    { label: enumLabel('CANCELLED', locale), value: formatNumber(count('CANCELLED'), locale), tone: 'danger' },
+    { label: t('k.revenue'), value: formatMoney(netRevenue, 'IQD', locale) },
+  ];
 
   const cols: Column[] = [
     { label: t('f.orderNumber') },
@@ -86,6 +100,7 @@ export default async function OrdersRecordsPage({
           {t('add')}
         </Link>
       </div>
+      <RecordsSummary stats={stats} />
       <DataTable columns={cols} rows={rows} emptyLabel={t('none')} />
     </>
   );

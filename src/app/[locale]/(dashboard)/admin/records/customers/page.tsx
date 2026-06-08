@@ -2,8 +2,10 @@ import { getTranslations } from 'next-intl/server';
 import { getPageContext } from '@/server/page-context';
 import { prisma } from '@/server/db/client';
 import { enumLabel } from '@/lib/enums';
+import { formatNumber } from '@/lib/money';
 import { PageHeader } from '@/components/ui/primitives';
 import { DataTable, type Column } from '@/components/data-table/DataTable';
+import { RecordsSummary, type SummaryStat } from '@/components/records/Summary';
 import { Plus } from 'lucide-react';
 import { BackLink } from '@/components/records/parts';
 import { Link } from '@/i18n/navigation';
@@ -18,6 +20,14 @@ export default async function CustomersRecordsPage({
   const { locale } = await getPageContext(params, searchParams, 'manage:customers');
   const t = await getTranslations('records');
   const customers = await prisma.customer.findMany({ orderBy: { ordersCount: 'desc' } });
+
+  const withOrders = customers.filter((c) => c.ordersCount > 0).length;
+  const repeat = customers.filter((c) => c.ordersCount > 1).length;
+  const stats: SummaryStat[] = [
+    { label: t('k.total'), value: formatNumber(customers.length, locale) },
+    { label: t('k.withOrders'), value: formatNumber(withOrders, locale), tone: 'success' },
+    { label: t('k.repeat'), value: formatNumber(repeat, locale) },
+  ];
 
   const cols: Column[] = [
     { label: t('f.name') },
@@ -54,6 +64,7 @@ export default async function CustomersRecordsPage({
           {t('add')}
         </Link>
       </div>
+      <RecordsSummary stats={stats} />
       <DataTable columns={cols} rows={rows} emptyLabel={t('none')} />
     </>
   );

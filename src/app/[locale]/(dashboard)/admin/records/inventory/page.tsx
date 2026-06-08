@@ -2,9 +2,10 @@ import { getTranslations } from 'next-intl/server';
 import { getPageContext } from '@/server/page-context';
 import { prisma } from '@/server/db/client';
 import { enumLabel } from '@/lib/enums';
-import { formatNumber } from '@/lib/money';
+import { formatNumber, formatMoney } from '@/lib/money';
 import { PageHeader } from '@/components/ui/primitives';
 import { DataTable, type Column } from '@/components/data-table/DataTable';
+import { RecordsSummary, type SummaryStat } from '@/components/records/Summary';
 import { Plus } from 'lucide-react';
 import { BackLink } from '@/components/records/parts';
 import { Link } from '@/i18n/navigation';
@@ -22,6 +23,15 @@ export default async function InventoryRecordsPage({
     orderBy: { category: 'asc' },
     include: { movements: { select: { quantity: true } } },
   });
+
+  const currentStock = (it: (typeof items)[number]) => it.movements.reduce((s, m) => s + m.quantity, 0);
+  const stockValue = items.reduce((s, it) => s + currentStock(it) * (it.unitCost ?? 0), 0);
+  const reorderCount = items.filter((it) => it.reorderPoint != null && currentStock(it) < it.reorderPoint).length;
+  const stats: SummaryStat[] = [
+    { label: t('k.total'), value: formatNumber(items.length, locale) },
+    { label: t('k.stockValue'), value: formatMoney(stockValue, 'IQD', locale) },
+    { label: t('k.reorder'), value: formatNumber(reorderCount, locale), tone: reorderCount > 0 ? 'danger' : 'default' },
+  ];
 
   const cols: Column[] = [
     { label: t('f.item') },
@@ -58,6 +68,7 @@ export default async function InventoryRecordsPage({
           {t('add')}
         </Link>
       </div>
+      <RecordsSummary stats={stats} />
       <DataTable columns={cols} rows={rows} emptyLabel={t('none')} />
     </>
   );

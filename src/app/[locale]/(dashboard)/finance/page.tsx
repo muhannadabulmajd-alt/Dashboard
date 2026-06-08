@@ -264,7 +264,11 @@ export default async function FinancePage({
             <BarChartCard title={t('topSuppliers')} data={topParties} locale={locale} valueKind="iqd" horizontal />
           ) : null}
         </section>
-      ) : null}
+      ) : (
+        <div className="rounded-[var(--radius)] border border-dashed bg-card p-6 text-center text-sm text-muted-foreground">
+          {t('noSpend')}
+        </div>
+      )}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {cards.map(({ href, key, Icon }) => (

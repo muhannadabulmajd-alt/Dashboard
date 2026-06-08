@@ -3,10 +3,11 @@ import { getPageContext } from '@/server/page-context';
 import { prisma } from '@/server/db/client';
 import { Badge, PageHeader } from '@/components/ui/primitives';
 import { DataTable, type Column } from '@/components/data-table/DataTable';
+import { RecordsSummary, type SummaryStat } from '@/components/records/Summary';
 import { Plus } from 'lucide-react';
 import { BackLink } from '@/components/records/parts';
 import { Link } from '@/i18n/navigation';
-import { formatNumber } from '@/lib/money';
+import { formatNumber, formatPercent } from '@/lib/money';
 import { formatDate } from '@/lib/dates';
 
 export default async function BatchesRecordsPage({
@@ -19,6 +20,16 @@ export default async function BatchesRecordsPage({
   const { locale } = await getPageContext(params, searchParams, 'manage:batches');
   const t = await getTranslations('records');
   const batches = await prisma.roastBatch.findMany({ orderBy: { batchNumber: 'asc' } });
+
+  const roastedBatches = batches.filter((b) => b.roastedOutputGrams != null);
+  const outputKg = roastedBatches.reduce((s, b) => s + (b.roastedOutputGrams ?? 0), 0) / 1000;
+  const stats: SummaryStat[] = [
+    { label: t('k.total'), value: formatNumber(batches.length, locale) },
+    { label: t('f.roasted'), value: formatNumber(roastedBatches.length, locale), tone: 'success' },
+    { label: t('f.pending'), value: formatNumber(batches.length - roastedBatches.length, locale), tone: 'warning' },
+    { label: t('k.completion'), value: formatPercent(batches.length ? roastedBatches.length / batches.length : 0, locale, 0) },
+    { label: t('k.output'), value: `${formatNumber(outputKg, locale, 1)} kg` },
+  ];
 
   const cols: Column[] = [
     { label: t('f.batchNumber') },
@@ -58,6 +69,7 @@ export default async function BatchesRecordsPage({
           {t('add')}
         </Link>
       </div>
+      <RecordsSummary stats={stats} />
       <DataTable columns={cols} rows={rows} emptyLabel={t('none')} />
     </>
   );
