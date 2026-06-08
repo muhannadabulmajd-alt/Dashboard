@@ -65,9 +65,22 @@ export async function updateProduct(
   if (!r.success) return { error: 'invalid' };
   const locale = reqField(fd, 'locale') || 'ar';
   // SKU is the permanent key — immutable after creation (CR-5).
-  const { sku: _immutable, ...data } = r.data;
+  const { sku, ...data } = r.data;
+  // Record cost/price changes for the cost-history view (CR-3). Past orders keep
+  // their own COGS snapshot, so this only affects future transactions.
+  const before = await prisma.product.findUnique({ where: { id }, select: { cogsPerUnit: true, sellingPrice: true } });
   await prisma.product.update({ where: { id }, data });
   await audit(user.id, 'UPDATE', 'Product', { id });
+  if (before && (before.cogsPerUnit !== data.cogsPerUnit || before.sellingPrice !== data.sellingPrice)) {
+    await audit(user.id, 'COST_CHANGE', 'Product', {
+      id,
+      sku,
+      cogsFrom: before.cogsPerUnit,
+      cogsTo: data.cogsPerUnit,
+      priceFrom: before.sellingPrice,
+      priceTo: data.sellingPrice,
+    });
+  }
   revalidatePath(LIST, 'page');
   redirect(`/${locale}/admin/records/products/${id}`);
 }

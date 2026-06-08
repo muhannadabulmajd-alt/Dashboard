@@ -3,8 +3,10 @@ import { getTranslations } from 'next-intl/server';
 import { getPageContext } from '@/server/page-context';
 import { prisma } from '@/server/db/client';
 import { enumLabel } from '@/lib/enums';
-import { formatMoney } from '@/lib/money';
+import { formatMoney, formatNumber } from '@/lib/money';
+import { formatDate } from '@/lib/dates';
 import { Badge, PageHeader } from '@/components/ui/primitives';
+import { DataTable, type Column } from '@/components/data-table/DataTable';
 import { BackLink, DetailGrid, type DetailField } from '@/components/records/parts';
 import { RecordActions } from '@/components/records/RecordActions';
 import { archiveProduct, deleteProduct } from '@/server/records/products';
@@ -21,6 +23,26 @@ export default async function ProductDetailPage({
   const t = await getTranslations('records');
   const p = await prisma.product.findUnique({ where: { id } });
   if (!p) notFound();
+
+  // Effective cost history (CR-3): the COGS snapshots actually applied to past
+  // orders, proving historical costs are preserved when the product cost changes.
+  const lines = await prisma.orderLine.findMany({
+    where: { productId: id },
+    select: { unitCogsSnapshot: true, order: { select: { placedAt: true } } },
+  });
+  const costMap = new Map<number, { cost: number; count: number; first: Date; last: Date }>();
+  for (const l of lines) {
+    const d = l.order.placedAt;
+    const e = costMap.get(l.unitCogsSnapshot);
+    if (e) {
+      e.count += 1;
+      if (d < e.first) e.first = d;
+      if (d > e.last) e.last = d;
+    } else {
+      costMap.set(l.unitCogsSnapshot, { cost: l.unitCogsSnapshot, count: 1, first: d, last: d });
+    }
+  }
+  const history = [...costMap.values()].sort((a, b) => b.last.getTime() - a.last.getTime());
 
   const name = locale === 'ar' ? p.nameAr : p.nameEn;
   const items: DetailField[] = [
@@ -59,6 +81,28 @@ export default async function ProductDetailPage({
         }}
       />
       <DetailGrid items={items} />
+
+      <div className="mt-4 space-y-2">
+        <h3 className="text-sm font-semibold">{t('costHistory')}</h3>
+        <p className="text-xs text-muted-foreground">{t('costHistoryHint')}</p>
+        <DataTable
+          columns={
+            [
+              { label: t('f.cost'), align: 'end' },
+              { label: t('f.ordersCount'), align: 'end' },
+              { label: t('f.firstUsed') },
+              { label: t('f.lastUsed') },
+            ] as Column[]
+          }
+          rows={history.map((h) => [
+            formatMoney(h.cost, p.sellingCurrency, locale),
+            formatNumber(h.count, locale),
+            formatDate(h.first, locale),
+            formatDate(h.last, locale),
+          ])}
+          emptyLabel={t('none')}
+        />
+      </div>
     </>
   );
 }

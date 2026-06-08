@@ -103,6 +103,8 @@
     "search": "Search",
     "total": "{n} records",
     "none": "Nothing here yet.",
+    "costHistory": "Cost history",
+    "costHistoryHint": "The cost applied to past orders is preserved. Changing the product cost only affects future orders.",
     "k": {
       "total": "Total",
       "revenue": "Net revenue",
@@ -193,6 +195,7 @@
       "active": "Active", "inactive": "Archived",
       "externalId": "ID", "phone": "Phone", "email": "Email", "governorate": "Governorate",
       "segment": "Segment", "ordersCount": "Orders", "firstOrder": "First order", "lastOrder": "Last order",
+      "firstUsed": "First used", "lastUsed": "Last used",
       "campaign": "Source",
       "orderNumber": "Order #", "date": "Date", "customer": "Customer", "channel": "Channel",
       "fulfillment": "Fulfillment", "gross": "Gross", "discount": "Discount", "net": "Net",

@@ -103,6 +103,8 @@
     "search": "بحث",
     "total": "{n} سجل",
     "none": "لا توجد سجلات بعد.",
+    "costHistory": "سجل التكلفة",
+    "costHistoryHint": "التكلفة المطبّقة على الطلبات السابقة محفوظة. تغيير تكلفة المنتج يؤثر على الطلبات المستقبلية فقط.",
     "k": {
       "total": "الإجمالي",
       "revenue": "صافي الإيراد",
@@ -193,6 +195,7 @@
       "active": "نشط", "inactive": "مؤرشف",
       "externalId": "المعرّف", "phone": "الهاتف", "email": "البريد", "governorate": "المحافظة",
       "segment": "الشريحة", "ordersCount": "الطلبات", "firstOrder": "أول طلب", "lastOrder": "آخر طلب",
+      "firstUsed": "أول استخدام", "lastUsed": "آخر استخدام",
       "campaign": "المصدر",
       "orderNumber": "رقم الطلب", "date": "التاريخ", "customer": "العميل", "channel": "القناة",
       "fulfillment": "التسليم", "gross": "الإجمالي", "discount": "الخصم", "net": "الصافي",
