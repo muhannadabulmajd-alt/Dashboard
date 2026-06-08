@@ -187,6 +187,7 @@
       "fulfillment": "التسليم", "gross": "الإجمالي", "discount": "الخصم", "net": "الصافي",
       "deliveryFee": "أجور التوصيل", "deliveryCost": "كلفة التوصيل", "items": "البنود",
       "product": "المنتج", "qty": "الكمية", "unitPrice": "سعر الوحدة", "lineTotal": "إجمالي البند",
+      "subtotal": "المجموع الفرعي", "total": "الإجمالي",
       "item": "الصنف", "category": "التصنيف", "unit": "الوحدة", "currentStock": "الرصيد الحالي",
       "reorderPoint": "حد إعادة الطلب", "avgDailyUsage": "متوسط الاستهلاك اليومي", "unitCost": "كلفة الوحدة",
       "movements": "حركات المخزون", "reason": "السبب", "quantity": "الكمية", "occurredAt": "التاريخ",

@@ -126,40 +126,63 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
   if (!h.success) return { error: 'invalid' };
   const locale = reqField(fd, 'locale') || 'ar';
 
-  const existing = await prisma.order.findUnique({
-    where: { id },
-    select: { grossAmount: true, discountAmount: true, orderNumber: true },
-  });
+  // Full edit (CR-2): the submitted line items replace the existing ones and
+  // every total is recomputed, so reports/invoice stay in sync automatically.
+  let rawLines: unknown;
+  try {
+    rawLines = JSON.parse(reqField(fd, 'lines') || '[]');
+  } catch {
+    return { error: 'nolines' };
+  }
+  const parsedLines = lineSchema.safeParse(rawLines);
+  if (!parsedLines.success || parsedLines.data.length === 0) return { error: 'nolines' };
+
+  const existing = await prisma.order.findUnique({ where: { id }, select: { id: true } });
   if (!existing) return { error: 'notfound' };
-  const dup = await prisma.order.findUnique({
-    where: { orderNumber: h.data.orderNumber },
-    select: { id: true },
-  });
-  if (dup && dup.id !== id) return { error: 'exists' };
 
+  const lineData = [];
+  for (const l of parsedLines.data) {
+    const product = await prisma.product.findUnique({ where: { sku: l.sku }, select: { id: true, cogsPerUnit: true } });
+    if (!product) return { error: 'sku' };
+    lineData.push({
+      productId: product.id,
+      sku: l.sku,
+      quantity: l.quantity,
+      unitGrossPrice: l.unitGrossPrice,
+      lineDiscount: l.lineDiscount,
+      lineNet: l.unitGrossPrice * l.quantity - l.lineDiscount,
+      unitCogsSnapshot: product.cogsPerUnit,
+    });
+  }
   const customer = h.data.customerExternalId
-    ? await prisma.customer.findUnique({
-        where: { externalId: h.data.customerExternalId },
-        select: { id: true },
-      })
+    ? await prisma.customer.findUnique({ where: { externalId: h.data.customerExternalId }, select: { id: true } })
     : null;
+  const gross = lineData.reduce((s, l) => s + l.unitGrossPrice * l.quantity, 0);
+  const discount = lineData.reduce((s, l) => s + l.lineDiscount, 0);
 
-  await prisma.order.update({
-    where: { id },
-    data: {
-      orderNumber: h.data.orderNumber,
-      placedAt: h.data.placedAt,
-      customerId: customer?.id ?? null,
-      channel: h.data.channel,
-      governorate: h.data.governorate,
-      fulfillmentMethod: h.data.fulfillmentMethod,
-      status: h.data.status,
-      refundAmount: refundFor(h.data.status, existing.grossAmount, existing.discountAmount),
-      deliveryFee: h.data.deliveryFee,
-      deliveryCost: h.data.deliveryCost,
-    },
-  });
-  await audit(user.id, 'UPDATE', 'Order', { id, orderNumber: h.data.orderNumber });
+  // Replace lines + update header + recompute totals atomically. orderNumber is
+  // immutable (CR-5), so it is never changed here.
+  await prisma.$transaction([
+    prisma.orderLine.deleteMany({ where: { orderId: id } }),
+    prisma.order.update({
+      where: { id },
+      data: {
+        placedAt: h.data.placedAt,
+        customerId: customer?.id ?? null,
+        channel: h.data.channel,
+        governorate: h.data.governorate,
+        fulfillmentMethod: h.data.fulfillmentMethod,
+        status: h.data.status,
+        grossAmount: gross,
+        discountAmount: discount,
+        refundAmount: refundFor(h.data.status, gross, discount),
+        deliveryFee: h.data.deliveryFee,
+        deliveryCost: h.data.deliveryCost,
+        lines: { create: lineData },
+      },
+    }),
+  ]);
+  await audit(user.id, 'UPDATE', 'Order', { id, lines: lineData.length, gross, discount });
   revalidatePath(LIST, 'page');
   redirect(`/${locale}/admin/records/orders/${id}`);
 }

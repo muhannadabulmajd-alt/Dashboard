@@ -32,9 +32,10 @@ export default async function NewOrderPage({
     qty: t('f.qty'),
     unitPrice: t('f.unitPrice'),
     discount: t('f.discount'),
+    subtotal: t('f.subtotal'),
+    total: t('f.total'),
     addLine: t('addLine'),
     removeLine: t('removeLine'),
-    create: t('create'),
     cancel: t('cancel'),
   };
   const errors = {
@@ -59,6 +60,7 @@ export default async function NewOrderPage({
         labels={labels}
         errors={errors}
         cancelHref="/admin/records/orders"
+        submitLabel={t('create')}
       />
     </>
   );

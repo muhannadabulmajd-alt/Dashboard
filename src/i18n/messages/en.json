@@ -187,6 +187,7 @@
       "fulfillment": "Fulfillment", "gross": "Gross", "discount": "Discount", "net": "Net",
       "deliveryFee": "Delivery fee", "deliveryCost": "Delivery cost", "items": "Items",
       "product": "Product", "qty": "Qty", "unitPrice": "Unit price", "lineTotal": "Line total",
+      "subtotal": "Subtotal", "total": "Total",
       "item": "Item", "category": "Category", "unit": "Unit", "currentStock": "Current stock",
       "reorderPoint": "Reorder point", "avgDailyUsage": "Avg daily use", "unitCost": "Unit cost",
       "movements": "Stock movements", "reason": "Reason", "quantity": "Quantity", "occurredAt": "Date",

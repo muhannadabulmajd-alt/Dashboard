@@ -1,12 +1,12 @@
 import { notFound } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { getPageContext } from '@/server/page-context';
+import { enumLabel, CHANNELS, GOVERNORATES, FULFILLMENT_METHODS, ORDER_STATUSES } from '@/lib/enums';
 import { prisma } from '@/server/db/client';
 import { PageHeader } from '@/components/ui/primitives';
-import { RecordForm } from '@/components/records/form';
 import { BackLink } from '@/components/records/parts';
+import { OrderForm, type OrderLineInput } from '@/components/records/OrderForm';
 import { updateOrder } from '@/server/records/orders';
-import { orderFields } from '../../_fields';
 
 export default async function EditOrderPage({
   params,
@@ -18,36 +18,83 @@ export default async function EditOrderPage({
   const { locale } = await getPageContext(params, searchParams, 'manage:orders');
   const { id } = await params;
   const t = await getTranslations('records');
-  const tk = (k: string) => t(k);
-  const o = await prisma.order.findUnique({ where: { id }, include: { customer: true } });
+  const opts = (vals: readonly string[]) => vals.map((v) => ({ value: v, label: enumLabel(v, locale) }));
+
+  const o = await prisma.order.findUnique({
+    where: { id },
+    include: { customer: { select: { externalId: true } }, lines: { orderBy: { id: 'asc' } } },
+  });
   if (!o) notFound();
 
   const initial = {
-    orderNumber: o.orderNumber,
-    placedAt: o.placedAt.toISOString().slice(0, 10),
-    customerExternalId: o.customer?.externalId ?? '',
-    channel: o.channel,
-    governorate: o.governorate,
-    fulfillmentMethod: o.fulfillmentMethod,
-    status: o.status,
-    deliveryFee: o.deliveryFee,
-    deliveryCost: o.deliveryCost,
+    header: {
+      orderNumber: o.orderNumber,
+      placedAt: o.placedAt.toISOString().slice(0, 10),
+      customerExternalId: o.customer?.externalId ?? '',
+      channel: o.channel,
+      governorate: o.governorate,
+      fulfillmentMethod: o.fulfillmentMethod,
+      status: o.status,
+      deliveryFee: String(o.deliveryFee),
+      deliveryCost: String(o.deliveryCost),
+    },
+    lines: o.lines.map(
+      (l): OrderLineInput => ({
+        sku: l.sku,
+        quantity: String(l.quantity),
+        unitGrossPrice: String(l.unitGrossPrice),
+        lineDiscount: String(l.lineDiscount),
+      }),
+    ),
   };
-  const errors = { invalid: t('err.invalid'), exists: t('err.exists'), forbidden: t('err.forbidden') };
+
+  const labels = {
+    orderNumber: t('f.orderNumber'),
+    date: t('f.date'),
+    customer: t('f.customer'),
+    channel: t('f.channel'),
+    governorate: t('f.governorate'),
+    fulfillment: t('f.fulfillment'),
+    status: t('f.status'),
+    deliveryFee: t('f.deliveryFee'),
+    deliveryCost: t('f.deliveryCost'),
+    items: t('f.items'),
+    sku: t('f.sku'),
+    qty: t('f.qty'),
+    unitPrice: t('f.unitPrice'),
+    discount: t('f.discount'),
+    subtotal: t('f.subtotal'),
+    total: t('f.total'),
+    addLine: t('addLine'),
+    removeLine: t('removeLine'),
+    cancel: t('cancel'),
+  };
+  const errors = {
+    invalid: t('err.invalid'),
+    exists: t('err.exists'),
+    forbidden: t('err.forbidden'),
+    sku: t('err.sku'),
+    nolines: t('err.nolines'),
+    notfound: t('err.notfound'),
+  };
 
   return (
     <>
       <BackLink href={`/admin/records/orders/${id}`} label={t('back')} />
       <PageHeader title={t('editTitle', { entity: t('entities.orders') })} subtitle={o.orderNumber} />
-      <RecordForm
+      <OrderForm
         action={updateOrder.bind(null, id)}
-        fields={orderFields(tk, locale)}
-        initial={initial}
         locale={locale}
-        submitLabel={t('save')}
-        cancelHref={`/admin/records/orders/${id}`}
-        cancelLabel={t('cancel')}
+        channelOptions={opts(CHANNELS)}
+        governorateOptions={opts(GOVERNORATES)}
+        fulfillmentOptions={opts(FULFILLMENT_METHODS)}
+        statusOptions={opts(ORDER_STATUSES)}
+        labels={labels}
         errors={errors}
+        cancelHref={`/admin/records/orders/${id}`}
+        initial={initial}
+        submitLabel={t('save')}
+        editing
       />
     </>
   );
