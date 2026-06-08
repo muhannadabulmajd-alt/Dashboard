@@ -547,7 +547,19 @@
     "when": "When",
     "forbidden": "You are not allowed to import data.",
     "invalid": "Choose a valid dataset.",
-    "nofile": "Please choose a CSV file."
+    "nofile": "Please choose a CSV file.",
+    "health": {
+      "title": "Imported finance health",
+      "purchases": "Imported purchases",
+      "capital": "Imported capital",
+      "unassigned": "Not tied to a cash account",
+      "duplicates": "Exact-duplicate rows",
+      "entries": "{n} entries",
+      "clean": "Remove {n} duplicate rows",
+      "confirm": "Remove duplicate imported rows? The earliest of each identical set is kept. This cannot be undone.",
+      "verdictClean": "No duplicate imported rows. The \"Unassigned (imported)\" total is simply imported purchases that aren't tied to a cash account, minus account-less capital — not duplication. Assign those purchases to a cash account from Finance → Ledger, or record the funding capital, to resolve it.",
+      "verdictDupes": "Found exact-duplicate imported rows — usually from mixing manual entry with imports. Removing them keeps the earliest of each identical set."
+    }
   },
   "invoice": {
     "title": "Invoice",
