@@ -6,6 +6,7 @@ import { prisma } from '@/server/db/client';
 import { PageHeader } from '@/components/ui/primitives';
 import { BackLink } from '@/components/records/parts';
 import { OrderForm, type OrderLineInput } from '@/components/records/OrderForm';
+import { getOrderCatalog } from '@/server/records/order-catalog';
 import { updateOrder } from '@/server/records/orders';
 
 export default async function EditOrderPage({
@@ -19,6 +20,7 @@ export default async function EditOrderPage({
   const { id } = await params;
   const t = await getTranslations('records');
   const opts = (vals: readonly string[]) => vals.map((v) => ({ value: v, label: enumLabel(v, locale) }));
+  const catalog = await getOrderCatalog(locale, t('ungrouped'));
 
   const o = await prisma.order.findUnique({
     where: { id },
@@ -63,6 +65,7 @@ export default async function EditOrderPage({
     deliveryCost: t('f.deliveryCost'),
     items: t('f.items'),
     sku: t('f.sku'),
+    variation: t('f.variation'),
     qty: t('f.qty'),
     unitPrice: t('f.unitPrice'),
     discount: t('f.discount'),
@@ -101,6 +104,7 @@ export default async function EditOrderPage({
         initial={initial}
         submitLabel={t('save')}
         editing
+        catalog={catalog}
       />
     </>
   );

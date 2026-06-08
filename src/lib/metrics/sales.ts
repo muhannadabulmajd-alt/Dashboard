@@ -153,6 +153,32 @@ export function topProducts(lines: OrderLineWithProduct[], n = 10): ProductRank[
     .slice(0, n);
 }
 
+/**
+ * Net sales + units rolled up to the parent product group (variations module).
+ * Ungrouped products are reported as their own parent so totals reconcile.
+ */
+export function salesByGroup(
+  lines: OrderLineWithProduct[],
+): { key: string; nameEn: string; nameAr: string; netSales: number; units: number }[] {
+  const map = new Map<string, { nameEn: string; nameAr: string; netSales: number; units: number }>();
+  for (const l of lines) {
+    const p = l.product;
+    const key = p.groupId ?? `prod:${p.id}`;
+    const entry = map.get(key) ?? {
+      nameEn: p.group?.nameEn ?? p.nameEn,
+      nameAr: p.group?.nameAr ?? p.nameAr,
+      netSales: 0,
+      units: 0,
+    };
+    entry.netSales += l.lineNet;
+    entry.units += l.quantity;
+    map.set(key, entry);
+  }
+  return [...map.entries()]
+    .map(([key, v]) => ({ key, ...v }))
+    .sort((a, b) => b.netSales - a.netSales);
+}
+
 /** Slowest movers across the full active catalog (includes zero-sellers). */
 export function slowMovers(
   lines: OrderLineWithProduct[],

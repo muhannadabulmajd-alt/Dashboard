@@ -12,6 +12,8 @@ const disabledInput = 'cursor-not-allowed bg-muted text-muted-foreground';
 type Opt = { value: string; label: string };
 export type OrderLineInput = { sku: string; quantity: string; unitGrossPrice: string; lineDiscount: string };
 export type OrderInitial = { header: Record<string, string>; lines: OrderLineInput[] };
+/** A selectable variation for the order line picker. */
+export type CatalogItem = { sku: string; name: string; group: string; price: number };
 const emptyLine: OrderLineInput = { sku: '', quantity: '1', unitGrossPrice: '0', lineDiscount: '0' };
 
 // Header inputs are defined at module scope so re-renders (line edits) don't
@@ -66,6 +68,7 @@ export function OrderForm({
   initial,
   submitLabel,
   editing,
+  catalog = [],
 }: {
   action: (prev: ActionState, fd: FormData) => Promise<ActionState>;
   locale: string;
@@ -79,9 +82,30 @@ export function OrderForm({
   initial?: OrderInitial;
   submitLabel: string;
   editing?: boolean;
+  catalog?: CatalogItem[];
 }) {
   const [state, formAction, pending] = useActionState<ActionState, FormData>(action, undefined);
   const [lines, setLines] = useState<OrderLineInput[]>(initial?.lines?.length ? initial.lines : [{ ...emptyLine }]);
+
+  // Active variations grouped by parent for the picker (BRD §11–12).
+  const catalogByGroup = useMemo(() => {
+    const m = new Map<string, CatalogItem[]>();
+    for (const c of catalog) {
+      const arr = m.get(c.group) ?? [];
+      arr.push(c);
+      m.set(c.group, arr);
+    }
+    return [...m.entries()];
+  }, [catalog]);
+  const priceBySku = useMemo(() => new Map(catalog.map((c) => [c.sku, c.price])), [catalog]);
+
+  // Selecting a variation fills the SKU and auto-fills its price (overridable).
+  const pickVariation = (i: number, sku: string) =>
+    setLines((ls) =>
+      ls.map((l, idx) =>
+        idx === i ? { ...l, sku, unitGrossPrice: priceBySku.has(sku) ? String(priceBySku.get(sku)) : l.unitGrossPrice } : l,
+      ),
+    );
   const h = initial?.header ?? {};
   // Order-level adjustments are controlled so the live total reflects them.
   const [adj, setAdj] = useState({
@@ -136,8 +160,24 @@ export function OrderForm({
           {lines.map((l, i) => (
             <div key={i} className="grid grid-cols-[2fr_1fr_1fr_1fr_auto] items-end gap-2">
               <div className="flex flex-col gap-1">
-                {i === 0 ? <label className="text-xs text-muted-foreground">{labels.sku}</label> : null}
-                <input value={l.sku} onChange={(e) => setLine(i, 'sku', e.target.value)} className={input} />
+                {i === 0 ? <label className="text-xs text-muted-foreground">{labels.variation ?? labels.sku}</label> : null}
+                {catalog.length ? (
+                  <select value={l.sku} onChange={(e) => pickVariation(i, e.target.value)} className={input}>
+                    <option value="">—</option>
+                    {catalogByGroup.map(([group, items]) => (
+                      <optgroup key={group} label={group}>
+                        {items.map((c) => (
+                          <option key={c.sku} value={c.sku}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                    {l.sku && !priceBySku.has(l.sku) ? <option value={l.sku}>{l.sku}</option> : null}
+                  </select>
+                ) : (
+                  <input value={l.sku} onChange={(e) => setLine(i, 'sku', e.target.value)} className={input} />
+                )}
               </div>
               <div className="flex flex-col gap-1">
                 {i === 0 ? <label className="text-xs text-muted-foreground">{labels.qty}</label> : null}

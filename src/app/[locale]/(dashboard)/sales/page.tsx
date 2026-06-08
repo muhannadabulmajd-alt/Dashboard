@@ -50,6 +50,11 @@ export default async function SalesPage({
     .map((b) => ({ label: enumLabel(b.key, locale), value: b.orders }))
     .sort((a, b) => b.value - a.value);
 
+  // Parent-product (group) revenue — variations rolled up to their parent.
+  const byGroup = M.salesByGroup(lines)
+    .slice(0, 8)
+    .map((g) => ({ label: locale === 'ar' ? g.nameAr : g.nameEn, value: g.netSales }));
+
   const top = M.topProducts(lines, 10);
   const slow = M.slowMovers(lines, catalog, 10);
 
@@ -84,6 +89,12 @@ export default async function SalesPage({
         <LineChartCard title={t('trend')} data={trend} locale={locale} valueKind="iqd" />
         <DonutChartCard title={t('productMix')} data={mix} locale={locale} valueKind="iqd" />
       </section>
+
+      {byGroup.length ? (
+        <section className="grid gap-4 lg:grid-cols-2">
+          <BarChartCard title={t('topGroups')} data={byGroup} locale={locale} valueKind="iqd" horizontal />
+        </section>
+      ) : null}
 
       <section className="grid gap-4 lg:grid-cols-3">
         <BarChartCard title={t('grindPref')} data={byGrind} locale={locale} valueKind="count" />

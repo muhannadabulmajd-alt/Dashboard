@@ -108,6 +108,7 @@
     "none": "Nothing here yet.",
     "costHistory": "Cost history",
     "costHistoryHint": "The cost applied to past orders is preserved. Changing the product cost only affects future orders.",
+    "ungrouped": "Ungrouped",
     "k": {
       "total": "Total",
       "revenue": "Net revenue",
@@ -214,7 +215,7 @@
       "yield": "Yield", "shrinkage": "Shrinkage", "qc": "QC", "qcNotes": "QC notes", "pending": "Pending", "roasted": "Roasted",
       "none": "—", "createdAt": "Added",
       "address1": "Address", "street": "Street / landmark", "notes": "Notes", "source": "Source",
-      "code": "Code", "description": "Description", "variations": "Variations", "group": "Product group"
+      "code": "Code", "description": "Description", "variations": "Variations", "variation": "Variation", "group": "Product group"
     }
   },
   "common": {
@@ -309,6 +310,7 @@
     "byCity": "Sales by city",
     "ordersByCity": "Orders by city",
     "ordersByChannel": "Orders by channel",
+    "topGroups": "Top parent products",
     "topProducts": "Top products",
     "slowMovers": "Slow movers"
   },

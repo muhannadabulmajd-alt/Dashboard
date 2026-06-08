@@ -11,6 +11,7 @@ import {
   avgUnitPrice,
   discountEffect,
   salesByDimension,
+  salesByGroup,
   productMix,
   topProducts,
   slowMovers,
@@ -74,6 +75,18 @@ describe('sales metrics', () => {
     expect(pos.netSales).toBe(50_000);
     // sorted descending by net sales
     expect(byChannel[0].key).toBe('ONLINE_STORE');
+  });
+
+  it('salesByGroup rolls variations up to their parent group', () => {
+    const g = { nameEn: 'Espresso Spring', nameAr: 'إسبريسو سبرنغ' };
+    const lines = [
+      makeLine({ product: makeProduct({ id: 'a', groupId: 'g1', group: g }), quantity: 2, lineNet: 36_000 }),
+      makeLine({ product: makeProduct({ id: 'b', groupId: 'g1', group: g }), quantity: 1, lineNet: 18_000 }),
+      makeLine({ product: makeProduct({ id: 'c', nameEn: 'Solo', nameAr: 'منفرد' }), quantity: 1, lineNet: 5_000 }),
+    ];
+    const r = salesByGroup(lines);
+    expect(r[0]).toMatchObject({ key: 'g1', nameEn: 'Espresso Spring', netSales: 54_000, units: 3 });
+    expect(r[1]).toMatchObject({ key: 'prod:c', nameEn: 'Solo', netSales: 5_000, units: 1 });
   });
 });
 

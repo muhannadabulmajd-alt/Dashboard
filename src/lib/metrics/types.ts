@@ -39,6 +39,8 @@ export interface ProductLite {
   productLine: ProductLine;
   grind: Grind;
   sizeLabel: string;
+  groupId?: string | null; // parent product group (variations module)
+  group?: { nameEn: string; nameAr: string } | null;
 }
 
 export interface OrderLineLike {

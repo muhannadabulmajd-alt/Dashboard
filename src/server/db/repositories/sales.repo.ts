@@ -39,6 +39,8 @@ const lineSelect = {
       productLine: true,
       grind: true,
       sizeLabel: true,
+      groupId: true,
+      group: { select: { nameEn: true, nameAr: true } },
     },
   },
 } as const;

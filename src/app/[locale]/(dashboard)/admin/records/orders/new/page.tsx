@@ -4,6 +4,7 @@ import { enumLabel, CHANNELS, GOVERNORATES, FULFILLMENT_METHODS, ORDER_STATUSES 
 import { PageHeader } from '@/components/ui/primitives';
 import { BackLink } from '@/components/records/parts';
 import { OrderForm } from '@/components/records/OrderForm';
+import { getOrderCatalog } from '@/server/records/order-catalog';
 import { createOrder } from '@/server/records/orders';
 
 export default async function NewOrderPage({
@@ -16,6 +17,7 @@ export default async function NewOrderPage({
   const { locale } = await getPageContext(params, searchParams, 'manage:orders');
   const t = await getTranslations('records');
   const opts = (vals: readonly string[]) => vals.map((v) => ({ value: v, label: enumLabel(v, locale) }));
+  const catalog = await getOrderCatalog(locale, t('ungrouped'));
 
   const labels = {
     orderNumber: t('f.orderNumber'),
@@ -29,6 +31,7 @@ export default async function NewOrderPage({
     deliveryCost: t('f.deliveryCost'),
     items: t('f.items'),
     sku: t('f.sku'),
+    variation: t('f.variation'),
     qty: t('f.qty'),
     unitPrice: t('f.unitPrice'),
     discount: t('f.discount'),
@@ -64,6 +67,7 @@ export default async function NewOrderPage({
         errors={errors}
         cancelHref="/admin/records/orders"
         submitLabel={t('create')}
+        catalog={catalog}
       />
     </>
   );
