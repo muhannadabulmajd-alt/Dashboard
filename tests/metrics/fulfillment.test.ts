@@ -4,6 +4,7 @@ import {
   avgDeliveryDays,
   deliverySlaPct,
   failedDeliveryRate,
+  failedDeliveryCount,
   returnRate,
   courierComparison,
 } from '@/lib/metrics/fulfillment';
@@ -42,6 +43,7 @@ describe('fulfillment metrics', () => {
 
   it('failed rate counts failed + returned over all shipments', () => {
     const shipments = [ship({}), ship({ status: 'FAILED' }), ship({ status: 'RETURNED' }), ship({})];
+    expect(failedDeliveryCount(shipments)).toBe(2);
     expect(failedDeliveryRate(shipments)).toBeCloseTo(0.5, 6);
   });
 

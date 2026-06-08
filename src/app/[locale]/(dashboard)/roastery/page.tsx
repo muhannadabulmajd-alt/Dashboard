@@ -42,6 +42,7 @@ export default async function RoasteryPage({
       .filter((b) => b.roastedOutputGrams != null)
       .map((b) => ({ operatorName: b.operatorName, greenInputGrams: b.greenInputGrams, roastedOutputGrams: b.roastedOutputGrams as number })),
   ).map((o) => ({ label: o.operator, value: o.outputGrams }));
+  const qcDist = M.qcDistribution(batches).map((d) => ({ label: `${d.band}–${d.band + 5}`, value: d.count }));
 
   const cols = [
     { label: t('batchNumber') },
@@ -76,9 +77,10 @@ export default async function RoasteryPage({
         <KpiCard label={t('avgQc')} value={formatNumber(M.avgQcScore(batches), locale, 1)} locale={locale} />
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-2">
+      <section className="grid gap-4 lg:grid-cols-3">
         <DonutChartCard title={t('roastMix')} data={roastMix} locale={locale} valueKind="count" />
         <BarChartCard title={t('operators')} data={operators} locale={locale} valueKind="count" horizontal />
+        <BarChartCard title={t('qcDistribution')} data={qcDist} locale={locale} valueKind="count" />
       </section>
 
       <section className="space-y-2">

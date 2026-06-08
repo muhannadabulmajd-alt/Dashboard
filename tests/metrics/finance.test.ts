@@ -5,6 +5,7 @@ import {
   totalCash,
   netCash,
   unassignedCash,
+  agingBuckets,
   type FinanceEntryLike,
 } from '@/lib/metrics/finance';
 
@@ -75,6 +76,22 @@ describe('finance metrics', () => {
       e({ id: 'spend', type: 'PURCHASE', amount: 3_000_000, accountId: null }),
     ];
     expect(unassignedCash(entries)).toBe(-3_000_000); // only the real account-less purchase
+  });
+
+  it('buckets dues by age (0-30 / 30-60 / 60+)', () => {
+    const asOf = new Date('2026-06-30T00:00:00Z');
+    const b = agingBuckets(
+      [
+        { outstanding: 100, refDate: new Date('2026-06-20T00:00:00Z') }, // 10d → 0-30
+        { outstanding: 200, refDate: new Date('2026-05-20T00:00:00Z') }, // 41d → 30-60
+        { outstanding: 300, refDate: new Date('2026-03-01T00:00:00Z') }, // 121d → 60+
+      ],
+      asOf,
+    );
+    expect(b.d0_30).toBe(100);
+    expect(b.d30_60).toBe(200);
+    expect(b.d60plus).toBe(300);
+    expect(b.total).toBe(600);
   });
 
   it('tracks a receivable and capital + computes totals per slice', () => {

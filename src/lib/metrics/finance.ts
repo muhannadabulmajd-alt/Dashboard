@@ -99,6 +99,32 @@ export function financeTotals(entries: FinanceEntryLike[]): FinanceTotals {
   return t;
 }
 
+export interface AgingInput {
+  outstanding: number; // minor units still owed
+  refDate: Date; // due date (preferred) or the entry date
+}
+
+export interface AgingBuckets {
+  d0_30: number;
+  d30_60: number;
+  d60plus: number;
+  total: number;
+}
+
+/** Bucket outstanding dues by age (days since refDate): 0–30, 30–60, 60+. */
+export function agingBuckets(items: AgingInput[], asOf: Date): AgingBuckets {
+  const DAY = 86_400_000;
+  const b: AgingBuckets = { d0_30: 0, d30_60: 0, d60plus: 0, total: 0 };
+  for (const it of items) {
+    const days = Math.floor((asOf.getTime() - it.refDate.getTime()) / DAY);
+    if (days <= 30) b.d0_30 += it.outstanding;
+    else if (days <= 60) b.d30_60 += it.outstanding;
+    else b.d60plus += it.outstanding;
+    b.total += it.outstanding;
+  }
+  return b;
+}
+
 /** Net cash across accounts (sum of opening balances + movements). */
 export function totalCash(accounts: AccountLike[], entries: FinanceEntryLike[]): number {
   return accounts.reduce((s, a) => s + accountBalance(a, entries), 0);

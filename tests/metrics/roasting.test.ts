@@ -6,6 +6,7 @@ import {
   roastLevelMix,
   operatorActivity,
   avgQcScore,
+  qcDistribution,
 } from '@/lib/metrics/roasting';
 import type { BatchLike } from '@/lib/metrics/types';
 
@@ -54,5 +55,14 @@ describe('roasting metrics', () => {
 
   it('avgQcScore ignores nulls', () => {
     expect(avgQcScore([{ qcScore: 80 }, { qcScore: 90 }, { qcScore: null }])).toBe(85);
+  });
+
+  it('qcDistribution buckets scores into 5-point bands', () => {
+    const d = qcDistribution([{ qcScore: 80 }, { qcScore: 82 }, { qcScore: 88 }, { qcScore: 90 }, { qcScore: null }]);
+    expect(d).toEqual([
+      { band: 80, count: 2 },
+      { band: 85, count: 1 },
+      { band: 90, count: 1 },
+    ]);
   });
 });

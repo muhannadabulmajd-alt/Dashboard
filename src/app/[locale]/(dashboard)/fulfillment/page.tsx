@@ -37,6 +37,7 @@ export default async function FulfillmentPage({
     { label: t('courier') },
     { label: t('shipments'), align: 'end' as const },
     { label: t('delivered'), align: 'end' as const },
+    { label: t('failed'), align: 'end' as const },
     { label: t('sla'), align: 'end' as const },
     { label: t('avgDelivery'), align: 'end' as const },
     { label: t('cost'), align: 'end' as const },
@@ -45,6 +46,7 @@ export default async function FulfillmentPage({
     c.courier,
     formatNumber(c.shipments, locale),
     formatNumber(c.delivered, locale),
+    formatNumber(c.failed, locale),
     formatPercent(c.slaPct, locale),
     days(c.avgDays),
     formatMoney(Math.round(c.avgCost), 'IQD', locale),
@@ -58,7 +60,13 @@ export default async function FulfillmentPage({
         <KpiCard label={t('shipments')} value={formatNumber(shipments.length, locale)} locale={locale} />
         <KpiCard label={t('sla')} value={formatPercent(M.deliverySlaPct(shipments, 3), locale)} locale={locale} />
         <KpiCard label={t('avgDelivery')} value={days(M.avgDeliveryDays(shipments))} locale={locale} invertDelta />
-        <KpiCard label={t('failed')} value={formatPercent(M.failedDeliveryRate(shipments), locale)} locale={locale} invertDelta />
+        <KpiCard
+          label={t('failed')}
+          value={formatNumber(M.failedDeliveryCount(shipments), locale)}
+          sub={formatPercent(M.failedDeliveryRate(shipments), locale)}
+          locale={locale}
+          invertDelta
+        />
         <KpiCard label={t('returns')} value={formatPercent(M.returnRate(orders), locale)} locale={locale} invertDelta />
       </section>
 

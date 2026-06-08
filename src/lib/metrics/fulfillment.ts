@@ -23,10 +23,16 @@ export function deliverySlaPct(shipments: ShipmentLike[], slaDays = 3): number {
   return onTime / delivered.length;
 }
 
+const isFailed = (s: ShipmentLike) => s.status === 'FAILED' || s.status === 'RETURNED';
+
+/** Count of failed/returned shipments. */
+export function failedDeliveryCount(shipments: ShipmentLike[]): number {
+  return shipments.filter(isFailed).length;
+}
+
 export function failedDeliveryRate(shipments: ShipmentLike[]): number {
   if (!shipments.length) return 0;
-  const failed = shipments.filter((s) => s.status === 'FAILED' || s.status === 'RETURNED').length;
-  return failed / shipments.length;
+  return failedDeliveryCount(shipments) / shipments.length;
 }
 
 /** Returned/refunded orders ÷ sales orders. */
@@ -46,6 +52,7 @@ export interface CourierStat {
   courier: string;
   shipments: number;
   delivered: number;
+  failed: number;
   slaPct: number;
   avgDays: number;
   avgCost: number;
@@ -63,6 +70,7 @@ export function courierComparison(shipments: ShipmentLike[]): CourierStat[] {
       courier,
       shipments: list.length,
       delivered: list.filter((s) => s.status === 'DELIVERED').length,
+      failed: list.filter(isFailed).length,
       slaPct: deliverySlaPct(list),
       avgDays: avgDeliveryDays(list),
       avgCost: avgShippingCost(list),

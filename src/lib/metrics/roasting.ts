@@ -76,3 +76,17 @@ export function avgQcScore(batches: { qcScore: number | null }[]): number {
   const scores = batches.map((b) => b.qcScore).filter((s): s is number => s != null);
   return scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
 }
+
+/** QC-score distribution: count of scored batches per 5-point band (e.g. 85 → 85–90). */
+export function qcDistribution(
+  batches: { qcScore: number | null }[],
+  bandSize = 5,
+): { band: number; count: number }[] {
+  const map = new Map<number, number>();
+  for (const b of batches) {
+    if (b.qcScore == null) continue;
+    const band = Math.floor(b.qcScore / bandSize) * bandSize;
+    map.set(band, (map.get(band) ?? 0) + 1);
+  }
+  return [...map.entries()].map(([band, count]) => ({ band, count })).sort((a, b) => a.band - b.band);
+}
