@@ -2,7 +2,47 @@
 
 import { revalidatePath } from 'next/cache';
 import { prisma } from '@/server/db/client';
-import { requireCap, audit } from '@/server/records/shared';
+import { getCurrentUser } from '@/server/auth/session';
+import { requireCap, audit, reqField, type ActionState } from '@/server/records/shared';
+
+// All business/operational tables wiped by a full data reset. KEEP: User,
+// Branch, ExpenseCategory, AuditLog, Connector, Setting. No kept table has a
+// foreign key into these, so TRUNCATE ... CASCADE can't touch the kept ones.
+const RESET_TABLES = [
+  'Order',
+  'OrderLine',
+  'StockMovement',
+  'InventoryItem',
+  'Product',
+  'ProductComponent',
+  'ProductGroup',
+  'Customer',
+  'RoastBatch',
+  'BatchSkuLink',
+  'Expense',
+  'Offer',
+  'Shipment',
+  'UploadBatch',
+  'SyncRun',
+  'FinanceAccount',
+  'Party',
+  'FinanceEntry',
+] as const;
+
+/**
+ * Owner-only, typed-confirm full reset of business data (re-import from scratch).
+ * Irreversible. Keeps users, branches, settings, connectors, expense categories.
+ */
+export async function resetBusinessData(_prev: ActionState, fd: FormData): Promise<ActionState> {
+  const user = await getCurrentUser();
+  if (!user || user.role !== 'OWNER') return { error: 'forbidden' };
+  if (reqField(fd, 'confirm') !== 'RESET') return { error: 'confirm' };
+  const list = RESET_TABLES.map((t) => `"${t}"`).join(', ');
+  await prisma.$executeRawUnsafe(`TRUNCATE ${list} RESTART IDENTITY CASCADE`);
+  await audit(user.id, 'RESET_DATA', 'System', { tables: RESET_TABLES.length });
+  revalidatePath('/[locale]/(dashboard)/admin/uploads');
+  return { ok: true };
+}
 
 /**
  * Remove exact-duplicate imported finance rows, keeping the earliest of each

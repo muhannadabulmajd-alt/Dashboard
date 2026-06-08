@@ -586,6 +586,15 @@
       "confirm": "Remove duplicate imported rows? The earliest of each identical set is kept. This cannot be undone.",
       "verdictClean": "No duplicate imported rows. The \"Unassigned (imported)\" total is simply imported purchases that aren't tied to a cash account, minus account-less capital — not duplication. Assign those purchases to a cash account from Finance → Ledger, or record the funding capital, to resolve it.",
       "verdictDupes": "Found exact-duplicate imported rows — usually from mixing manual entry with imports. Removing them keeps the earliest of each identical set."
+    },
+    "reset": {
+      "title": "Danger zone — reset all data",
+      "body": "Permanently deletes products, product groups, customers, orders, inventory + stock, batches, finance entries, cash accounts, suppliers/shareholders, offers, shipments, and upload/sync history. Keeps your users, branches, settings and connectors. This cannot be undone — type RESET to confirm.",
+      "placeholder": "Type RESET",
+      "button": "Delete all data",
+      "done": "All business data has been cleared.",
+      "mismatch": "Type RESET exactly to confirm.",
+      "forbidden": "Only the Owner can reset data."
     }
   },
   "audit": {

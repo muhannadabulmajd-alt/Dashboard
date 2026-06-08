@@ -8,6 +8,7 @@ import { DataTable } from '@/components/data-table/DataTable';
 import { RecordsSummary, type SummaryStat } from '@/components/records/Summary';
 import { UploadForm } from './UploadForm';
 import { CleanupButton } from './CleanupButton';
+import { ResetDataPanel } from './ResetDataPanel';
 import type { FinanceType } from '@prisma/client';
 
 const STATUS_VARIANT: Record<string, 'success' | 'warning' | 'danger' | 'muted'> = {
@@ -25,9 +26,10 @@ export default async function UploadsPage({
   params: Promise<{ locale: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { locale } = await getPageContext(params, searchParams, 'upload:data');
+  const { locale, user } = await getPageContext(params, searchParams, 'upload:data');
   const t = await getTranslations('uploads');
   const th = await getTranslations('uploads.health');
+  const tr = await getTranslations('uploads.reset');
   const loc = locale as AppLocale;
 
   // Imported-finance health: explains the "Unassigned (imported)" figure and
@@ -101,6 +103,20 @@ export default async function UploadsPage({
         <h3 className="text-sm font-semibold">{t('recent')}</h3>
         <DataTable columns={cols} rows={rows} emptyLabel="—" />
       </section>
+
+      {user.role === 'OWNER' ? (
+        <ResetDataPanel
+          labels={{
+            title: tr('title'),
+            body: tr('body'),
+            placeholder: tr('placeholder'),
+            button: tr('button'),
+            done: tr('done'),
+            mismatch: tr('mismatch'),
+            forbidden: tr('forbidden'),
+          }}
+        />
+      ) : null}
     </>
   );
 }
