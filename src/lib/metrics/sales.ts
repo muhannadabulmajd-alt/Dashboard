@@ -42,6 +42,21 @@ export function completedOrderCount(orders: OrderLike[]): number {
   return orders.filter((o) => o.status === 'COMPLETED').length;
 }
 
+/**
+ * Count of real sales orders (placed & not cancelled/pending) — the same
+ * population netSales is computed over, so it's the correct denominator for AOV
+ * and the headline "Orders" count, and it reconciles with per-dimension counts.
+ */
+export function salesOrderCount(orders: OrderLike[]): number {
+  return orders.filter(isSalesOrder).length;
+}
+
+/** Share of sales orders that completed (vs returned/refunded). 0..1. */
+export function orderCompletionRate(orders: OrderLike[]): number {
+  const sales = salesOrderCount(orders);
+  return sales > 0 ? completedOrderCount(orders) / sales : 0;
+}
+
 export function unitsSold(lines: OrderLineLike[]): number {
   return lines.reduce((s, l) => s + l.quantity, 0);
 }

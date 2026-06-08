@@ -4,6 +4,8 @@ import {
   netSales,
   discountTotal,
   completedOrderCount,
+  salesOrderCount,
+  orderCompletionRate,
   unitsSold,
   aov,
   avgUnitPrice,
@@ -38,6 +40,14 @@ describe('sales metrics', () => {
 
   it('completedOrderCount counts only COMPLETED', () => {
     expect(completedOrderCount(orders)).toBe(2);
+  });
+
+  it('salesOrderCount counts all real sales orders (incl. returned), excludes cancelled', () => {
+    expect(salesOrderCount(orders)).toBe(3); // 2 completed + 1 returned; cancelled excluded
+  });
+
+  it('orderCompletionRate = completed / sales orders', () => {
+    expect(orderCompletionRate(orders)).toBeCloseTo(2 / 3, 6);
   });
 
   it('aov and avgUnitPrice handle zero denominators', () => {

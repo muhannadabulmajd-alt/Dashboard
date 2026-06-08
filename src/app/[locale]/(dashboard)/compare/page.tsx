@@ -55,8 +55,8 @@ export default async function ComparePage({
 
   const net = M.netSales(orders);
   const prevNet = M.netSales(prevOrders);
-  const oc = M.completedOrderCount(orders);
-  const prevOc = M.completedOrderCount(prevOrders);
+  const oc = M.salesOrderCount(orders);
+  const prevOc = M.salesOrderCount(prevOrders);
   const units = M.unitsSold(lines);
   const prevUnits = M.unitsSold(prevLines);
   const aov = M.aov(net, oc);

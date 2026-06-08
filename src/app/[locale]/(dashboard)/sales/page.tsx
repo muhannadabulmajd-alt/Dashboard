@@ -30,7 +30,7 @@ export default async function SalesPage({
   ]);
 
   const net = M.netSales(orders);
-  const orderCount = M.completedOrderCount(orders);
+  const orderCount = M.salesOrderCount(orders);
   const units = M.unitsSold(lines);
   const discount = M.discountEffect(orders);
 
@@ -42,6 +42,13 @@ export default async function SalesPage({
     label: enumLabel(b.key, locale),
     value: b.netSales,
   }));
+  // Count-based companions to the amount charts: performance by number of orders.
+  const ordersByCity = M.salesByDimension(orders, 'governorate')
+    .map((b) => ({ label: enumLabel(b.key, locale), value: b.orders }))
+    .sort((a, b) => b.value - a.value);
+  const ordersByChannel = M.salesByDimension(orders, 'channel')
+    .map((b) => ({ label: enumLabel(b.key, locale), value: b.orders }))
+    .sort((a, b) => b.value - a.value);
 
   const top = M.topProducts(lines, 10);
   const slow = M.slowMovers(lines, catalog, 10);
@@ -59,8 +66,9 @@ export default async function SalesPage({
     <>
       <PageHeader title={t('title')} subtitle={t('subtitle')} />
 
-      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <KpiCard label={tk('netSales')} value={formatMoney(net, 'IQD', locale)} locale={locale} />
+        <KpiCard label={tk('orders')} value={formatNumber(orderCount, locale)} locale={locale} />
         <KpiCard label={tk('units')} value={formatNumber(units, locale)} locale={locale} />
         <KpiCard label={tk('aov')} value={formatMoney(M.aov(net, orderCount), 'IQD', locale)} locale={locale} />
         <KpiCard
@@ -81,6 +89,11 @@ export default async function SalesPage({
         <BarChartCard title={t('grindPref')} data={byGrind} locale={locale} valueKind="count" />
         <BarChartCard title={t('sizePref')} data={bySize} locale={locale} valueKind="count" />
         <BarChartCard title={t('byCity')} data={byCity} locale={locale} valueKind="iqd" horizontal />
+      </section>
+
+      <section className="grid gap-4 lg:grid-cols-2">
+        <BarChartCard title={t('ordersByCity')} data={ordersByCity} locale={locale} valueKind="count" horizontal />
+        <BarChartCard title={t('ordersByChannel')} data={ordersByChannel} locale={locale} valueKind="count" horizontal />
       </section>
 
       <section className="grid gap-4 lg:grid-cols-2">

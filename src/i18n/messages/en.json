@@ -265,6 +265,8 @@
     "grindPref": "Grind preference",
     "sizePref": "Pack-size preference",
     "byCity": "Sales by city",
+    "ordersByCity": "Orders by city",
+    "ordersByChannel": "Orders by channel",
     "topProducts": "Top products",
     "slowMovers": "Slow movers"
   },

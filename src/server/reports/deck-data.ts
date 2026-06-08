@@ -63,7 +63,7 @@ export async function buildDeckData(
 
   const net = M.netSales(orders);
   const prevNet = M.netSales(prevOrders);
-  const orderCount = M.completedOrderCount(orders);
+  const orderCount = M.salesOrderCount(orders);
   const units = M.unitsSold(lines);
   const cogs = M.cogs(lines);
   const margin = M.grossMargin(net, cogs);

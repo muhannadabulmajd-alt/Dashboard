@@ -265,6 +265,8 @@
     "grindPref": "تفضيل الطحن",
     "sizePref": "تفضيل حجم العبوة",
     "byCity": "المبيعات حسب المدينة",
+    "ordersByCity": "الطلبات حسب المدينة",
+    "ordersByChannel": "الطلبات حسب القناة",
     "topProducts": "أفضل المنتجات",
     "slowMovers": "المنتجات البطيئة"
   },

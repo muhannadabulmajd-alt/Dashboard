@@ -39,8 +39,8 @@ export default async function ExecutiveOverviewPage({
 
   const net = M.netSales(orders);
   const prevNet = M.netSales(prevOrders);
-  const orderCount = M.completedOrderCount(orders);
-  const prevOrderCount = M.completedOrderCount(prevOrders);
+  const orderCount = M.salesOrderCount(orders);
+  const prevOrderCount = M.salesOrderCount(prevOrders);
   const units = M.unitsSold(lines);
   const cogs = M.cogs(lines);
   const margin = M.grossMargin(net, cogs);
