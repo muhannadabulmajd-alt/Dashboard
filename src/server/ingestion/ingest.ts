@@ -10,6 +10,7 @@ import {
   parseInventory,
   parsePurchases,
   parseCapital,
+  parseShipments,
   type ImportDataset,
   type RowError,
   type IngestSummary,
@@ -24,6 +25,7 @@ const DATASET_TYPE: Record<ImportDataset, DatasetType> = {
   inventory: 'INVENTORY',
   purchases: 'EXPENSES',
   capital: 'CAPITAL',
+  shipments: 'SHIPMENTS',
 };
 
 function csvToRows(csvText: string): Record<string, string>[] {
@@ -235,6 +237,42 @@ export async function ingestCsv(
               createdById: opts.userId,
             },
           });
+          inserted += 1;
+        }
+      }
+    } else if (dataset === 'shipments') {
+      // Courier delivery report → one Shipment per order. Matched to our orders
+      // by orderNumber; idempotent via the order's unique shipment relation.
+      const { valid, errors: e } = parseShipments(rows);
+      errors.push(...e);
+      for (const s of valid) {
+        const order = await prisma.order.findUnique({
+          where: { orderNumber: s.orderNumber },
+          select: { id: true, governorate: true },
+        });
+        if (!order) {
+          errors.push({ row: 0, message: `unknown order ${s.orderNumber}` });
+          skipped += 1;
+          continue;
+        }
+        const data = {
+          courier: s.courier ?? 'Courier',
+          status: s.status,
+          governorate: s.governorate ?? order.governorate,
+          shippingCost: s.shippingCost,
+          dispatchedAt: s.dispatchedAt ?? null,
+          deliveredAt: s.deliveredAt ?? null,
+          failureReason: s.failureReason ?? null,
+        };
+        const existing = await prisma.shipment.findUnique({
+          where: { orderId: order.id },
+          select: { id: true },
+        });
+        if (existing) {
+          await prisma.shipment.update({ where: { orderId: order.id }, data });
+          updated += 1;
+        } else {
+          await prisma.shipment.create({ data: { orderId: order.id, ...data } });
           inserted += 1;
         }
       }

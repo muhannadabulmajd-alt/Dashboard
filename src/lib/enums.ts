@@ -106,6 +106,8 @@ export const ROLES = [
 
 export const CURRENCIES = ['IQD', 'USD'] as const;
 
+export const SHIPMENT_STATUSES = ['DISPATCHED', 'IN_TRANSIT', 'DELIVERED', 'FAILED', 'RETURNED'] as const;
+
 export const ACCOUNT_TYPES = ['CASH', 'BANK'] as const;
 
 export const PARTY_TYPES = [
@@ -200,6 +202,11 @@ export const ENUM_LABELS: Record<string, Label> = {
   CANCELLED: { en: 'Cancelled', ar: 'ملغى' },
   RETURNED: { en: 'Returned', ar: 'مُرتجع' },
   REFUNDED: { en: 'Refunded', ar: 'مُسترد' },
+  // Shipment status
+  DISPATCHED: { en: 'Dispatched', ar: 'تم الإرسال' },
+  IN_TRANSIT: { en: 'In transit', ar: 'قيد التوصيل' },
+  DELIVERED: { en: 'Delivered', ar: 'تم التوصيل' },
+  FAILED: { en: 'Failed', ar: 'فشل التوصيل' },
   // Inventory categories
   GREEN_COFFEE: { en: 'Green coffee', ar: 'بن أخضر' },
   ROASTED: { en: 'Roasted coffee', ar: 'بن محمّص' },
