@@ -259,12 +259,29 @@ model Product {
   orderLines     OrderLine[]
   batchLinks     BatchSkuLink[]
   inventoryItems InventoryItem[]
+  components     ProductComponent[]
   group          ProductGroup?   @relation(fields: [groupId], references: [id])
 
   @@index([productLine])
   @@index([grind])
   @@index([isActive])
   @@index([groupId])
+}
+
+// Cost recipe (BOM) line for a variation (§16 component-based cost): the
+// variation's cost = Σ(quantity × unitCost). Recomputing sets Product.cogsPerUnit
+// (which is snapshotted onto orders, so history is preserved).
+model ProductComponent {
+  id        String   @id @default(cuid())
+  productId String
+  name      String // e.g. "Green beans", "Bag", "Label", "Cardamom"
+  quantity  Int      @default(1)
+  unitCost  Int // minor units IQD per unit
+  createdAt DateTime @default(now())
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
 }
 
 // Parent product (Products Variations Module): groups the sellable products

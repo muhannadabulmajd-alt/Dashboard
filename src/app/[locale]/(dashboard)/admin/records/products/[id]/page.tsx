@@ -10,6 +10,7 @@ import { DataTable, type Column } from '@/components/data-table/DataTable';
 import { BackLink, DetailGrid, type DetailField } from '@/components/records/parts';
 import { RecordActions } from '@/components/records/RecordActions';
 import { archiveProduct, deleteProduct } from '@/server/records/products';
+import { Link } from '@/i18n/navigation';
 
 export default async function ProductDetailPage({
   params,
@@ -21,7 +22,10 @@ export default async function ProductDetailPage({
   const { locale } = await getPageContext(params, searchParams, 'manage:products');
   const { id } = await params;
   const t = await getTranslations('records');
-  const p = await prisma.product.findUnique({ where: { id }, include: { group: true } });
+  const p = await prisma.product.findUnique({
+    where: { id },
+    include: { group: true, components: { select: { id: true } } },
+  });
   if (!p) notFound();
 
   // Effective cost history (CR-3): the COGS snapshots actually applied to past
@@ -81,6 +85,15 @@ export default async function ProductDetailPage({
           confirm: t('confirmDelete'),
         }}
       />
+      <div>
+        <Link
+          href={`/admin/records/products/${p.id}/cost`}
+          className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium hover:bg-muted"
+        >
+          {t('costRecipe')}
+          {p.components.length ? ` (${p.components.length})` : ''}
+        </Link>
+      </div>
       <DetailGrid items={items} />
 
       <div className="mt-4 space-y-2">

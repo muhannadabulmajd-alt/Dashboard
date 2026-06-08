@@ -108,6 +108,8 @@
     "none": "Nothing here yet.",
     "costHistory": "Cost history",
     "costHistoryHint": "The cost applied to past orders is preserved. Changing the product cost only affects future orders.",
+    "costRecipe": "Cost recipe",
+    "costRecipeHint": "List the components (beans, packaging, labels…). Saving sets this variation's cost to the sum — applied to future orders only; past orders keep their snapshot.",
     "ungrouped": "Ungrouped",
     "k": {
       "total": "Total",

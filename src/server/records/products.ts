@@ -113,3 +113,47 @@ export async function deleteProduct(id: string, locale: string): Promise<void> {
   revalidatePath(LIST, 'page');
   redirect(`/${locale}/admin/records/products`);
 }
+
+const componentSchema = z.array(
+  z.object({
+    name: z.string().min(1),
+    quantity: z.coerce.number().int().nonnegative(),
+    unitCost: z.coerce.number().int().nonnegative(),
+  }),
+);
+
+/**
+ * Save a variation's cost recipe (BOM, §16 component cost) and recompute its
+ * cogsPerUnit = Σ(quantity × unitCost). Because COGS is snapshotted per order
+ * line, this only affects future orders. An empty recipe clears the components
+ * and leaves the cost untouched.
+ */
+export async function saveProductComponents(productId: string, _prev: ActionState, fd: FormData): Promise<ActionState> {
+  const user = await requireCap(CAP);
+  if (!user) return { error: 'forbidden' };
+  const locale = reqField(fd, 'locale') || 'ar';
+  let raw: unknown;
+  try {
+    raw = JSON.parse(reqField(fd, 'components') || '[]');
+  } catch {
+    return { error: 'invalid' };
+  }
+  const parsed = componentSchema.safeParse(raw);
+  if (!parsed.success) return { error: 'invalid' };
+  const components = parsed.data.filter((c) => c.name.trim());
+  const cost = components.reduce((s, c) => s + c.quantity * c.unitCost, 0);
+  await prisma.$transaction(async (tx) => {
+    await tx.productComponent.deleteMany({ where: { productId } });
+    if (components.length) {
+      await tx.productComponent.createMany({
+        data: components.map((c) => ({ productId, name: c.name.trim(), quantity: c.quantity, unitCost: c.unitCost })),
+      });
+      await tx.product.update({ where: { id: productId }, data: { cogsPerUnit: cost } });
+    }
+  });
+  if (components.length) {
+    await audit(user.id, 'COST_CHANGE', 'Product', { id: productId, source: 'recipe', cogsTo: cost, components: components.length });
+  }
+  revalidatePath(LIST, 'page');
+  redirect(`/${locale}/admin/records/products/${productId}`);
+}
