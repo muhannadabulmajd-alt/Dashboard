@@ -3,6 +3,8 @@ import {
   accountBalance,
   financeTotals,
   totalCash,
+  netCash,
+  unassignedCash,
   type FinanceEntryLike,
 } from '@/lib/metrics/finance';
 
@@ -46,6 +48,33 @@ describe('finance metrics', () => {
     expect(t.expenses).toBe(900_000); // incurred once (the obligation), not the payments
     expect(t.cashOut).toBe(600_000); // only the two payments moved cash
     expect(t.outstandingPayable).toBe(300_000); // 900k - 600k
+  });
+
+  it('counts account-less cash movements (e.g. imports) in net cash', () => {
+    // Imported purchases/capital have obligation=false and NO account, yet they
+    // are real cash movements. totalCash (per-account) misses them; netCash must
+    // include them so the balance sheet cash isn't understated.
+    const entries = [
+      e({ id: 'cap', type: 'CAPITAL_IN', amount: 50_000_000, accountId: null }),
+      e({ id: 'pur', type: 'PURCHASE', amount: 18_000_000, accountId: null }),
+      e({ id: 'manual', type: 'EXPENSE', amount: 2_000_000, accountId: 'bank' }),
+    ];
+    const accounts = [{ id: 'bank', openingBalance: 1_000_000 }];
+    // Per-account view only sees opening + the account-tied expense.
+    expect(totalCash(accounts, entries)).toBe(-1_000_000);
+    // Account-less net effect: +50M capital - 18M purchase = 32M.
+    expect(unassignedCash(entries)).toBe(32_000_000);
+    // True cash = -1M (accounts) + 32M (unassigned) = 31M.
+    expect(netCash(accounts, entries)).toBe(31_000_000);
+  });
+
+  it('excludes obligations and transfers from unassigned cash', () => {
+    const entries = [
+      e({ id: 'due', type: 'PURCHASE', amount: 9_000_000, obligation: true, obligationKind: 'PAYABLE', accountId: null }),
+      e({ id: 'xfer', type: 'TRANSFER', amount: 5_000_000, accountId: 'bank', toAccountId: 'cash' }),
+      e({ id: 'spend', type: 'PURCHASE', amount: 3_000_000, accountId: null }),
+    ];
+    expect(unassignedCash(entries)).toBe(-3_000_000); // only the real account-less purchase
   });
 
   it('tracks a receivable and capital + computes totals per slice', () => {

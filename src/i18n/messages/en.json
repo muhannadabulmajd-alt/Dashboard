@@ -64,6 +64,7 @@
     "totalLiabilities": "Total liabilities",
     "totalEquity": "Total equity",
     "retained": "Retained earnings",
+    "unassigned": "Unassigned (imported)",
     "asOf": "As of {date}",
     "print": "Print / Save as PDF",
     "entityHints": {

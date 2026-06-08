@@ -103,3 +103,29 @@ export function financeTotals(entries: FinanceEntryLike[]): FinanceTotals {
 export function totalCash(accounts: AccountLike[], entries: FinanceEntryLike[]): number {
   return accounts.reduce((s, a) => s + accountBalance(a, entries), 0);
 }
+
+/**
+ * Cash effect of non-obligation entries that aren't tied to a named account
+ * (e.g. bulk-imported purchases/capital have no account). The data model treats
+ * every `obligation=false` entry as a real cash movement, so this money is on
+ * hand even though `accountBalance` — which is per-account — can't attribute it.
+ */
+export function unassignedCash(entries: FinanceEntryLike[]): number {
+  let cash = 0;
+  for (const e of entries) {
+    if (e.obligation || e.accountId != null) continue; // dues + account-tied handled elsewhere
+    if (e.type === 'TRANSFER') continue; // transfers always name accounts; nets out
+    cash += signedEffect(e);
+  }
+  return cash;
+}
+
+/**
+ * True cash on hand = opening balances + every non-obligation cash movement,
+ * whether or not it names an account. Equals `totalCash` plus `unassignedCash`,
+ * so a per-account breakdown reconciles to this when an "unassigned" line is
+ * shown. Use this (not `totalCash`) for headline cash / balance-sheet assets.
+ */
+export function netCash(accounts: AccountLike[], entries: FinanceEntryLike[]): number {
+  return totalCash(accounts, entries) + unassignedCash(entries);
+}

@@ -6,7 +6,7 @@ import { toCsv } from '@/server/export/csv';
 import { enumLabel } from '@/lib/enums';
 import { formatDate } from '@/lib/dates';
 import { toMajor, type AppLocale } from '@/lib/money';
-import { accountBalance, financeTotals, type FinanceEntryLike } from '@/lib/metrics/finance';
+import { accountBalance, netCash, unassignedCash, financeTotals, type FinanceEntryLike } from '@/lib/metrics/finance';
 import type { ObligationKind, Currency } from '@prisma/client';
 
 export async function GET(req: NextRequest) {
@@ -65,8 +65,10 @@ export async function GET(req: NextRequest) {
       const ce = entries.filter((e) => e.currency === cur);
       const ca = accounts.filter((a) => a.currency === cur);
       for (const a of ca) rows.push(['Account', a.name, cur, toMajor(accountBalance(a, ce), cur)]);
+      const unassigned = unassignedCash(ce);
+      if (unassigned) rows.push(['Account', 'Unassigned', cur, toMajor(unassigned, cur)]);
       const tot = financeTotals(ce);
-      const cashBank = ca.reduce((s, a) => s + accountBalance(a, ce), 0);
+      const cashBank = netCash(ca, ce);
       const totalAssets = cashBank + tot.outstandingReceivable;
       const retained = totalAssets - tot.outstandingPayable - tot.capitalIn;
       rows.push(['Assets', 'Cash & bank', cur, toMajor(cashBank, cur)]);

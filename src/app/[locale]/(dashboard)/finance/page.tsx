@@ -20,7 +20,7 @@ import { enumLabel } from '@/lib/enums';
 import { formatMoney, convertToIqd } from '@/lib/money';
 import { can } from '@/lib/rbac';
 import { cn } from '@/lib/utils';
-import { accountBalance, financeTotals, type FinanceEntryLike } from '@/lib/metrics/finance';
+import { accountBalance, netCash, financeTotals, type FinanceEntryLike } from '@/lib/metrics/finance';
 import { getUsdToIqd } from '@/server/settings';
 import { setUsdToIqd } from '@/server/finance/settings';
 import { RateEditor } from '@/components/finance/RateEditor';
@@ -111,7 +111,7 @@ export default async function FinancePage({
     const ce = entries.filter((e) => e.currency === cur);
     const ca = accounts.filter((a) => a.currency === cur);
     const tot = financeTotals(ce);
-    const cash = ca.reduce((s, a) => s + accountBalance(a, ce), 0);
+    const cash = netCash(ca, ce);
     const vals: Vals = {
       cash,
       capitalIn: tot.capitalIn,

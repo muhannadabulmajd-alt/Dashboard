@@ -64,6 +64,7 @@
     "totalLiabilities": "إجمالي الالتزامات",
     "totalEquity": "إجمالي حقوق الملكية",
     "retained": "الأرباح المحتجزة",
+    "unassigned": "غير مخصّص (مستورد)",
     "asOf": "حتى تاريخ {date}",
     "print": "طباعة / حفظ PDF",
     "entityHints": {

@@ -4,7 +4,7 @@ import { requireCapability } from '@/server/auth/rbac';
 import { prisma } from '@/server/db/client';
 import { formatMoney, convertToIqd, type AppLocale } from '@/lib/money';
 import { formatDate } from '@/lib/dates';
-import { accountBalance, financeTotals, type FinanceEntryLike } from '@/lib/metrics/finance';
+import { accountBalance, netCash, unassignedCash, financeTotals, type FinanceEntryLike } from '@/lib/metrics/finance';
 import { getUsdToIqd } from '@/server/settings';
 import { PrintButton } from '@/components/PrintButton';
 
@@ -33,7 +33,7 @@ export default async function BalanceSheetPage({ params }: { params: Promise<{ l
     const ce = entries.filter((e) => e.currency === cur);
     const ca = accounts.filter((a) => a.currency === cur);
     const tot = financeTotals(ce);
-    const cashBank = ca.reduce((s, a) => s + accountBalance(a, ce), 0);
+    const cashBank = netCash(ca, ce);
     comb.cashBank += convertToIqd(cashBank, cur, rate);
     comb.receivables += convertToIqd(tot.outstandingReceivable, cur, rate);
     comb.payables += convertToIqd(tot.outstandingPayable, cur, rate);
@@ -107,7 +107,8 @@ export default async function BalanceSheetPage({ params }: { params: Promise<{ l
           const ce = entries.filter((e) => e.currency === cur);
           const ca = accounts.filter((a) => a.currency === cur);
           const tot = financeTotals(ce);
-          const cashBank = ca.reduce((s, a) => s + accountBalance(a, ce), 0);
+          const cashBank = netCash(ca, ce);
+          const unassigned = unassignedCash(ce);
           const totalAssets = cashBank + tot.outstandingReceivable;
           const retained = totalAssets - tot.outstandingPayable - tot.capitalIn;
           const m = (n: number) => formatMoney(n, cur, loc);
@@ -120,7 +121,7 @@ export default async function BalanceSheetPage({ params }: { params: Promise<{ l
                   <Row label={t('cashBank')} value={m(cashBank)} />
                   <Row label={t('receivables')} value={m(tot.outstandingReceivable)} />
                   <Row label={t('totalAssets')} value={m(totalAssets)} strong />
-                  {ca.length ? (
+                  {ca.length || unassigned ? (
                     <div className="mt-3 space-y-0.5 text-xs text-muted-foreground">
                       {ca.map((a) => (
                         <div key={a.id} className="flex justify-between gap-4">
@@ -128,6 +129,12 @@ export default async function BalanceSheetPage({ params }: { params: Promise<{ l
                           <span className="tabular-nums">{m(accountBalance(a, ce))}</span>
                         </div>
                       ))}
+                      {unassigned ? (
+                        <div className="flex justify-between gap-4">
+                          <span>{t('unassigned')}</span>
+                          <span className="tabular-nums">{m(unassigned)}</span>
+                        </div>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>
