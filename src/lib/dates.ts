@@ -137,6 +137,8 @@ export function monthProgress(now: Date = new Date()): { dayOfMonth: number; day
   return { dayOfMonth: getDate(z), daysInMonth: getDaysInMonth(z) };
 }
 
+// Displayed dates use DD/MM/YYYY everywhere (CR-1). Storage stays UTC/ISO;
+// `<input type="date">` values are formatted separately as yyyy-MM-dd.
 export function formatDate(date: Date, locale: 'ar' | 'en' = 'en'): string {
-  return formatInTimeZone(date, TZ, 'yyyy-MM-dd');
+  return formatInTimeZone(date, TZ, 'dd/MM/yyyy');
 }
