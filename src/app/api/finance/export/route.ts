@@ -6,7 +6,8 @@ import { toCsv } from '@/server/export/csv';
 import { enumLabel } from '@/lib/enums';
 import { formatDate } from '@/lib/dates';
 import { toMajor, type AppLocale } from '@/lib/money';
-import type { ObligationKind } from '@prisma/client';
+import { accountBalance, financeTotals, type FinanceEntryLike } from '@/lib/metrics/finance';
+import type { ObligationKind, Currency } from '@prisma/client';
 
 export async function GET(req: NextRequest) {
   const user = await getCurrentUser();
@@ -46,6 +47,36 @@ export async function GET(req: NextRequest) {
       })
       .filter((r) => Number(r[5]) > 0);
     filename = 'dues';
+  } else if (type === 'balances') {
+    const [accounts, entriesRaw] = await Promise.all([
+      prisma.financeAccount.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }),
+      prisma.financeEntry.findMany({
+        select: {
+          id: true, type: true, amount: true, currency: true, obligation: true,
+          obligationKind: true, accountId: true, toAccountId: true, settlesId: true,
+        },
+      }),
+    ]);
+    const entries = entriesRaw as FinanceEntryLike[];
+    headers = ['Section', 'Name', 'Currency', 'Amount'];
+    rows = [];
+    const currencies = Array.from(new Set([...accounts.map((a) => a.currency), ...entries.map((e) => e.currency)]));
+    for (const cur of (currencies.length ? currencies : ['IQD']) as Currency[]) {
+      const ce = entries.filter((e) => e.currency === cur);
+      const ca = accounts.filter((a) => a.currency === cur);
+      for (const a of ca) rows.push(['Account', a.name, cur, toMajor(accountBalance(a, ce), cur)]);
+      const tot = financeTotals(ce);
+      const cashBank = ca.reduce((s, a) => s + accountBalance(a, ce), 0);
+      const totalAssets = cashBank + tot.outstandingReceivable;
+      const retained = totalAssets - tot.outstandingPayable - tot.capitalIn;
+      rows.push(['Assets', 'Cash & bank', cur, toMajor(cashBank, cur)]);
+      rows.push(['Assets', 'Receivables', cur, toMajor(tot.outstandingReceivable, cur)]);
+      rows.push(['Assets', 'Total assets', cur, toMajor(totalAssets, cur)]);
+      rows.push(['Liabilities', 'Payables', cur, toMajor(tot.outstandingPayable, cur)]);
+      rows.push(['Equity', 'Capital', cur, toMajor(tot.capitalIn, cur)]);
+      rows.push(['Equity', 'Retained', cur, toMajor(retained, cur)]);
+    }
+    filename = 'balance-sheet';
   } else {
     const entries = await prisma.financeEntry.findMany({
       orderBy: { date: 'desc' },

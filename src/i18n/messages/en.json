@@ -50,12 +50,24 @@
     "assignAccount": "Set paying account for imported purchases",
     "assignHint": "Applies the chosen account to imported purchases of the same currency that don't have one yet, so cash balances reflect history.",
     "apply": "Apply",
+    "balanceSheet": "Balance sheet",
+    "assets": "Assets",
+    "liabilities": "Liabilities",
+    "equity": "Equity",
+    "cashBank": "Cash & bank",
+    "totalAssets": "Total assets",
+    "totalLiabilities": "Total liabilities",
+    "totalEquity": "Total equity",
+    "retained": "Retained earnings",
+    "asOf": "As of {date}",
+    "print": "Print / Save as PDF",
     "entityHints": {
       "accounts": "Cash & bank balances",
       "parties": "Suppliers, retailers, shareholders…",
       "ledger": "Every money movement",
       "dues": "Payables & receivables",
-      "shareholders": "Capital & ownership"
+      "shareholders": "Capital & ownership",
+      "balanceSheet": "Assets, liabilities & equity"
     },
     "f": {
       "name": "Name", "type": "Type", "bank": "Bank", "branch": "Branch", "currency": "Currency",
@@ -505,6 +517,28 @@
     "forbidden": "You are not allowed to import data.",
     "invalid": "Choose a valid dataset.",
     "nofile": "Please choose a CSV file."
+  },
+  "invoice": {
+    "title": "Invoice",
+    "invoiceNo": "Invoice #",
+    "date": "Date",
+    "status": "Status",
+    "billTo": "Bill to",
+    "walkIn": "Walk-in customer",
+    "phone": "Phone",
+    "item": "Item",
+    "qty": "Qty",
+    "unitPrice": "Unit price",
+    "lineTotal": "Total",
+    "subtotal": "Subtotal",
+    "discount": "Discount",
+    "delivery": "Delivery",
+    "grandTotal": "Grand total",
+    "print": "Print / Save as PDF",
+    "back": "Back",
+    "thanks": "Thank you for your order.",
+    "brand": "Laheeb Coffee",
+    "tagline": "Specialty Roastery & Commerce"
   },
   "stale": {
     "warning": "Latest data: {date}"
