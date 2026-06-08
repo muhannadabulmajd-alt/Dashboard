@@ -1,23 +1,9 @@
 import { Coffee } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
-import type { Role } from '@prisma/client';
-import { NAV_ITEMS, NAV_GROUPS, can } from '@/lib/rbac';
-import { NavLinks } from './NavLinks';
+import { NavLinks, type NavGroup } from './NavLinks';
 
-export async function Sidebar({ role }: { role: Role }) {
-  const t = await getTranslations('nav');
+export async function Sidebar({ groups }: { groups: NavGroup[] }) {
   const tApp = await getTranslations('app');
-
-  const visible = NAV_ITEMS.filter((i) => can(role, i.capability));
-  // Group the role-visible items; drop any group the role can't see at all.
-  const groups = NAV_GROUPS.map((g) => ({
-    key: g.key,
-    label: t(`group.${g.key}`),
-    defaultOpen: g.defaultOpen,
-    items: visible
-      .filter((i) => i.group === g.key)
-      .map((i) => ({ href: i.href, icon: i.icon, label: t(i.key) })),
-  })).filter((g) => g.items.length > 0);
 
   return (
     <aside className="hidden w-60 shrink-0 flex-col border-e bg-card md:flex">

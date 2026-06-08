@@ -4,6 +4,7 @@ import { getLatestOrderDate } from '@/server/db/repositories/sales.repo';
 import { prisma } from '@/server/db/client';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { TopBar } from '@/components/layout/TopBar';
+import { getNavGroups } from '@/components/layout/nav';
 import { StaleDataBanner } from '@/components/layout/StaleDataBanner';
 import { FilterBar } from '@/components/filters/FilterBar';
 import type { AppLocale } from '@/lib/money';
@@ -19,6 +20,7 @@ export default async function DashboardLayout({
   const user = await requireUser(locale);
   const scope = buildBranchScope(user);
   const lastUpdated = await getLatestOrderDate(scope);
+  const navGroups = await getNavGroups(user.role);
 
   // Branch filter is shown only to non-scoped roles (others are locked to their branch).
   const branchOptions = scope.branchId
@@ -33,9 +35,9 @@ export default async function DashboardLayout({
 
   return (
     <div className="flex min-h-screen">
-      <Sidebar role={user.role} />
+      <Sidebar groups={navGroups} />
       <div className="flex min-w-0 flex-1 flex-col">
-        <TopBar user={{ name: user.name, role: user.role }} locale={locale} />
+        <TopBar user={{ name: user.name, role: user.role }} locale={locale} navGroups={navGroups} />
         <StaleDataBanner lastUpdated={lastUpdated} locale={locale as AppLocale} />
         <FilterBar branchOptions={branchOptions} />
         <main className="flex-1 space-y-6 p-4 lg:p-6">{children}</main>
