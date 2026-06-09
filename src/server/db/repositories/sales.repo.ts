@@ -87,6 +87,16 @@ export async function getActiveCatalog(): Promise<
   });
 }
 
+/** Active catalog with price + cost for margin-health alerts (§9/§17). */
+export async function getCatalogForAlerts(): Promise<
+  { id: string; nameEn: string; nameAr: string; sellingPrice: number; cogsPerUnit: number }[]
+> {
+  return prisma.product.findMany({
+    where: { isActive: true },
+    select: { id: true, nameEn: true, nameAr: true, sellingPrice: true, cogsPerUnit: true },
+  });
+}
+
 /** Latest order timestamp — drives the data-freshness banner. */
 export async function getLatestOrderDate(scope: Scope): Promise<Date | null> {
   const row = await prisma.order.findFirst({

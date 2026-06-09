@@ -1,11 +1,13 @@
 import { getTranslations } from 'next-intl/server';
-import { AlertTriangle, CalendarClock, FileDown } from 'lucide-react';
+import { AlertTriangle, CalendarClock, FileDown, PackageX, TrendingDown } from 'lucide-react';
 import { serializeFilters } from '@/lib/filters';
 import { getPageContext } from '@/server/page-context';
-import { getOrders, getPrevOrders, getOrderLines } from '@/server/db/repositories/sales.repo';
+import { getOrders, getPrevOrders, getOrderLines, getCatalogForAlerts } from '@/server/db/repositories/sales.repo';
 import { getInventoryItems } from '@/server/db/repositories/inventory.repo';
 import { getExpenses } from '@/server/db/repositories/finance.repo';
 import * as M from '@/lib/metrics';
+import type { AlertKind } from '@/lib/metrics';
+import { Link } from '@/i18n/navigation';
 import { can } from '@/lib/rbac';
 import { enumLabel } from '@/lib/enums';
 import { formatMoney, formatNumber, formatPercent } from '@/lib/money';
@@ -26,13 +28,15 @@ export default async function ExecutiveOverviewPage({
   const t = await getTranslations('executive');
   const tk = await getTranslations('kpi');
   const tc = await getTranslations('common');
+  const ta = await getTranslations('alerts');
 
-  const [orders, prevOrders, lines, items, expenses] = await Promise.all([
+  const [orders, prevOrders, lines, items, expenses, catalog] = await Promise.all([
     getOrders(filters, scope, range),
     getPrevOrders(filters, scope, range),
     getOrderLines(filters, scope, range),
     getInventoryItems(filters, scope, range),
     getExpenses(filters, scope, range),
+    getCatalogForAlerts(),
   ]);
 
   const showFinancial = can(user.role, 'view:financial');
@@ -57,8 +61,42 @@ export default async function ExecutiveOverviewPage({
   }));
   const top = M.topProducts(lines, 8).map((p) => ({ label: p.name[locale], value: p.netSales }));
 
-  const reorder = M.reorderAlerts(items);
-  const expiry = M.nearExpiry(items, 21);
+  // Centralized notifications (§9/§17): low/out-of-stock + near-expiry from
+  // inventory, plus below-cost / thin-margin products from the catalog, folded
+  // into one ranked feed. Collapse expiry to the soonest lot per item.
+  const expiryByItem = new Map<string, M.ExpiryAlertInput>();
+  for (const e of M.nearExpiry(items, 21)) {
+    const cur = expiryByItem.get(e.item.id);
+    if (!cur || e.daysToExpiry < cur.daysToExpiry)
+      expiryByItem.set(e.item.id, { id: e.item.id, nameEn: e.item.nameEn, nameAr: e.item.nameAr, daysToExpiry: e.daysToExpiry });
+  }
+  const alerts = M.buildAlerts({
+    stock: items.map((it) => ({
+      id: it.id,
+      nameEn: it.nameEn,
+      nameAr: it.nameAr,
+      unit: it.unit,
+      current: M.currentStock(it.movements),
+      reorderPoint: it.reorderPoint,
+    })),
+    expiring: [...expiryByItem.values()],
+    products: catalog,
+  });
+  const counts = M.alertCounts(alerts);
+
+  // kind → icon + colour + link target for the notifications panel.
+  const alertMeta: Record<AlertKind, { Icon: typeof AlertTriangle; href: string }> = {
+    stockout: { Icon: PackageX, href: '/admin/records/inventory' },
+    reorder: { Icon: AlertTriangle, href: '/admin/records/inventory' },
+    expiry: { Icon: CalendarClock, href: '/inventory' },
+    belowCost: { Icon: TrendingDown, href: '/admin/records/products' },
+    lowMargin: { Icon: TrendingDown, href: '/pnl' },
+  };
+  const formatAlertValue = (a: M.AlertItem): string => {
+    if (a.kind === 'expiry') return `${formatNumber(a.value, locale)}${ta('daysSuffix')}`;
+    if (a.kind === 'belowCost' || a.kind === 'lowMargin') return formatPercent(a.value, locale);
+    return `${formatNumber(a.value, locale)} ${a.unit ?? ''}`.trim();
+  };
 
   const deckQuery = (() => {
     const sp = serializeFilters(filters);
@@ -104,36 +142,35 @@ export default async function ExecutiveOverviewPage({
         <BarChartCard title={t('topProducts')} data={top} locale={locale} valueKind="iqd" horizontal />
         <Card>
           <CardHeader>
-            <CardTitle>{t('stockAlerts')}</CardTitle>
-            <Badge variant={reorder.length + expiry.length > 0 ? 'warning' : 'success'}>
-              {formatNumber(reorder.length + expiry.length, locale)}
+            <CardTitle>{ta('title')}</CardTitle>
+            <Badge variant={counts.critical > 0 ? 'danger' : counts.total > 0 ? 'warning' : 'success'}>
+              {counts.critical > 0
+                ? ta('criticalOf', { critical: formatNumber(counts.critical, locale), total: formatNumber(counts.total, locale) })
+                : formatNumber(counts.total, locale)}
             </Badge>
           </CardHeader>
           <CardContent>
-            {reorder.length + expiry.length === 0 ? (
-              <p className="py-6 text-center text-sm text-muted-foreground">{t('noAlerts')}</p>
+            {alerts.length === 0 ? (
+              <p className="py-6 text-center text-sm text-muted-foreground">{ta('none')}</p>
             ) : (
               <ul className="divide-y text-sm">
-                {reorder.slice(0, 5).map((r) => (
-                  <li key={r.item.id} className="flex items-center justify-between py-2">
-                    <span className="flex items-center gap-2">
-                      <AlertTriangle className="size-4 text-warning" />
-                      {r.item[locale === 'ar' ? 'nameAr' : 'nameEn']}
-                    </span>
-                    <span className="tabular text-muted-foreground">
-                      {formatNumber(r.current, locale)} {r.item.unit}
-                    </span>
-                  </li>
-                ))}
-                {expiry.slice(0, 5).map((e, i) => (
-                  <li key={`e${i}`} className="flex items-center justify-between py-2">
-                    <span className="flex items-center gap-2">
-                      <CalendarClock className="size-4 text-danger" />
-                      {e.item[locale === 'ar' ? 'nameAr' : 'nameEn']}
-                    </span>
-                    <span className="tabular text-muted-foreground">{formatNumber(e.daysToExpiry, locale)}d</span>
-                  </li>
-                ))}
+                {alerts.slice(0, 8).map((a) => {
+                  const { Icon, href } = alertMeta[a.kind];
+                  return (
+                    <li key={`${a.kind}-${a.refId}`} className="py-2">
+                      <Link href={href} className="flex items-center justify-between gap-2 hover:text-primary">
+                        <span className="flex min-w-0 items-center gap-2">
+                          <Icon className={`size-4 shrink-0 ${a.severity === 'critical' ? 'text-danger' : 'text-warning'}`} />
+                          <span className="truncate">{a.name[locale === 'ar' ? 'ar' : 'en']}</span>
+                          <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                            {ta(`kind.${a.kind}`)}
+                          </span>
+                        </span>
+                        <span className="tabular shrink-0 text-muted-foreground">{formatAlertValue(a)}</span>
+                      </Link>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </CardContent>

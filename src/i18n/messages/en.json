@@ -315,6 +315,19 @@
     "financialHidden": "Financial metrics are restricted to Finance and Owner roles.",
     "noAlerts": "No stock alerts. 🎉"
   },
+  "alerts": {
+    "title": "Alerts",
+    "none": "All clear — no alerts. 🎉",
+    "criticalOf": "{critical} critical / {total}",
+    "daysSuffix": "d",
+    "kind": {
+      "stockout": "Out of stock",
+      "reorder": "Low stock",
+      "expiry": "Expiring",
+      "belowCost": "Below cost",
+      "lowMargin": "Thin margin"
+    }
+  },
   "sales": {
     "title": "Sales & Product View",
     "subtitle": "A 360° view of products, channels and demand.",
