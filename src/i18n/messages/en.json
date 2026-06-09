@@ -331,6 +331,38 @@
       "next": "Next",
       "finish": "Create product"
     },
+    "lists": {
+      "title": "System lists",
+      "subtitle": "Manage the standard values used across the app, in both languages.",
+      "add": "Add value",
+      "labelEn": "Label (English)",
+      "labelAr": "Label (Arabic)",
+      "used": "{n} in use",
+      "system": "Built-in",
+      "merge": "Merge values",
+      "mergeHint": "Move all records from one value to another, then retire the first.",
+      "mergeFrom": "From",
+      "mergeTo": "Into",
+      "mergeBtn": "Merge",
+      "viewerNote": "Only Owners and Admins can edit these lists.",
+      "enumNote": "You can rename, reorder and hide these values now; adding brand-new ones is being enabled next.",
+      "names": {
+        "channel": "Channels",
+        "governorate": "Governorates",
+        "productLine": "Product categories",
+        "grind": "Grind types",
+        "roastLevel": "Roast levels",
+        "customerSegment": "Customer segments",
+        "fulfillment": "Fulfillment methods",
+        "orderStatus": "Order statuses",
+        "inventoryCategory": "Inventory categories",
+        "customerSource": "Customer sources",
+        "productType": "Product types",
+        "variationType": "Variation types",
+        "unit": "Units",
+        "packaging": "Packaging types"
+      }
+    },
     "systemLists": {
       "title": "System lists",
       "subtitle": "The standard categories used across the app, in both languages.",

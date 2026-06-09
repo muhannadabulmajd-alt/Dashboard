@@ -22,6 +22,7 @@ export type Capability =
   | 'manage:users'
   | 'manage:branches'
   | 'manage:connectors'
+  | 'manage:lists'
   | 'upload:data'
   | 'export:data'
   | 'export:financial';
@@ -47,6 +48,7 @@ const ALL: Capability[] = [
   'manage:users',
   'manage:branches',
   'manage:connectors',
+  'manage:lists',
   'upload:data',
   'export:data',
   'export:financial',
