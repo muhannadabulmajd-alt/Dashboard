@@ -10,6 +10,7 @@ export * from './fulfillment';
 export * from './offers';
 export * from './franchise';
 export * from './alerts';
+export * from './pricing';
 
 /** Period-over-period delta as a ratio (e.g. 0.12 == +12%). */
 export function deltaPct(current: number, previous: number | undefined): number | undefined {

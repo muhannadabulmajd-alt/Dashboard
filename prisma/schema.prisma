@@ -249,9 +249,16 @@ model Product {
   roastLevel      RoastLevel?
   origin          String?
   isBlend         Boolean     @default(false)
-  sellingPrice    Int // minor units of sellingCurrency
+  variationType   String? // what makes this variation differ: size / grind / roast / packaging / flavor
+  imageUrl        String?
+  sellingPrice    Int // minor units of sellingCurrency (current base price)
   sellingCurrency Currency    @default(IQD)
+  minSellingPrice Int? // optional floor for manual price overrides
   cogsPerUnit     Int // minor units of sellingCurrency
+  invoiceName     String? // display name on the invoice (defaults to name)
+  allowDiscount      Boolean  @default(true) // order usage (§6)
+  allowPriceOverride Boolean  @default(true)
+  trackInventory     Boolean  @default(true) // deduct finished stock on sale
   isActive        Boolean     @default(true)
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
@@ -260,12 +267,33 @@ model Product {
   batchLinks     BatchSkuLink[]
   inventoryItems InventoryItem[]
   components     ProductComponent[]
+  prices         ProductPrice[]
   group          ProductGroup?   @relation(fields: [groupId], references: [id])
 
   @@index([productLine])
   @@index([grind])
   @@index([isActive])
   @@index([groupId])
+}
+
+/// Price entries for a variation (§6): base, wholesale or channel-specific,
+/// each effective from a date. The latest non-future BASE entry is the current
+/// selling price; future entries are scheduled. Immutable history.
+model ProductPrice {
+  id            String    @id @default(cuid())
+  productId     String
+  kind          String    @default("BASE") // BASE | WHOLESALE | CHANNEL
+  channel       Channel? // set when kind = CHANNEL
+  price         Int // minor units
+  currency      Currency  @default(IQD)
+  effectiveFrom DateTime
+  note          String?
+  createdAt     DateTime  @default(now())
+  createdById   String?
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId, kind, effectiveFrom])
 }
 
 // Cost recipe (BOM) line for a variation (§16 component-based cost): the

@@ -34,15 +34,17 @@ async function applySoldMovements(
   lines: { productId: string; quantity: number }[],
 ): Promise<void> {
   const ids = lines.map((l) => l.productId);
-  const items = await tx.inventoryItem.findMany({
-    where: { productId: { in: ids } },
-    select: { id: true, productId: true },
-  });
+  const [items, prods] = await Promise.all([
+    tx.inventoryItem.findMany({ where: { productId: { in: ids } }, select: { id: true, productId: true } }),
+    tx.product.findMany({ where: { id: { in: ids } }, select: { id: true, trackInventory: true } }),
+  ]);
   const byProduct = new Map<string, string>();
   for (const i of items) if (i.productId) byProduct.set(i.productId, i.id);
+  // Variations with stock tracking turned off (§6, made-to-order) don't deduct.
+  const noTrack = new Set(prods.filter((p) => !p.trackInventory).map((p) => p.id));
   const data = lines.flatMap((l) => {
     const inventoryItemId = byProduct.get(l.productId);
-    return inventoryItemId
+    return inventoryItemId && !noTrack.has(l.productId)
       ? [{ inventoryItemId, orderId, occurredAt, reason: 'SOLD' as const, quantity: -l.quantity }]
       : [];
   });

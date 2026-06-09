@@ -202,7 +202,44 @@
       "overview": "Overview",
       "variations": "Variations",
       "reports": "Reports",
-      "activity": "Activity"
+      "activity": "Activity",
+      "pricing": "Pricing",
+      "costRecipe": "Cost & Recipe",
+      "inventory": "Inventory",
+      "orderUsage": "Order usage"
+    },
+    "marginStatus": {
+      "ok": "Healthy",
+      "lowMargin": "Thin margin",
+      "belowCost": "Below cost"
+    },
+    "usage": {
+      "invoiceName": "Invoice display name",
+      "invoiceNameHint": "Shown on the invoice; defaults to the variation name.",
+      "minSellingPrice": "Minimum price (floor)",
+      "allowDiscount": "Allow discounts",
+      "allowDiscountHint": "Let staff apply a discount to this variation in an order.",
+      "allowPriceOverride": "Allow price override",
+      "allowPriceOverrideHint": "Let staff change the unit price during order entry.",
+      "trackInventory": "Track inventory",
+      "trackInventoryHint": "Deduct finished stock when this variation is sold."
+    },
+    "price": {
+      "current": "Current price",
+      "kind": "Type",
+      "base": "Base",
+      "wholesale": "Wholesale",
+      "channel": "Channel",
+      "effectiveFrom": "Effective from",
+      "note": "Note",
+      "add": "Add price",
+      "scheduled": "Scheduled prices",
+      "special": "Wholesale & channel prices",
+      "history": "Price history",
+      "historyEmpty": "No recorded price changes yet.",
+      "linked": "linked to stock",
+      "linkedItems": "Linked inventory items",
+      "noLinkedItems": "No inventory item is linked to this variation yet."
     },
     "rep": {
       "unitsSold": "Units sold",

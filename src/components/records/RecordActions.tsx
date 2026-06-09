@@ -58,3 +58,20 @@ export function RecordActions({
     </div>
   );
 }
+
+/** Inline confirm-then-submit button for a single bound action (e.g. delete a
+ * scheduled price row). */
+export function ConfirmButton({ action, label, confirm }: { action: () => Promise<void>; label: string; confirm: string }) {
+  return (
+    <form
+      action={action}
+      onSubmit={(e) => {
+        if (!confirm || !window.confirm(confirm)) e.preventDefault();
+      }}
+    >
+      <button type="submit" className="text-xs font-medium text-danger hover:underline">
+        {label}
+      </button>
+    </form>
+  );
+}

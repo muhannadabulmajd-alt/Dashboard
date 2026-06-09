@@ -15,11 +15,13 @@ const schema = z.object({
   nameEn: z.string().min(1),
   nameAr: z.string().min(1),
   productLine: z.enum(PRODUCT_LINES),
+  variationType: z.string().optional(),
   sizeLabel: z.string().min(1),
   sizeGrams: z.coerce.number().int().positive().optional(),
   grind: z.enum(GRINDS),
   roastLevel: z.enum(ROAST_LEVELS).optional(),
   origin: z.string().optional(),
+  imageUrl: z.string().url().optional().or(z.literal('')),
   groupId: z.string().optional(), // parent product group (variations module)
   sellingPrice: z.coerce.number().int().nonnegative(),
   cogsPerUnit: z.coerce.number().int().nonnegative(),
@@ -31,19 +33,25 @@ function parse(fd: FormData) {
     nameEn: reqField(fd, 'nameEn'),
     nameAr: reqField(fd, 'nameAr'),
     productLine: reqField(fd, 'productLine'),
+    variationType: optField(fd, 'variationType'),
     sizeLabel: reqField(fd, 'sizeLabel'),
     sizeGrams: optField(fd, 'sizeGrams'),
     grind: reqField(fd, 'grind'),
     roastLevel: optField(fd, 'roastLevel'),
     origin: optField(fd, 'origin'),
+    imageUrl: optField(fd, 'imageUrl'),
     groupId: optField(fd, 'groupId'),
     sellingPrice: reqField(fd, 'sellingPrice'),
     cogsPerUnit: reqField(fd, 'cogsPerUnit'),
   });
 }
 
-// Normalize a blank group selection to null (unassigned / standalone).
-const withGroup = <T extends { groupId?: string }>(data: T) => ({ ...data, groupId: data.groupId || null });
+// Normalize blank group/image to null (unassigned / standalone / no image).
+const withGroup = <T extends { groupId?: string; imageUrl?: string }>(data: T) => ({
+  ...data,
+  groupId: data.groupId || null,
+  imageUrl: data.imageUrl || null,
+});
 
 export async function createProduct(_prev: ActionState, fd: FormData): Promise<ActionState> {
   const user = await requireCap(CAP);
@@ -169,4 +177,44 @@ export async function saveProductComponents(productId: string, _prev: ActionStat
   }
   revalidatePath(LIST, 'page');
   redirect(`/${locale}/admin/records/products/${productId}`);
+}
+
+const orderUsageSchema = z.object({
+  invoiceName: z.string().optional(),
+  minSellingPrice: z.coerce.number().int().nonnegative().optional(),
+  allowDiscount: z.coerce.boolean(),
+  allowPriceOverride: z.coerce.boolean(),
+  trackInventory: z.coerce.boolean(),
+});
+
+/**
+ * Save how a variation behaves in orders/invoices (§6): invoice display name,
+ * optional price floor, and the discount / price-override / stock-tracking
+ * toggles. Checkboxes submit only when checked, so absent = false.
+ */
+export async function saveOrderUsage(productId: string, _prev: ActionState, fd: FormData): Promise<ActionState> {
+  const user = await requireCap(CAP);
+  if (!user) return { error: 'forbidden' };
+  const locale = reqField(fd, 'locale') || 'ar';
+  const r = orderUsageSchema.safeParse({
+    invoiceName: optField(fd, 'invoiceName'),
+    minSellingPrice: optField(fd, 'minSellingPrice'),
+    allowDiscount: fd.get('allowDiscount') != null,
+    allowPriceOverride: fd.get('allowPriceOverride') != null,
+    trackInventory: fd.get('trackInventory') != null,
+  });
+  if (!r.success) return { error: 'invalid' };
+  await prisma.product.update({
+    where: { id: productId },
+    data: {
+      invoiceName: r.data.invoiceName || null,
+      minSellingPrice: r.data.minSellingPrice ?? null,
+      allowDiscount: r.data.allowDiscount,
+      allowPriceOverride: r.data.allowPriceOverride,
+      trackInventory: r.data.trackInventory,
+    },
+  });
+  await audit(user.id, 'UPDATE', 'Product', { id: productId, source: 'orderUsage' });
+  revalidatePath(LIST, 'page');
+  redirect(`/${locale}/admin/records/products/${productId}?tab=usage`);
 }

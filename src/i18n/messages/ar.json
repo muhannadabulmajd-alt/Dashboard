@@ -202,7 +202,44 @@
       "overview": "نظرة عامة",
       "variations": "التنويعات",
       "reports": "التقارير",
-      "activity": "النشاط"
+      "activity": "النشاط",
+      "pricing": "التسعير",
+      "costRecipe": "التكلفة والوصفة",
+      "inventory": "المخزون",
+      "orderUsage": "الاستخدام في الطلبات"
+    },
+    "marginStatus": {
+      "ok": "صحي",
+      "lowMargin": "هامش رفيع",
+      "belowCost": "أقل من التكلفة"
+    },
+    "usage": {
+      "invoiceName": "اسم العرض في الفاتورة",
+      "invoiceNameHint": "يظهر في الفاتورة؛ الافتراضي اسم التنويع.",
+      "minSellingPrice": "الحد الأدنى للسعر",
+      "allowDiscount": "السماح بالخصومات",
+      "allowDiscountHint": "السماح للموظفين بتطبيق خصم على هذا التنويع في الطلب.",
+      "allowPriceOverride": "السماح بتعديل السعر",
+      "allowPriceOverrideHint": "السماح للموظفين بتغيير سعر الوحدة عند إدخال الطلب.",
+      "trackInventory": "تتبّع المخزون",
+      "trackInventoryHint": "خصم المخزون الجاهز عند بيع هذا التنويع."
+    },
+    "price": {
+      "current": "السعر الحالي",
+      "kind": "النوع",
+      "base": "أساسي",
+      "wholesale": "جملة",
+      "channel": "قناة",
+      "effectiveFrom": "ساري من",
+      "note": "ملاحظة",
+      "add": "إضافة سعر",
+      "scheduled": "أسعار مجدولة",
+      "special": "أسعار الجملة والقنوات",
+      "history": "سجل الأسعار",
+      "historyEmpty": "لا توجد تغييرات أسعار مسجّلة بعد.",
+      "linked": "مرتبط بالمخزون",
+      "linkedItems": "أصناف المخزون المرتبطة",
+      "noLinkedItems": "لا يوجد صنف مخزون مرتبط بهذا التنويع بعد."
     },
     "rep": {
       "unitsSold": "الوحدات المباعة",
