@@ -357,7 +357,11 @@
     "costsByCategory": "Operating costs by category",
     "perKg": "Cost per kg",
     "perCup": "Cost per cup",
-    "amount": "Amount"
+    "amount": "Amount",
+    "marginAlerts": "Margin alerts",
+    "price": "Price",
+    "belowCost": "Below cost",
+    "lowMargin": "Low margin"
   },
   "table": {
     "product": "Product",

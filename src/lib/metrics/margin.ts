@@ -5,6 +5,14 @@ export function cogs(lines: OrderLineLike[]): number {
   return lines.reduce((s, l) => s + l.unitCogsSnapshot * l.quantity, 0);
 }
 
+/** Health of a product's current price vs cost (§9/§17 alerts). */
+export type MarginStatus = 'belowCost' | 'lowMargin' | 'ok';
+export function marginStatus(sellingPrice: number, cogsPerUnit: number, lowThreshold = 0.15): MarginStatus {
+  if (sellingPrice <= 0) return 'ok'; // no price set yet — don't flag
+  if (cogsPerUnit > sellingPrice) return 'belowCost';
+  return (sellingPrice - cogsPerUnit) / sellingPrice < lowThreshold ? 'lowMargin' : 'ok';
+}
+
 /** Gross margin amount and percentage. */
 export function grossMargin(
   netSalesValue: number,

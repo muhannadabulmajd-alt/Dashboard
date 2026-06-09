@@ -162,7 +162,9 @@ export async function createOrder(_prev: ActionState, fd: FormData): Promise<Act
         lines: { create: lineData },
       },
     });
-    await applySoldMovements(tx, o.id, h.data.placedAt, lineData);
+    // Only completed orders consume stock (§11.3). Pending/cancelled/returned
+    // don't deduct — and editing to one of those (updateOrder) reverses them.
+    if (h.data.status === 'COMPLETED') await applySoldMovements(tx, o.id, h.data.placedAt, lineData);
     return o;
   });
   await audit(user.id, 'CREATE', 'Order', { orderNumber: h.data.orderNumber, lines: lineData.length });
@@ -236,7 +238,8 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
         lines: { create: lineData },
       },
     });
-    await applySoldMovements(tx, id, h.data.placedAt, lineData);
+    // Prior deductions were cleared above; re-apply only if still completed.
+    if (h.data.status === 'COMPLETED') await applySoldMovements(tx, id, h.data.placedAt, lineData);
   });
   await audit(user.id, 'UPDATE', 'Order', { id, lines: lineData.length, gross, discount });
   revalidatePath(LIST, 'page');

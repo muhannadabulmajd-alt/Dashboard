@@ -1,8 +1,15 @@
 import { describe, it, expect } from 'vitest';
-import { cogs, grossMargin, contributionMargin, productMargin, costPerKg } from '@/lib/metrics/margin';
+import { cogs, grossMargin, contributionMargin, productMargin, costPerKg, marginStatus } from '@/lib/metrics/margin';
 import { makeLine, makeProduct } from '../fixtures/builders';
 
 describe('margin metrics', () => {
+  it('marginStatus flags below-cost and low-margin products', () => {
+    expect(marginStatus(8_000, 4_016)).toBe('ok'); // ~50%
+    expect(marginStatus(8_000, 7_500)).toBe('lowMargin'); // ~6% < 15%
+    expect(marginStatus(8_000, 9_000)).toBe('belowCost');
+    expect(marginStatus(0, 5_000)).toBe('ok'); // no price set
+  });
+
   const lines = [
     makeLine({ quantity: 3, lineNet: 30_000, unitCogsSnapshot: 6_000 }),
     makeLine({ quantity: 2, lineNet: 25_000, unitCogsSnapshot: 7_000 }),

@@ -357,7 +357,11 @@
     "costsByCategory": "التكاليف التشغيلية حسب الفئة",
     "perKg": "التكلفة لكل كغم",
     "perCup": "التكلفة لكل كوب",
-    "amount": "المبلغ"
+    "amount": "المبلغ",
+    "marginAlerts": "تنبيهات الهامش",
+    "price": "السعر",
+    "belowCost": "أقل من التكلفة",
+    "lowMargin": "هامش منخفض"
   },
   "table": {
     "product": "المنتج",

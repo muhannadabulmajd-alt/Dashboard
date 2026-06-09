@@ -7,10 +7,11 @@ import { enumLabel } from '@/lib/enums';
 import { buildExportHref } from '@/lib/filters';
 import { formatMoney, formatNumber, formatPercent } from '@/lib/money';
 import { monthProgress } from '@/lib/dates';
+import { prisma } from '@/server/db/client';
 import { KpiCard } from '@/components/kpi/KpiCard';
 import { WaterfallChart, BarChartCard, type WaterfallStep } from '@/components/charts/Charts';
 import { DataTable } from '@/components/data-table/DataTable';
-import { PageHeader } from '@/components/ui/primitives';
+import { Badge, PageHeader } from '@/components/ui/primitives';
 
 const CUPS_PER_KG = 83; // ~12g per cup
 
@@ -44,6 +45,18 @@ export default async function PnlPage({
   const opex = M.operatingExpenses(expenses, 'IQD');
   const profit = M.operatingProfit(margin.amount, opex);
   const contribution = M.contributionMargin(net, cogs, { delivery: M.deliveryCostTotal(orders) });
+
+  // Cost/margin alerts (§9/§17): active products priced below cost or thin margin.
+  const products = await prisma.product.findMany({
+    where: { isActive: true },
+    orderBy: { sku: 'asc' },
+    select: { sku: true, nameEn: true, nameAr: true, sellingPrice: true, cogsPerUnit: true, sellingCurrency: true },
+  });
+  const rank = { belowCost: 0, lowMargin: 1, ok: 2 };
+  const marginAlerts = products
+    .map((p) => ({ p, status: M.marginStatus(p.sellingPrice, p.cogsPerUnit) }))
+    .filter((a) => a.status !== 'ok')
+    .sort((a, b) => rank[a.status] - rank[b.status]);
 
   const greenSpend = expenses.filter((e) => e.categoryType === 'GREEN_COFFEE').reduce((s, e) => s + e.amount, 0);
   const roastedKg = M.totalRoastedOutput(batches) / 1000;
@@ -104,6 +117,36 @@ export default async function PnlPage({
         <KpiCard label={t('perKg')} value={formatMoney(costPerKg, 'IQD', locale)} locale={locale} invertDelta />
         <KpiCard label={t('perCup')} value={formatMoney(costPerCup, 'IQD', locale)} locale={locale} invertDelta />
       </section>
+
+      {marginAlerts.length ? (
+        <section className="space-y-2 rounded-[var(--radius)] border border-warning/40 bg-warning-soft/30 p-4">
+          <h3 className="text-sm font-bold text-warning">{t('marginAlerts')}</h3>
+          <DataTable
+            columns={[
+              { label: tt('product') },
+              { label: tt('sku') },
+              { label: t('price'), align: 'end' as const },
+              { label: tk('cogs'), align: 'end' as const },
+              { label: tt('marginPct'), align: 'end' as const },
+              { label: '' },
+            ]}
+            rows={marginAlerts.map(({ p, status }) => {
+              const m = p.sellingPrice > 0 ? (p.sellingPrice - p.cogsPerUnit) / p.sellingPrice : 0;
+              return [
+                locale === 'ar' ? p.nameAr : p.nameEn,
+                p.sku,
+                formatMoney(p.sellingPrice, p.sellingCurrency, locale),
+                formatMoney(p.cogsPerUnit, p.sellingCurrency, locale),
+                formatPercent(m, locale),
+                <Badge key="s" variant={status === 'belowCost' ? 'danger' : 'warning'}>
+                  {status === 'belowCost' ? t('belowCost') : t('lowMargin')}
+                </Badge>,
+              ];
+            })}
+            emptyLabel={tc('noData')}
+          />
+        </section>
+      ) : null}
 
       <section className="grid gap-4 lg:grid-cols-2">
         <WaterfallChart title={t('waterfall')} steps={waterfall} locale={locale} />
