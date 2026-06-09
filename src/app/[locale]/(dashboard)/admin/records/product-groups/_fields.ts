@@ -17,11 +17,13 @@ export function productGroupFields(
     { name: 'nameAr', label: t('f.nameAr'), type: 'text', required: true },
     {
       name: 'productLine',
-      label: t('f.productLine'),
+      label: t('f.category'),
       type: 'select',
       required: true,
       options: PRODUCT_LINES.map((v) => ({ value: v, label: enumLabel(v, locale) })),
     },
+    { name: 'productType', label: t('f.productType'), type: 'text', placeholder: t('f.productTypeHint') },
     { name: 'description', label: t('f.description'), type: 'text' },
+    { name: 'imageUrl', label: t('f.imageUrl'), type: 'text', placeholder: 'https://…' },
   ];
 }

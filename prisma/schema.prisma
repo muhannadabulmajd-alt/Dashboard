@@ -296,7 +296,9 @@ model ProductGroup {
   nameEn      String
   nameAr      String
   productLine ProductLine
+  productType String? // free-text kind, e.g. "Coffee", "Gift", "Merch"
   description String?
+  imageUrl    String? // optional image (URL)
   isActive    Boolean     @default(true)
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt

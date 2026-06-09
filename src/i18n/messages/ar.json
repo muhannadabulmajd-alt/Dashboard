@@ -198,6 +198,23 @@
     "addVariation": "إضافة تنويع",
     "ungroupedVariations": "تنويعات غير مرتبطة",
     "ungroupedHint": "غير مرتبطة بمنتج رئيسي",
+    "tabs": {
+      "overview": "نظرة عامة",
+      "variations": "التنويعات",
+      "reports": "التقارير",
+      "activity": "النشاط"
+    },
+    "rep": {
+      "unitsSold": "الوحدات المباعة",
+      "revenue": "الإيراد",
+      "cogs": "كلفة البضاعة",
+      "grossMargin": "الهامش الإجمالي"
+    },
+    "act": {
+      "when": "متى",
+      "action": "التغيير",
+      "by": "بواسطة"
+    },
     "guide": {
       "products": {
         "title": "كيفية استخدام المنتجات والتنويعات",
@@ -255,7 +272,8 @@
       "yield": "العائد", "shrinkage": "الفاقد", "qc": "الجودة", "qcNotes": "ملاحظات الجودة", "pending": "قيد الانتظار", "roasted": "محمّص",
       "none": "—", "createdAt": "أُضيف",
       "address1": "العنوان", "street": "الشارع / أقرب نقطة دالة", "notes": "ملاحظات", "source": "المصدر",
-      "code": "الرمز", "description": "الوصف", "variations": "التنويعات", "variation": "التنويع", "group": "مجموعة المنتج", "mainProduct": "المنتج الرئيسي"
+      "code": "الرمز", "description": "الوصف", "variations": "التنويعات", "variation": "التنويع", "group": "مجموعة المنتج", "mainProduct": "المنتج الرئيسي",
+      "productType": "نوع المنتج", "productTypeHint": "مثل: قهوة، هدية، منتجات", "imageUrl": "رابط الصورة"
     }
   },
   "common": {

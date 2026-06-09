@@ -198,6 +198,23 @@
     "addVariation": "Add variation",
     "ungroupedVariations": "Ungrouped variations",
     "ungroupedHint": "not linked to a main product",
+    "tabs": {
+      "overview": "Overview",
+      "variations": "Variations",
+      "reports": "Reports",
+      "activity": "Activity"
+    },
+    "rep": {
+      "unitsSold": "Units sold",
+      "revenue": "Revenue",
+      "cogs": "COGS",
+      "grossMargin": "Gross margin"
+    },
+    "act": {
+      "when": "When",
+      "action": "Change",
+      "by": "By"
+    },
     "guide": {
       "products": {
         "title": "How to use Products & Variations",
@@ -255,7 +272,8 @@
       "yield": "Yield", "shrinkage": "Shrinkage", "qc": "QC", "qcNotes": "QC notes", "pending": "Pending", "roasted": "Roasted",
       "none": "—", "createdAt": "Added",
       "address1": "Address", "street": "Street / landmark", "notes": "Notes", "source": "Source",
-      "code": "Code", "description": "Description", "variations": "Variations", "variation": "Variation", "group": "Product group", "mainProduct": "Main product"
+      "code": "Code", "description": "Description", "variations": "Variations", "variation": "Variation", "group": "Product group", "mainProduct": "Main product",
+      "productType": "Product type", "productTypeHint": "e.g. Coffee, Gift, Merch", "imageUrl": "Image URL"
     }
   },
   "common": {

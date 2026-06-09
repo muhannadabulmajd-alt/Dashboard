@@ -14,7 +14,9 @@ const schema = z.object({
   nameEn: z.string().min(1),
   nameAr: z.string().min(1),
   productLine: z.enum(PRODUCT_LINES),
+  productType: z.string().optional(),
   description: z.string().optional(),
+  imageUrl: z.string().url().optional().or(z.literal('')),
 });
 
 function parse(fd: FormData) {
@@ -22,9 +24,14 @@ function parse(fd: FormData) {
     nameEn: reqField(fd, 'nameEn'),
     nameAr: reqField(fd, 'nameAr'),
     productLine: reqField(fd, 'productLine'),
+    productType: optField(fd, 'productType'),
     description: optField(fd, 'description'),
+    imageUrl: optField(fd, 'imageUrl'),
   });
 }
+
+// Normalize an empty image URL to null.
+const clean = <T extends { imageUrl?: string }>(d: T) => ({ ...d, imageUrl: d.imageUrl || null });
 
 const isUniqueViolation = (e: unknown) =>
   typeof e === 'object' && e !== null && 'code' in e && (e as { code?: string }).code === 'P2002';
@@ -50,7 +57,7 @@ export async function createProductGroup(_prev: ActionState, fd: FormData): Prom
   for (let attempt = 0; ; attempt++) {
     const code = await nextGroupCode();
     try {
-      created = await prisma.productGroup.create({ data: { ...r.data, code } });
+      created = await prisma.productGroup.create({ data: { ...clean(r.data), code } });
       break;
     } catch (e) {
       if (isUniqueViolation(e) && attempt < 5) continue; // race: regenerate
@@ -69,7 +76,7 @@ export async function updateProductGroup(id: string, _prev: ActionState, fd: For
   if (!r.success) return { error: 'invalid' };
   const locale = reqField(fd, 'locale') || 'ar';
   // `code` is immutable (BRD §10) — never updated.
-  await prisma.productGroup.update({ where: { id }, data: r.data });
+  await prisma.productGroup.update({ where: { id }, data: clean(r.data) });
   await audit(user.id, 'UPDATE', 'ProductGroup', { id });
   revalidatePath(LIST, 'page');
   redirect(`/${locale}/admin/records/product-groups/${id}`);
