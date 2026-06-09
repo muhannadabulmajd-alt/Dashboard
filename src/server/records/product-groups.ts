@@ -37,7 +37,7 @@ const isUniqueViolation = (e: unknown) =>
   typeof e === 'object' && e !== null && 'code' in e && (e as { code?: string }).code === 'P2002';
 
 /** Next sequential, immutable group code, e.g. PG-000001. */
-async function nextGroupCode(): Promise<string> {
+export async function nextGroupCode(): Promise<string> {
   const rows = await prisma.productGroup.findMany({ select: { code: true } });
   let max = 0;
   for (const { code } of rows) {

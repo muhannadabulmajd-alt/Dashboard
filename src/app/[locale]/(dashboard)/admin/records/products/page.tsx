@@ -9,7 +9,7 @@ import { DataTable, type Column } from '@/components/data-table/DataTable';
 import { RecordsSummary, type SummaryStat } from '@/components/records/Summary';
 import { TableToolbar } from '@/components/records/TableToolbar';
 import { SectionGuide } from '@/components/records/SectionGuide';
-import { Plus, Layers, Boxes } from 'lucide-react';
+import { Plus, Layers, Boxes, Wand2 } from 'lucide-react';
 import { BackLink } from '@/components/records/parts';
 import { Link } from '@/i18n/navigation';
 
@@ -42,6 +42,13 @@ export default async function ProductsRecordsPage({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <PageHeader title={t('entities.productsVariations')} subtitle={t('entityHints.productsVariations')} />
         <div className="flex shrink-0 items-center gap-2">
+          <Link
+            href="/admin/records/products/wizard"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-sm font-medium text-primary hover:bg-primary/10"
+          >
+            <Wand2 className="size-4" />
+            {t('wizard.cta')}
+          </Link>
           <Link
             href="/admin/records/product-groups/new"
             className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium hover:bg-muted"

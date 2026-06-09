@@ -316,6 +316,21 @@
     "impact": {
       "cost": "Changing the price or cost affects future orders only — past orders keep the price and cost recorded at the time."
     },
+    "wizard": {
+      "title": "New product — guided setup",
+      "subtitle": "Create a main product and its first variation step by step.",
+      "cta": "Guided setup",
+      "steps": { "basics": "Product", "variation": "Variation", "pricing": "Pricing", "cost": "Cost", "behaviour": "Behaviour", "review": "Review" },
+      "skuHint": "A unique code for this variation, e.g. LH-TUR-250-WB. Can't change later.",
+      "sizeHint": "e.g. 250g, 1kg, box of 10.",
+      "behaviourHint": "You can fine-tune these and link inventory later on the variation's tabs.",
+      "status": "Activate as",
+      "active": "Active (available in orders)",
+      "draft": "Draft (hidden until ready)",
+      "back": "Back",
+      "next": "Next",
+      "finish": "Create product"
+    },
     "systemLists": {
       "title": "System lists",
       "subtitle": "The standard categories used across the app, in both languages.",
