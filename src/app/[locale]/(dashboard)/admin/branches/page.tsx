@@ -1,10 +1,12 @@
 import { getTranslations } from 'next-intl/server';
+import { Plus } from 'lucide-react';
 import { getPageContext } from '@/server/page-context';
 import { prisma } from '@/server/db/client';
 import { enumLabel } from '@/lib/enums';
 import { Badge, PageHeader } from '@/components/ui/primitives';
-import { DataTable } from '@/components/data-table/DataTable';
-import { CreateBranchForm } from './CreateBranchForm';
+import { DataTable, type Column } from '@/components/data-table/DataTable';
+import { SectionGuide } from '@/components/records/SectionGuide';
+import { Link } from '@/i18n/navigation';
 
 export default async function BranchesPage({
   params,
@@ -18,39 +20,42 @@ export default async function BranchesPage({
 
   const branches = await prisma.branch.findMany({
     orderBy: { createdAt: 'asc' },
-    select: { id: true, code: true, nameEn: true, nameAr: true, governorate: true, isFranchise: true, isActive: true },
+    select: { id: true, code: true, nameEn: true, nameAr: true, branchType: true, governorate: true, isActive: true },
   });
 
-  const cols = [
+  const cols: Column[] = [
     { label: t('code') },
     { label: t('nameEn') },
-    { label: t('governorate') },
     { label: t('type') },
+    { label: t('governorate') },
     { label: t('status') },
+    { label: '', align: 'end' },
   ];
   const rows = branches.map((b) => [
-    b.code,
+    <span key="c" className="font-mono text-xs text-muted-foreground">{b.code}</span>,
     locale === 'ar' ? b.nameAr : b.nameEn,
+    <Badge key="t" variant={b.branchType === 'FRANCHISE' ? 'default' : b.branchType === 'HQ' ? 'success' : 'muted'}>
+      {t(`types.${b.branchType}`)}
+    </Badge>,
     enumLabel(b.governorate, locale),
-    <Badge key="t" variant={b.isFranchise ? 'default' : 'muted'}>
-      {b.isFranchise ? t('franchiseTag') : t('hq')}
-    </Badge>,
-    <Badge key="s" variant={b.isActive ? 'success' : 'muted'}>
-      {b.isActive ? t('active') : t('inactive')}
-    </Badge>,
+    <Badge key="s" variant={b.isActive ? 'success' : 'muted'}>{b.isActive ? t('active') : t('inactive')}</Badge>,
+    <Link key="o" href={`/admin/branches/${b.id}`} className="font-medium text-primary hover:underline">{t('open')}</Link>,
   ]);
 
   return (
     <>
-      <PageHeader title={t('title')} subtitle={t('subtitle')} />
-      <section className="space-y-2">
-        <h3 className="text-sm font-semibold">{t('create')}</h3>
-        <CreateBranchForm />
-      </section>
-      <section className="space-y-2">
-        <h3 className="text-sm font-semibold">{t('existing')}</h3>
-        <DataTable columns={cols} rows={rows} emptyLabel="—" />
-      </section>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <PageHeader title={t('title')} subtitle={t('subtitle')} />
+        <Link
+          href="/admin/branches/new"
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:opacity-95"
+        >
+          <Plus className="size-4" />
+          {t('create')}
+        </Link>
+      </div>
+      <SectionGuide title={t('guide.title')} intro={t('guide.intro')} points={t.raw('guide.points') as string[]} />
+      <DataTable columns={cols} rows={rows} emptyLabel="—" />
     </>
   );
 }

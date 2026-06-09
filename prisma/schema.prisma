@@ -219,10 +219,38 @@ model Branch {
   code        String      @unique
   nameEn      String
   nameAr      String
+  branchType  String      @default("COMPANY") // HQ | COMPANY | FRANCHISE (§12)
   governorate Governorate @default(BAGHDAD)
-  isFranchise Boolean     @default(false)
+  isFranchise Boolean     @default(false) // kept in sync with branchType for data scoping
   isActive    Boolean     @default(true)
-  createdAt   DateTime    @default(now())
+
+  // Location & contact
+  city         String?
+  address      String?
+  street       String?
+  notes        String?
+  phone        String?
+  email        String?
+  managerName  String?
+  managerPhone String?
+  managerEmail String?
+
+  // Franchise (when branchType = FRANCHISE)
+  franchiseeName  String?
+  franchiseePhone String?
+  franchiseeEmail String?
+  agreementStart  DateTime?
+  agreementEnd    DateTime?
+
+  // Operational
+  openingDate    DateTime?
+  operatingHours String?
+  hasDelivery    Boolean   @default(false)
+  hasPos         Boolean   @default(false)
+  trackInventory Boolean   @default(true)
+  hasWarehouse   Boolean   @default(false)
+
+  createdAt DateTime @default(now())
 
   users          User[]
   orders         Order[]

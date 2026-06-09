@@ -11,7 +11,8 @@ type ShowWhen = { field: string; in: string[] };
 
 export type FieldDef =
   | { name: string; label: string; type: 'text' | 'number' | 'email' | 'date'; required?: boolean; placeholder?: string; step?: string; showWhen?: ShowWhen; disabled?: boolean }
-  | { name: string; label: string; type: 'select'; required?: boolean; options: { value: string; label: string }[]; showWhen?: ShowWhen; disabled?: boolean };
+  | { name: string; label: string; type: 'select'; required?: boolean; options: { value: string; label: string }[]; showWhen?: ShowWhen; disabled?: boolean }
+  | { name: string; label: string; type: 'checkbox'; hint?: string; showWhen?: ShowWhen; disabled?: boolean };
 
 const input =
   'w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:border-primary';
@@ -35,7 +36,7 @@ export function RecordForm({
 }: {
   action: Action;
   fields: FieldDef[];
-  initial?: Record<string, string | number | null | undefined>;
+  initial?: Record<string, string | number | boolean | null | undefined>;
   locale: string;
   submitLabel: string;
   cancelHref: string;
@@ -72,6 +73,18 @@ export function RecordForm({
         const track = watched.has(f.name)
           ? (val: string) => setValues((p) => ({ ...p, [f.name]: val }))
           : undefined;
+        if (f.type === 'checkbox') {
+          const checked = v === true || v === 'true' || v === 'on' || v === 1;
+          return (
+            <label key={f.name} className="flex cursor-pointer items-start gap-2.5 rounded-lg border p-3 hover:bg-muted/40 sm:col-span-2">
+              <input type="checkbox" name={f.name} defaultChecked={checked} disabled={f.disabled} className="mt-0.5 size-4 accent-primary" />
+              <span>
+                <span className="block text-sm font-medium text-foreground">{f.label}</span>
+                {f.hint ? <span className="block text-xs text-muted-foreground">{f.hint}</span> : null}
+              </span>
+            </label>
+          );
+        }
         return (
           <div key={f.name} className="flex flex-col gap-1">
             <label className="text-xs font-medium text-muted-foreground">
