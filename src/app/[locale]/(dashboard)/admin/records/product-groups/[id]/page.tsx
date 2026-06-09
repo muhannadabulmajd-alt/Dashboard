@@ -63,7 +63,7 @@ export default async function ProductGroupDetailPage({
 
   return (
     <>
-      <BackLink href="/admin/records/product-groups" label={t('back')} />
+      <BackLink href="/admin/records/products?view=main" label={t('back')} />
       <PageHeader title={name} subtitle={g.code} />
       <RecordActions
         editHref={`/admin/records/product-groups/${g.id}/edit`}

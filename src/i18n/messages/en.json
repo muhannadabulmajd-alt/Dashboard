@@ -172,21 +172,44 @@
     },
     "entities": {
       "products": "Products",
+      "productsVariations": "Products & Variations",
       "productGroups": "Product groups",
       "customers": "Customers",
       "orders": "Orders",
       "inventory": "Inventory",
       "batches": "Roast batches",
+      "branches": "Branches & Franchises",
       "systemLists": "System lists"
     },
     "entityHints": {
       "products": "Catalog items, prices and costs",
+      "productsVariations": "Main products, variations, prices, costs and inventory links",
       "productGroups": "Parent products grouping their variations",
       "customers": "People and businesses who order",
       "orders": "Every order and its line items",
       "inventory": "Stock items and movements",
       "batches": "Roasting log and green-coffee usage",
+      "branches": "HQ, company branches and franchise accounts",
       "systemLists": "Reference: channels, grinds, categories…"
+    },
+    "mainProducts": "Main products",
+    "variationsView": "All variations",
+    "addMainProduct": "Add main product",
+    "addVariation": "Add variation",
+    "ungroupedVariations": "Ungrouped variations",
+    "ungroupedHint": "not linked to a main product",
+    "guide": {
+      "products": {
+        "title": "How to use Products & Variations",
+        "intro": "A main product is the umbrella (e.g. Turkish Coffee). A variation is what you actually sell (e.g. 250g · Cardamom · Medium). Start with the main product, then add its variations.",
+        "points": [
+          "Create the main product first, then open it to add variations.",
+          "Each variation carries its own selling price, cost recipe and inventory link.",
+          "Only active, configured variations appear when creating an order.",
+          "Editing a variation's cost only affects future orders — past orders keep their snapshot.",
+          "Variations don't need a main product; standalone ones show under \"Ungrouped variations\"."
+        ]
+      }
     },
     "systemLists": {
       "title": "System lists",
@@ -232,7 +255,7 @@
       "yield": "Yield", "shrinkage": "Shrinkage", "qc": "QC", "qcNotes": "QC notes", "pending": "Pending", "roasted": "Roasted",
       "none": "—", "createdAt": "Added",
       "address1": "Address", "street": "Street / landmark", "notes": "Notes", "source": "Source",
-      "code": "Code", "description": "Description", "variations": "Variations", "variation": "Variation", "group": "Product group"
+      "code": "Code", "description": "Description", "variations": "Variations", "variation": "Variation", "group": "Product group", "mainProduct": "Main product"
     }
   },
   "common": {

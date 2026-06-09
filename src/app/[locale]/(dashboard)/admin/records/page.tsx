@@ -1,17 +1,19 @@
 import { getTranslations } from 'next-intl/server';
-import { Package, Layers, Users, ShoppingBag, Boxes, Flame, ChevronRight, ListChecks } from 'lucide-react';
+import { Package, Users, ShoppingBag, Boxes, Flame, ChevronRight, ListChecks, Building2 } from 'lucide-react';
 import { getPageContext } from '@/server/page-context';
 import { can, type Capability } from '@/lib/rbac';
 import { Link } from '@/i18n/navigation';
 import { PageHeader } from '@/components/ui/primitives';
 
+// Products and Product Groups are merged into one "Products & Variations"
+// section (BRD §3): main products lead, their variations live inside.
 const ENTITIES: { key: string; href: string; cap: Capability; Icon: typeof Package }[] = [
-  { key: 'products', href: '/admin/records/products', cap: 'manage:products', Icon: Package },
-  { key: 'productGroups', href: '/admin/records/product-groups', cap: 'manage:products', Icon: Layers },
-  { key: 'customers', href: '/admin/records/customers', cap: 'manage:customers', Icon: Users },
+  { key: 'productsVariations', href: '/admin/records/products', cap: 'manage:products', Icon: Package },
   { key: 'orders', href: '/admin/records/orders', cap: 'manage:orders', Icon: ShoppingBag },
+  { key: 'customers', href: '/admin/records/customers', cap: 'manage:customers', Icon: Users },
   { key: 'inventory', href: '/admin/records/inventory', cap: 'manage:inventory', Icon: Boxes },
   { key: 'batches', href: '/admin/records/batches', cap: 'manage:batches', Icon: Flame },
+  { key: 'branches', href: '/admin/branches', cap: 'manage:branches', Icon: Building2 },
   { key: 'systemLists', href: '/admin/records/system-lists', cap: 'view:records', Icon: ListChecks },
 ];
 
