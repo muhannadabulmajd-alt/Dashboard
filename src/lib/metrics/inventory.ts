@@ -6,6 +6,45 @@ export function currentStock(movements: MovementLike[]): number {
   return movements.reduce((s, m) => s + m.quantity, 0);
 }
 
+export interface CostLayer {
+  id: string;
+  qtyReceived: number;
+  unitCost: number;
+  receivedAt: Date;
+}
+export interface LayerStatus extends CostLayer {
+  remaining: number;
+}
+export interface FifoStatus {
+  layers: LayerStatus[];
+  activeCost: number | null; // oldest non-empty layer's unit cost
+  totalRemaining: number;
+  value: number; // Σ remaining × unitCost
+}
+
+/**
+ * FIFO layer status (§8): apply total consumed quantity to immutable layers
+ * oldest-first to derive each layer's remaining, the active (oldest non-empty)
+ * cost, and the on-hand value. Deriving remaining means order edits/cancels
+ * (which change the consumed total) adjust everything automatically.
+ */
+export function fifoStatus(layers: CostLayer[], totalConsumed: number): FifoStatus {
+  const sorted = [...layers].sort((a, b) => a.receivedAt.getTime() - b.receivedAt.getTime());
+  let left = Math.max(0, totalConsumed);
+  const out: LayerStatus[] = sorted.map((l) => {
+    const consumed = Math.min(l.qtyReceived, left);
+    left -= consumed;
+    return { ...l, remaining: l.qtyReceived - consumed };
+  });
+  const active = out.find((l) => l.remaining > 0) ?? null;
+  return {
+    layers: out,
+    activeCost: active ? active.unitCost : null,
+    totalRemaining: out.reduce((s, l) => s + l.remaining, 0),
+    value: out.reduce((s, l) => s + l.remaining * l.unitCost, 0),
+  };
+}
+
 export interface RecipeComponent {
   inventoryItemId: string | null; // null = unlinked (labor/overhead) — doesn't constrain capacity
   quantity: number; // required per produced unit

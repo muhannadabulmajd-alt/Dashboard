@@ -147,3 +147,8 @@ export function formatDate(date: Date, locale: 'ar' | 'en' = 'en'): string {
 export function formatDateTime(date: Date, locale: 'ar' | 'en' = 'en'): string {
   return formatInTimeZone(date, TZ, 'dd/MM/yyyy HH:mm');
 }
+
+/** Baghdad-local yyyy-MM-dd for prefilling `<input type="date">` defaults. */
+export function dateInputValue(date: Date = new Date()): string {
+  return formatInTimeZone(date, TZ, 'yyyy-MM-dd');
+}

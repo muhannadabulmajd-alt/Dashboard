@@ -8,6 +8,7 @@ import {
   nearExpiry,
   stockValueByCategory,
   productionCapacity,
+  fifoStatus,
 } from '@/lib/metrics/inventory';
 import { makeItem, makeMovement } from '../fixtures/builders';
 
@@ -109,5 +110,52 @@ describe('inventory metrics', () => {
 
   it('productionCapacity is null when no linked components', () => {
     expect(productionCapacity([{ inventoryItemId: null, quantity: 1 }], new Map()).producible).toBeNull();
+  });
+
+  describe('fifoStatus (§8)', () => {
+    const layers = [
+      { id: 'a', qtyReceived: 100, unitCost: 2_000, receivedAt: new Date('2026-04-01') },
+      { id: 'b', qtyReceived: 100, unitCost: 3_000, receivedAt: new Date('2026-05-01') },
+    ];
+
+    it('with nothing consumed the active cost is the oldest layer', () => {
+      const s = fifoStatus(layers, 0);
+      expect(s.activeCost).toBe(2_000);
+      expect(s.totalRemaining).toBe(200);
+      expect(s.value).toBe(100 * 2_000 + 100 * 3_000); // 500_000
+      expect(s.layers.map((l) => l.remaining)).toEqual([100, 100]);
+    });
+
+    it('consuming into the first layer keeps it active at the oldest cost', () => {
+      const s = fifoStatus(layers, 40);
+      expect(s.activeCost).toBe(2_000);
+      expect(s.totalRemaining).toBe(160);
+      expect(s.layers[0].remaining).toBe(60);
+    });
+
+    it('depleting the first layer rolls the active cost to the next', () => {
+      const s = fifoStatus(layers, 120); // 100 from A, 20 from B
+      expect(s.activeCost).toBe(3_000);
+      expect(s.totalRemaining).toBe(80);
+      expect(s.layers[0].remaining).toBe(0);
+      expect(s.layers[1].remaining).toBe(80);
+      expect(s.value).toBe(80 * 3_000);
+    });
+
+    it('fully consumed leaves no active cost', () => {
+      const s = fifoStatus(layers, 200);
+      expect(s.activeCost).toBeNull();
+      expect(s.totalRemaining).toBe(0);
+      expect(s.value).toBe(0);
+    });
+
+    it('sorts unordered layers by receipt date before applying consumption', () => {
+      const s = fifoStatus([layers[1], layers[0]], 120);
+      expect(s.activeCost).toBe(3_000); // oldest (A) still depleted first
+    });
+
+    it('returns null active cost with no layers', () => {
+      expect(fifoStatus([], 0).activeCost).toBeNull();
+    });
   });
 });

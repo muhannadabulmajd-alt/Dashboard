@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/server/db/client';
 import { CHANNELS, GOVERNORATES, FULFILLMENT_METHODS, ORDER_STATUSES } from '@/lib/enums';
+import { syncActiveCostForProducts } from '@/server/inventory/fifo';
 import { requireCap, audit, reqField, optField, type ActionState } from './shared';
 
 const LIST = '/[locale]/(dashboard)/admin/records/orders';
@@ -167,6 +168,8 @@ export async function createOrder(_prev: ActionState, fd: FormData): Promise<Act
     if (h.data.status === 'COMPLETED') await applySoldMovements(tx, o.id, h.data.placedAt, lineData);
     return o;
   });
+  // Stock consumption changed → roll each linked item's active FIFO cost (§8).
+  await syncActiveCostForProducts(lineData.map((l) => l.productId));
   await audit(user.id, 'CREATE', 'Order', { orderNumber: h.data.orderNumber, lines: lineData.length });
   revalidatePath(LIST, 'page');
   redirect(`/${locale}/admin/records/orders/${order.id}`);
@@ -190,8 +193,12 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
   const parsedLines = lineSchema.safeParse(rawLines);
   if (!parsedLines.success || parsedLines.data.length === 0) return { error: 'nolines' };
 
-  const existing = await prisma.order.findUnique({ where: { id }, select: { id: true } });
+  const existing = await prisma.order.findUnique({
+    where: { id },
+    select: { id: true, lines: { select: { productId: true } } },
+  });
   if (!existing) return { error: 'notfound' };
+  const oldProductIds = existing.lines.map((l) => l.productId);
 
   const lineData: LineData[] = [];
   for (const l of parsedLines.data) {
@@ -241,6 +248,9 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
     // Prior deductions were cleared above; re-apply only if still completed.
     if (h.data.status === 'COMPLETED') await applySoldMovements(tx, id, h.data.placedAt, lineData);
   });
+  // Re-derive FIFO cost for items touched before or after the edit (a removed
+  // line reverses its consumption; an added line consumes), §8.
+  await syncActiveCostForProducts([...oldProductIds, ...lineData.map((l) => l.productId)]);
   await audit(user.id, 'UPDATE', 'Order', { id, lines: lineData.length, gross, discount });
   revalidatePath(LIST, 'page');
   redirect(`/${locale}/admin/records/orders/${id}`);

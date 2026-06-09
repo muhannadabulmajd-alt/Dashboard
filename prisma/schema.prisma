@@ -455,12 +455,30 @@ model InventoryItem {
   isActive      Boolean           @default(true)
   createdAt     DateTime          @default(now())
 
-  product   Product?           @relation(fields: [productId], references: [id])
-  branch    Branch?            @relation(fields: [branchId], references: [id])
-  movements StockMovement[]
+  product    Product?           @relation(fields: [productId], references: [id])
+  branch     Branch?            @relation(fields: [branchId], references: [id])
+  movements  StockMovement[]
   recipeUses ProductComponent[]
+  costLayers InventoryCostLayer[]
 
   @@index([category])
+}
+
+// FIFO cost layer (§8): an immutable stock receipt at a unit cost. "Remaining"
+// is derived by applying net stock-out oldest-first, so order edits/cancels
+// adjust it automatically. The active (oldest non-empty) layer drives the
+// item's current cost.
+model InventoryCostLayer {
+  id              String   @id @default(cuid())
+  inventoryItemId String
+  qtyReceived     Int
+  unitCost        Int // minor units IQD per unit
+  receivedAt      DateTime
+  createdAt       DateTime @default(now())
+
+  inventoryItem InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+
+  @@index([inventoryItemId, receivedAt])
 }
 
 model StockMovement {

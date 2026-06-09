@@ -4,15 +4,17 @@ import { getPageContext } from '@/server/page-context';
 import { prisma } from '@/server/db/client';
 import { enumLabel, ROAST_LEVELS } from '@/lib/enums';
 import { formatMoney, formatNumber, formatPercent } from '@/lib/money';
-import { formatDate } from '@/lib/dates';
+import { formatDate, dateInputValue } from '@/lib/dates';
 import { gramsPerUnit } from '@/lib/roast';
 import { roastedCostPerKg } from '@/lib/metrics/roasting';
+import { fifoStatus } from '@/lib/metrics/inventory';
 import { getRoastConfig } from '@/server/settings';
 import { PageHeader } from '@/components/ui/primitives';
 import { BackLink, DetailGrid, type DetailField } from '@/components/records/parts';
 import { DataTable, type Column } from '@/components/data-table/DataTable';
 import { RecordActions } from '@/components/records/RecordActions';
-import { archiveInventory, deleteInventory } from '@/server/records/inventory';
+import { RecordForm, type FieldDef } from '@/components/records/form';
+import { archiveInventory, deleteInventory, receiveStock } from '@/server/records/inventory';
 import type { RoastLevel } from '@prisma/client';
 
 export default async function InventoryDetailPage({
@@ -27,12 +29,23 @@ export default async function InventoryDetailPage({
   const t = await getTranslations('records');
   const item = await prisma.inventoryItem.findUnique({
     where: { id },
-    include: { movements: { orderBy: { occurredAt: 'desc' } } },
+    include: {
+      movements: { orderBy: { occurredAt: 'desc' } },
+      costLayers: { orderBy: { receivedAt: 'asc' } },
+    },
   });
   if (!item) notFound();
 
   const name = locale === 'ar' ? item.nameAr : item.nameEn;
   const current = item.movements.reduce((s, m) => s + m.quantity, 0);
+
+  // FIFO cost layers (§8): apply consumption since the first layer (oldest-first)
+  // to derive each layer's remaining, the active cost, and the on-hand value.
+  const since = item.costLayers[0]?.receivedAt;
+  const consumed = since
+    ? item.movements.reduce((s, m) => (m.quantity < 0 && m.occurredAt >= since ? s - m.quantity : s), 0)
+    : 0;
+  const fifo = item.costLayers.length ? fifoStatus(item.costLayers, consumed) : null;
 
   // Green→roasted cost estimate (§5): for green coffee, project roasted cost per
   // roast type from this bean's cost-per-kg and the configured yields.
@@ -78,6 +91,15 @@ export default async function InventoryDetailPage({
     formatNumber(m.quantity, locale),
   ]);
 
+  const receiveFields: FieldDef[] = [
+    { name: 'qtyReceived', label: t('f.qtyReceived'), type: 'number', required: true, placeholder: '0' },
+    { name: 'unitCost', label: t('f.unitCost'), type: 'number', required: true, placeholder: '0' },
+    { name: 'receivedAt', label: t('f.receivedAt'), type: 'date', required: true },
+    { name: 'expiryDate', label: t('f.expiryDate'), type: 'date' },
+    { name: 'reference', label: t('f.reference'), type: 'text' },
+  ];
+  const receiveErrors = { invalid: t('err.invalid'), forbidden: t('err.forbidden') };
+
   return (
     <>
       <BackLink href="/admin/records/inventory" label={t('back')} />
@@ -118,6 +140,56 @@ export default async function InventoryDetailPage({
           />
         </div>
       ) : null}
+
+      <div className="mt-6 space-y-2">
+        <h3 className="text-sm font-semibold">{t('costLayers')}</h3>
+        <p className="text-xs text-muted-foreground">{t('costLayersHint')}</p>
+        {fifo ? (
+          <>
+            <div className="flex flex-wrap gap-4 text-sm">
+              <span>
+                {t('activeCost')}:{' '}
+                <strong>{fifo.activeCost != null ? formatMoney(fifo.activeCost, 'IQD', locale) : '—'}</strong>
+              </span>
+              <span>
+                {t('onHandValue')}: <strong>{formatMoney(fifo.value, 'IQD', locale)}</strong>
+              </span>
+            </div>
+            <DataTable
+              columns={[
+                { label: t('f.receivedAt') },
+                { label: t('f.qtyReceived'), align: 'end' },
+                { label: t('f.unitCost'), align: 'end' },
+                { label: t('f.remaining'), align: 'end' },
+                { label: t('f.value'), align: 'end' },
+              ]}
+              rows={fifo.layers.map((l) => [
+                formatDate(l.receivedAt, locale),
+                formatNumber(l.qtyReceived, locale),
+                formatMoney(l.unitCost, 'IQD', locale),
+                formatNumber(l.remaining, locale),
+                formatMoney(l.remaining * l.unitCost, 'IQD', locale),
+              ])}
+              emptyLabel={t('none')}
+            />
+          </>
+        ) : null}
+      </div>
+
+      <div className="mt-4 space-y-2">
+        <h3 className="text-sm font-semibold">{t('receiveStock')}</h3>
+        <p className="text-xs text-muted-foreground">{t('receiveStockHint')}</p>
+        <RecordForm
+          action={receiveStock.bind(null, item.id)}
+          fields={receiveFields}
+          initial={{ receivedAt: dateInputValue() }}
+          locale={locale}
+          submitLabel={t('receiveSubmit')}
+          cancelHref={`/admin/records/inventory/${item.id}`}
+          cancelLabel={t('cancel')}
+          errors={receiveErrors}
+        />
+      </div>
 
       <div className="mt-4 space-y-2">
         <h3 className="text-sm font-semibold">{t('f.movements')}</h3>

@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { prisma } from '@/server/db/client';
 import { INVENTORY_CATEGORIES } from '@/lib/enums';
+import { syncActiveCost, recomputeProductsForItem } from '@/server/inventory/fifo';
 import { requireCap, audit, reqField, optField, type ActionState } from './shared';
 
 const LIST = '/[locale]/(dashboard)/admin/records/inventory';
@@ -65,22 +66,62 @@ export async function updateInventory(
   // Dynamic recalculation (§4.3): a changed component cost recomputes the cost
   // of every product whose recipe links this item.
   if (r.data.unitCost != null && before && r.data.unitCost !== before.unitCost) {
-    await propagateItemCost(id, r.data.unitCost);
+    await recomputeProductsForItem(id, r.data.unitCost);
   }
   revalidatePath(LIST, 'page');
   redirect(`/${locale}/admin/records/inventory/${id}`);
 }
 
-/** Push a new component cost into linked recipes and recompute product costs. */
-async function propagateItemCost(itemId: string, newCost: number): Promise<void> {
-  const affected = await prisma.productComponent.findMany({ where: { inventoryItemId: itemId }, select: { productId: true } });
-  if (!affected.length) return;
-  await prisma.productComponent.updateMany({ where: { inventoryItemId: itemId }, data: { unitCost: newCost } });
-  for (const productId of [...new Set(affected.map((a) => a.productId))]) {
-    const comps = await prisma.productComponent.findMany({ where: { productId }, select: { quantity: true, unitCost: true } });
-    const cost = comps.reduce((s, c) => s + c.quantity * c.unitCost, 0);
-    await prisma.product.update({ where: { id: productId }, data: { cogsPerUnit: cost } });
-  }
+const receiveSchema = z.object({
+  qtyReceived: z.coerce.number().int().positive(),
+  unitCost: z.coerce.number().int().nonnegative(),
+  receivedAt: z.coerce.date(),
+  expiryDate: z.coerce.date().optional(),
+  reference: z.string().optional(),
+});
+
+/**
+ * Receive stock at a cost (§8): records an immutable FIFO cost layer plus a
+ * PURCHASE movement (so on-hand stock and the layer stay in lock-step), then
+ * re-derives the item's active FIFO cost. The active cost rolls to this layer
+ * once older layers are consumed.
+ */
+export async function receiveStock(itemId: string, _prev: ActionState, fd: FormData): Promise<ActionState> {
+  const user = await requireCap(CAP);
+  if (!user) return { error: 'forbidden' };
+  const r = receiveSchema.safeParse({
+    qtyReceived: reqField(fd, 'qtyReceived'),
+    unitCost: reqField(fd, 'unitCost'),
+    receivedAt: reqField(fd, 'receivedAt'),
+    expiryDate: optField(fd, 'expiryDate'),
+    reference: optField(fd, 'reference'),
+  });
+  if (!r.success) return { error: 'invalid' };
+  const locale = reqField(fd, 'locale') || 'ar';
+  await prisma.$transaction(async (tx) => {
+    await tx.inventoryCostLayer.create({
+      data: {
+        inventoryItemId: itemId,
+        qtyReceived: r.data.qtyReceived,
+        unitCost: r.data.unitCost,
+        receivedAt: r.data.receivedAt,
+      },
+    });
+    await tx.stockMovement.create({
+      data: {
+        inventoryItemId: itemId,
+        occurredAt: r.data.receivedAt,
+        reason: 'PURCHASE',
+        quantity: r.data.qtyReceived,
+        expiryDate: r.data.expiryDate ?? null,
+        reference: r.data.reference ?? null,
+      },
+    });
+  });
+  await syncActiveCost(itemId);
+  await audit(user.id, 'RECEIVE', 'InventoryItem', { id: itemId, qty: r.data.qtyReceived, unitCost: r.data.unitCost });
+  revalidatePath(LIST, 'page');
+  redirect(`/${locale}/admin/records/inventory/${itemId}`);
 }
 
 export async function archiveInventory(id: string, locale: string, active: boolean): Promise<void> {
