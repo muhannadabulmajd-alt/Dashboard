@@ -9,6 +9,7 @@ import { RecordsSummary, type SummaryStat } from '@/components/records/Summary';
 import { TableToolbar } from '@/components/records/TableToolbar';
 import { Plus } from 'lucide-react';
 import { BackLink } from '@/components/records/parts';
+import { SectionGuide } from '@/components/records/SectionGuide';
 import { Link } from '@/i18n/navigation';
 
 export default async function InventoryRecordsPage({
@@ -87,6 +88,7 @@ export default async function InventoryRecordsPage({
           {t('add')}
         </Link>
       </div>
+      <SectionGuide title={t('guide.inventory.title')} intro={t('guide.inventory.intro')} points={t.raw('guide.inventory.points') as string[]} />
       <RecordsSummary stats={stats} />
       <TableToolbar
         searchPlaceholder={t('tools.search')}

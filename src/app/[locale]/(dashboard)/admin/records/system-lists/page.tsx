@@ -1,5 +1,4 @@
 import { getTranslations } from 'next-intl/server';
-import { Info } from 'lucide-react';
 import { getPageContext } from '@/server/page-context';
 import {
   enumLabel,
@@ -20,6 +19,7 @@ import {
 import { PageHeader } from '@/components/ui/primitives';
 import { DataTable, type Column } from '@/components/data-table/DataTable';
 import { BackLink } from '@/components/records/parts';
+import { SectionGuide } from '@/components/records/SectionGuide';
 
 const SECTIONS: { key: string; values: readonly string[] }[] = [
   { key: 'channels', values: CHANNELS },
@@ -54,10 +54,7 @@ export default async function SystemListsPage({
     <>
       <BackLink href="/admin/records" label={tr('back')} />
       <PageHeader title={t('title')} subtitle={t('subtitle')} />
-      <div className="flex items-start gap-2 rounded-[var(--radius)] border bg-muted/40 p-3 text-xs text-muted-foreground">
-        <Info className="mt-0.5 size-4 shrink-0" />
-        <span>{t('fixed')}</span>
-      </div>
+      <SectionGuide title={tr('guide.systemLists.title')} intro={tr('guide.systemLists.intro')} points={tr.raw('guide.systemLists.points') as string[]} />
       <div className="grid gap-4 lg:grid-cols-2">
         {SECTIONS.map((s) => (
           <div key={s.key} className="space-y-1.5">

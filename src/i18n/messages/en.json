@@ -263,7 +263,58 @@
           "Editing a variation's cost only affects future orders — past orders keep their snapshot.",
           "Variations don't need a main product; standalone ones show under \"Ungrouped variations\"."
         ]
+      },
+      "orders": {
+        "title": "How to use Orders",
+        "intro": "Record every order with its line items. Totals, invoices, stock and reports all update from what you enter here.",
+        "points": [
+          "Pick the customer, then add variations as line items with quantity and price.",
+          "Completed orders deduct stock automatically; pending/cancelled orders don't.",
+          "Editing or cancelling an order re-computes its totals and reverses its stock.",
+          "The order number is permanent once created."
+        ]
+      },
+      "customers": {
+        "title": "How to use Customers",
+        "intro": "Customers link orders to people and businesses, powering CRM and repeat-purchase insights.",
+        "points": [
+          "Each customer gets a permanent ID (CL-000001) used across orders and reports.",
+          "Enter the phone and address so invoices and delivery are accurate.",
+          "Set the source to track which campaign or channel brought them in.",
+          "Search by name or phone before adding, to avoid duplicates."
+        ]
+      },
+      "inventory": {
+        "title": "How to use Inventory",
+        "intro": "Inventory items are green beans, roasted beans, packaging and finished goods. Stock is the running sum of all movements.",
+        "points": [
+          "Use \"Receive stock\" to add quantity at a cost — this creates a FIFO cost layer.",
+          "Sales and production deduct stock; the active cost follows the oldest layer.",
+          "Set a reorder point to get low-stock alerts on the dashboard.",
+          "Link a finished-goods item to a variation so sales deduct it automatically."
+        ]
+      },
+      "batches": {
+        "title": "How to use Roast Batches",
+        "intro": "Log each roast: green beans in, roasted beans out. Roast loss and the roasted-bean cost are derived from this.",
+        "points": [
+          "Enter green input and roasted output to compute yield and shrinkage.",
+          "Higher roast loss raises the cost per kg of roasted beans.",
+          "Link the batch to the variations it produces for accurate costing."
+        ]
+      },
+      "systemLists": {
+        "title": "About System lists",
+        "intro": "These are the standard categories used across the app (channels, governorates, grinds, roast levels, categories).",
+        "points": [
+          "They keep reports and filters consistent everywhere.",
+          "Branches are fully editable under Branches & Franchises.",
+          "Other list values are fixed for now to protect historical records."
+        ]
       }
+    },
+    "impact": {
+      "cost": "Changing the price or cost affects future orders only — past orders keep the price and cost recorded at the time."
     },
     "systemLists": {
       "title": "System lists",
@@ -305,6 +356,7 @@
       "reorderPoint": "Reorder point", "avgDailyUsage": "Avg daily use", "unitCost": "Unit cost", "linkedVariation": "Linked variation (deduct on sale)",
       "movements": "Stock movements", "reason": "Reason", "quantity": "Quantity", "occurredAt": "Date",
       "qtyReceived": "Quantity received", "receivedAt": "Received on", "remaining": "Remaining", "value": "Value", "reference": "Reference", "expiryDate": "Expiry date",
+      "skuHint": "Permanent code — can't be changed after the variation is used.", "costHint": "Affects future orders only; past orders keep their cost snapshot.",
       "batchNumber": "Batch #", "roastDate": "Roast date", "green": "Green (g)", "output": "Output (g)",
       "yield": "Yield", "shrinkage": "Shrinkage", "qc": "QC", "qcNotes": "QC notes", "pending": "Pending", "roasted": "Roasted",
       "none": "—", "createdAt": "Added",

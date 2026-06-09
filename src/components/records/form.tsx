@@ -10,8 +10,8 @@ import type { ActionState } from '@/server/records/shared';
 type ShowWhen = { field: string; in: string[] };
 
 export type FieldDef =
-  | { name: string; label: string; type: 'text' | 'number' | 'email' | 'date'; required?: boolean; placeholder?: string; step?: string; showWhen?: ShowWhen; disabled?: boolean }
-  | { name: string; label: string; type: 'select'; required?: boolean; options: { value: string; label: string }[]; showWhen?: ShowWhen; disabled?: boolean }
+  | { name: string; label: string; type: 'text' | 'number' | 'email' | 'date'; required?: boolean; placeholder?: string; step?: string; hint?: string; showWhen?: ShowWhen; disabled?: boolean }
+  | { name: string; label: string; type: 'select'; required?: boolean; options: { value: string; label: string }[]; hint?: string; showWhen?: ShowWhen; disabled?: boolean }
   | { name: string; label: string; type: 'checkbox'; hint?: string; showWhen?: ShowWhen; disabled?: boolean };
 
 const input =
@@ -33,6 +33,7 @@ export function RecordForm({
   cancelHref,
   cancelLabel,
   errors,
+  note,
 }: {
   action: Action;
   fields: FieldDef[];
@@ -42,6 +43,8 @@ export function RecordForm({
   cancelHref: string;
   cancelLabel: string;
   errors: Record<string, string>;
+  /** Optional change-impact callout shown above the fields (BRD §22). */
+  note?: string;
 }) {
   const [state, formAction, pending] = useActionState<ActionState, FormData>(action, undefined);
 
@@ -66,6 +69,9 @@ export function RecordForm({
   return (
     <form action={formAction} className="grid gap-3 rounded-[var(--radius)] border bg-card p-4 sm:grid-cols-2">
       <input type="hidden" name="locale" value={locale} />
+      {note ? (
+        <p className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-muted-foreground sm:col-span-2">{note}</p>
+      ) : null}
       {fields.map((f) => {
         if (f.showWhen && !f.showWhen.in.includes(values[f.showWhen.field] ?? '')) return null;
         const v = initial?.[f.name];
@@ -124,6 +130,7 @@ export function RecordForm({
                 validation still passes. The server is the source of truth and
                 ignores changes to immutable keys regardless. */}
             {f.disabled ? <input type="hidden" name={f.name} value={dv} /> : null}
+            {f.hint ? <p className="text-xs text-muted-foreground">{f.hint}</p> : null}
           </div>
         );
       })}

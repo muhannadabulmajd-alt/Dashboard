@@ -32,10 +32,12 @@ export default async function EditProductPage({
     nameAr: p.nameAr,
     productLine: p.productLine,
     groupId: p.groupId ?? '',
+    variationType: p.variationType ?? '',
     sizeLabel: p.sizeLabel,
     grind: p.grind,
     roastLevel: p.roastLevel ?? '',
     origin: p.origin ?? '',
+    imageUrl: p.imageUrl ?? '',
     sellingPrice: p.sellingPrice,
     cogsPerUnit: p.cogsPerUnit,
   };
@@ -44,7 +46,7 @@ export default async function EditProductPage({
   return (
     <>
       <BackLink href={`/admin/records/products/${id}`} label={t('back')} />
-      <PageHeader title={t('editTitle', { entity: t('entities.products') })} subtitle={p.sku} />
+      <PageHeader title={t('editTitle', { entity: t('f.variation') })} subtitle={p.sku} />
       <RecordForm
         action={updateProduct.bind(null, id)}
         fields={productFields(tk, locale, 'edit', groups)}
@@ -54,6 +56,7 @@ export default async function EditProductPage({
         cancelHref={`/admin/records/products/${id}`}
         cancelLabel={t('cancel')}
         errors={errors}
+        note={t('impact.cost')}
       />
     </>
   );

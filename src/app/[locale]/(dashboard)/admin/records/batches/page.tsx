@@ -6,6 +6,7 @@ import { DataTable, type Column } from '@/components/data-table/DataTable';
 import { RecordsSummary, type SummaryStat } from '@/components/records/Summary';
 import { Plus } from 'lucide-react';
 import { BackLink } from '@/components/records/parts';
+import { SectionGuide } from '@/components/records/SectionGuide';
 import { Link } from '@/i18n/navigation';
 import { formatNumber, formatPercent } from '@/lib/money';
 import { formatDate } from '@/lib/dates';
@@ -69,6 +70,7 @@ export default async function BatchesRecordsPage({
           {t('add')}
         </Link>
       </div>
+      <SectionGuide title={t('guide.batches.title')} intro={t('guide.batches.intro')} points={t.raw('guide.batches.points') as string[]} />
       <RecordsSummary stats={stats} />
       <DataTable columns={cols} rows={rows} emptyLabel={t('none')} />
     </>

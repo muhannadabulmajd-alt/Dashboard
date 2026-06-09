@@ -14,7 +14,7 @@ export function productFields(
 ): FieldDef[] {
   const opts = (vals: readonly string[]) => vals.map((v) => ({ value: v, label: enumLabel(v, locale) }));
   return [
-    { name: 'sku', label: t('f.sku'), type: 'text', required: true, disabled: mode === 'edit' },
+    { name: 'sku', label: t('f.sku'), type: 'text', required: true, disabled: mode === 'edit', hint: mode === 'edit' ? t('f.skuHint') : undefined },
     { name: 'nameEn', label: t('f.nameEn'), type: 'text', required: true },
     { name: 'nameAr', label: t('f.nameAr'), type: 'text', required: true },
     { name: 'productLine', label: t('f.productLine'), type: 'select', required: true, options: opts(PRODUCT_LINES) },
@@ -26,6 +26,6 @@ export function productFields(
     { name: 'origin', label: t('f.origin'), type: 'text' },
     { name: 'imageUrl', label: t('f.imageUrl'), type: 'text', placeholder: 'https://…' },
     { name: 'sellingPrice', label: t('f.price'), type: 'number', required: true },
-    { name: 'cogsPerUnit', label: t('f.cost'), type: 'number', required: true },
+    { name: 'cogsPerUnit', label: t('f.cost'), type: 'number', required: true, hint: t('f.costHint') },
   ];
 }

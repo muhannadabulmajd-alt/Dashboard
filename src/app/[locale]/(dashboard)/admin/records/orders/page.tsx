@@ -9,6 +9,7 @@ import { DataTable, type Column } from '@/components/data-table/DataTable';
 import { RecordsSummary, type SummaryStat } from '@/components/records/Summary';
 import { TableToolbar } from '@/components/records/TableToolbar';
 import { BackLink } from '@/components/records/parts';
+import { SectionGuide } from '@/components/records/SectionGuide';
 import { Link } from '@/i18n/navigation';
 import { formatDate } from '@/lib/dates';
 import { Plus } from 'lucide-react';
@@ -144,6 +145,7 @@ export default async function OrdersRecordsPage({
           {t('add')}
         </Link>
       </div>
+      <SectionGuide title={t('guide.orders.title')} intro={t('guide.orders.intro')} points={t.raw('guide.orders.points') as string[]} />
       <RecordsSummary stats={stats} />
       <TableToolbar
         searchPlaceholder={t('tools.search')}

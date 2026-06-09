@@ -10,6 +10,7 @@ import { RecordsSummary, type SummaryStat } from '@/components/records/Summary';
 import { TableToolbar } from '@/components/records/TableToolbar';
 import { Plus } from 'lucide-react';
 import { BackLink } from '@/components/records/parts';
+import { SectionGuide } from '@/components/records/SectionGuide';
 import { Link } from '@/i18n/navigation';
 
 const CUSTOMER_SORTS: Record<string, Prisma.CustomerOrderByWithRelationInput> = {
@@ -101,6 +102,7 @@ export default async function CustomersRecordsPage({
           {t('add')}
         </Link>
       </div>
+      <SectionGuide title={t('guide.customers.title')} intro={t('guide.customers.intro')} points={t.raw('guide.customers.points') as string[]} />
       <RecordsSummary stats={stats} />
       <TableToolbar
         searchPlaceholder={t('tools.search')}
