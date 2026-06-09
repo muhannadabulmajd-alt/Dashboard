@@ -7,6 +7,7 @@ import {
   operatorActivity,
   avgQcScore,
   qcDistribution,
+  roastedCostPerKg,
 } from '@/lib/metrics/roasting';
 import type { BatchLike } from '@/lib/metrics/types';
 
@@ -64,5 +65,11 @@ describe('roasting metrics', () => {
       { band: 85, count: 1 },
       { band: 90, count: 1 },
     ]);
+  });
+
+  it('roastedCostPerKg = green cost ÷ yield (+ roasting cost) (§5.3)', () => {
+    expect(roastedCostPerKg(10_000, 0.85)).toBe(11_765);
+    expect(roastedCostPerKg(10_000, 0.85, 500)).toBe(12_265);
+    expect(roastedCostPerKg(10_000, 0)).toBe(0);
   });
 });

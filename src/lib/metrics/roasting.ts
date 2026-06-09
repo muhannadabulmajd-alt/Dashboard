@@ -6,6 +6,16 @@ export function roastingYieldPct(greenInputGrams: number, roastedOutputGrams: nu
   return greenInputGrams > 0 ? roastedOutputGrams / greenInputGrams : 0;
 }
 
+/**
+ * Estimated roasted-bean cost per kg from the green cost per kg and the roast
+ * yield (§5.3): roasting loses weight, so roasted cost = green cost ÷ yield,
+ * plus optional roasting cost per kg. Rounded to whole IQD.
+ */
+export function roastedCostPerKg(greenCostPerKg: number, yieldRatio: number, roastingCostPerKg = 0): number {
+  if (yieldRatio <= 0) return 0;
+  return Math.round(greenCostPerKg / yieldRatio + roastingCostPerKg);
+}
+
 /** Shrinkage = 1 - yield. */
 export function shrinkagePct(greenInputGrams: number, roastedOutputGrams: number): number {
   return greenInputGrams > 0 ? 1 - roastingYieldPct(greenInputGrams, roastedOutputGrams) : 0;

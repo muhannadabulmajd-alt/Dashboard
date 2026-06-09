@@ -2,14 +2,18 @@ import { notFound } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { getPageContext } from '@/server/page-context';
 import { prisma } from '@/server/db/client';
-import { enumLabel } from '@/lib/enums';
-import { formatMoney, formatNumber } from '@/lib/money';
+import { enumLabel, ROAST_LEVELS } from '@/lib/enums';
+import { formatMoney, formatNumber, formatPercent } from '@/lib/money';
 import { formatDate } from '@/lib/dates';
+import { gramsPerUnit } from '@/lib/roast';
+import { roastedCostPerKg } from '@/lib/metrics/roasting';
+import { getRoastConfig } from '@/server/settings';
 import { PageHeader } from '@/components/ui/primitives';
 import { BackLink, DetailGrid, type DetailField } from '@/components/records/parts';
 import { DataTable, type Column } from '@/components/data-table/DataTable';
 import { RecordActions } from '@/components/records/RecordActions';
 import { archiveInventory, deleteInventory } from '@/server/records/inventory';
+import type { RoastLevel } from '@prisma/client';
 
 export default async function InventoryDetailPage({
   params,
@@ -29,6 +33,19 @@ export default async function InventoryDetailPage({
 
   const name = locale === 'ar' ? item.nameAr : item.nameEn;
   const current = item.movements.reduce((s, m) => s + m.quantity, 0);
+
+  // Green→roasted cost estimate (§5): for green coffee, project roasted cost per
+  // roast type from this bean's cost-per-kg and the configured yields.
+  let roast: { lvl: RoastLevel; y: number; perKg: number; per250: number }[] | null = null;
+  if (item.category === 'GREEN_COFFEE' && item.unitCost != null) {
+    const cfg = await getRoastConfig();
+    const greenPerKg = item.unitCost * (1000 / gramsPerUnit(item.unit));
+    roast = ROAST_LEVELS.map((lvl) => {
+      const y = cfg.yields[lvl as RoastLevel];
+      const perKg = roastedCostPerKg(greenPerKg, y, cfg.roastingCostPerKg);
+      return { lvl: lvl as RoastLevel, y, perKg, per250: Math.round(perKg * 0.25) };
+    });
+  }
 
   const items: DetailField[] = [
     { label: t('f.item'), value: `${item.nameEn} / ${item.nameAr}` },
@@ -79,6 +96,29 @@ export default async function InventoryDetailPage({
         }}
       />
       <DetailGrid items={items} />
+
+      {roast ? (
+        <div className="mt-4 space-y-2">
+          <h3 className="text-sm font-semibold">{t('roastedCost')}</h3>
+          <p className="text-xs text-muted-foreground">{t('roastedCostHint')}</p>
+          <DataTable
+            columns={[
+              { label: t('f.roastLevel') },
+              { label: t('f.yield'), align: 'end' },
+              { label: t('perKg'), align: 'end' },
+              { label: t('per250'), align: 'end' },
+            ]}
+            rows={roast.map((r) => [
+              enumLabel(r.lvl, locale),
+              formatPercent(r.y, locale, 0),
+              formatMoney(r.perKg, 'IQD', locale),
+              formatMoney(r.per250, 'IQD', locale),
+            ])}
+            emptyLabel="—"
+          />
+        </div>
+      ) : null}
+
       <div className="mt-4 space-y-2">
         <h3 className="text-sm font-semibold">{t('f.movements')}</h3>
         <DataTable columns={mCols} rows={mRows} emptyLabel={t('none')} />

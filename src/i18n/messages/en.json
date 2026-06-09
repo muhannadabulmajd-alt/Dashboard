@@ -113,6 +113,10 @@
     "manual": "Manual",
     "capacity": "Producible now",
     "limitedBy": "Limited by {name}",
+    "roastedCost": "Roasted cost estimate",
+    "roastedCostHint": "Projected roasted-bean cost from this green bean's cost ÷ roast yield (editable in settings).",
+    "perKg": "Per kg",
+    "per250": "Per 250g",
     "ungrouped": "Ungrouped",
     "k": {
       "total": "Total",
