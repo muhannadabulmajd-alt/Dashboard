@@ -198,7 +198,7 @@ export default async function FinancePage({
         <PageHeader title={t('title')} subtitle={t('subtitle')} />
         {canManage ? (
           <Link
-            href="/finance/ledger/new"
+            href="/finance/record"
             className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:opacity-95"
           >
             <Plus className="size-4" />

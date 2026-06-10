@@ -55,6 +55,48 @@
     "dues": "Dues",
     "shareholders": "Shareholders",
     "recordEntry": "Record entry",
+    "wizard": {
+      "title": "Record entry",
+      "subtitle": "Pick what happened — we'll record it correctly.",
+      "back": "Back",
+      "save": "Save entry",
+      "custom": "Advanced: full custom entry →",
+      "error": "Please check the fields and try again.",
+      "settleNote": "To apply this to a specific tracked invoice or bill, use Payables/Receivables → Settle instead.",
+      "groups": {
+        "in": "Money in",
+        "out": "Money out",
+        "due": "Record now, pay/collect later",
+        "transfer": "Transfer"
+      },
+      "options": {
+        "salesIncome": { "label": "Sales income", "hint": "Money received from a sale (not tied to an order)." },
+        "paymentReceived": { "label": "Customer payment received", "hint": "A customer paid you." },
+        "capital": { "label": "Capital contribution", "hint": "An owner/shareholder put money in." },
+        "otherIn": { "label": "Other money in", "hint": "Any other income or cash adjustment up." },
+        "expensePaid": { "label": "Expense paid", "hint": "An expense you paid now (rent, salary, utilities…)." },
+        "purchasePaid": { "label": "Supplier purchase paid", "hint": "Inventory/materials paid now." },
+        "supplierPayment": { "label": "Supplier payment", "hint": "You paid a supplier." },
+        "withdrawal": { "label": "Owner withdrawal", "hint": "An owner took money out." },
+        "refund": { "label": "Refund", "hint": "Money returned to a customer." },
+        "otherOut": { "label": "Other money out", "hint": "Any other expense or cash adjustment down." },
+        "expenseLater": { "label": "Expense to pay later", "hint": "An expense owed, not paid yet (creates a payable)." },
+        "purchaseCredit": { "label": "Supplier purchase on credit", "hint": "Bought on credit (creates a payable)." },
+        "receivable": { "label": "Customer receivable", "hint": "A customer owes you (creates a receivable)." },
+        "transfer": { "label": "Transfer between accounts", "hint": "Move money between cash/bank accounts." }
+      },
+      "guide": {
+        "title": "How to record an entry",
+        "intro": "Choose what happened in plain words. The system files it correctly behind the scenes — you don't need accounting knowledge.",
+        "points": [
+          "If you paid something now, use a \"Money out\" option and pick the account it left.",
+          "If you owe it but haven't paid, use \"Record now, pay later\" — it becomes a payable with a due date.",
+          "If a customer owes you, use \"Customer receivable\".",
+          "Amounts in USD save the exchange rate at that moment, so old entries never change.",
+          "Sales, COGS and profit come from Orders automatically — use \"Sales income\" only for sales not entered as orders."
+        ]
+      }
+    },
     "overdue": "Overdue",
     "aging0": "0–30 days", "aging30": "30–60 days", "aging60": "60+ days",
     "overdueAlert": "{count} overdue dues totaling {amount}.",
