@@ -12,6 +12,7 @@ export function customerFields(
   locale: AppLocale,
   mode: 'new' | 'edit' = 'new',
   sources: readonly string[] = CUSTOMER_SOURCES,
+  governorates?: { value: string; label: string }[],
 ): FieldDef[] {
   const opts = (vals: readonly string[]) => vals.map((v) => ({ value: v, label: enumLabel(v, locale) }));
   return [
@@ -22,7 +23,7 @@ export function customerFields(
     { name: 'nameAr', label: t('f.nameAr'), type: 'text' },
     { name: 'phone', label: t('f.phone'), type: 'text' },
     { name: 'email', label: t('f.email'), type: 'email' },
-    { name: 'governorate', label: t('f.governorate'), type: 'select', options: opts(GOVERNORATES) },
+    { name: 'governorate', label: t('f.governorate'), type: 'select', options: governorates ?? opts(GOVERNORATES) },
     { name: 'address1', label: t('f.address1'), type: 'text' },
     { name: 'street', label: t('f.street'), type: 'text' },
     { name: 'segment', label: t('f.segment'), type: 'select', required: true, options: opts(CUSTOMER_SEGMENTS) },

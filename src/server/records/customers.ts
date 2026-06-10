@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { prisma } from '@/server/db/client';
-import { GOVERNORATES, CUSTOMER_SEGMENTS } from '@/lib/enums';
+import { CUSTOMER_SEGMENTS } from '@/lib/enums';
 import { requireCap, audit, reqField, optField, type ActionState } from './shared';
 
 const LIST = '/[locale]/(dashboard)/admin/records/customers';
@@ -16,7 +16,7 @@ const schema = z.object({
   nameAr: z.string().optional(),
   phone: z.string().optional(),
   email: z.string().optional(),
-  governorate: z.enum(GOVERNORATES).optional(),
+  governorate: z.string().optional(), // list-managed code (§9)
   address1: z.string().optional(),
   street: z.string().optional(),
   notes: z.string().optional(),

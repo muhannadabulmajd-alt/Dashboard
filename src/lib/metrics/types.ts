@@ -2,19 +2,23 @@
 // the Prisma models so repository results can be passed in directly, while the
 // metrics stay pure and free of any database dependency (and so unit-testable).
 import type {
-  OrderStatus,
-  Channel,
-  Governorate,
   Currency,
   ProductLine,
-  Grind,
-  RoastLevel,
   MovementReason,
   InventoryCategory,
   ExpenseCategoryType,
   CustomerSegment,
   ShipmentStatus,
 } from '@prisma/client';
+
+// List-managed codes (BRD §9): stored as plain strings so Owner/Admin can add
+// values at runtime. Metrics that branch on a code use the built-in constants
+// (e.g. 'CANCELLED'); unknown codes get neutral default behaviour.
+export type OrderStatus = string;
+export type Channel = string;
+export type Governorate = string;
+export type Grind = string;
+export type RoastLevel = string;
 
 export interface OrderLike {
   id: string;

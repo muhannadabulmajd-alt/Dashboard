@@ -2,10 +2,11 @@ import { notFound } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { getPageContext } from '@/server/page-context';
 import { prisma } from '@/server/db/client';
-import { enumLabel, ROAST_LEVELS } from '@/lib/enums';
+import { enumLabel } from '@/lib/enums';
 import { formatMoney, formatNumber, formatPercent } from '@/lib/money';
 import { formatDate, dateInputValue } from '@/lib/dates';
-import { gramsPerUnit } from '@/lib/roast';
+import { gramsPerUnit, roastYieldFor } from '@/lib/roast';
+import { getListOptions } from '@/server/lists/resolver';
 import { roastedCostPerKg } from '@/lib/metrics/roasting';
 import { fifoStatus } from '@/lib/metrics/inventory';
 import { getRoastConfig } from '@/server/settings';
@@ -15,7 +16,6 @@ import { DataTable, type Column } from '@/components/data-table/DataTable';
 import { RecordActions } from '@/components/records/RecordActions';
 import { RecordForm, type FieldDef } from '@/components/records/form';
 import { archiveInventory, deleteInventory, receiveStock } from '@/server/records/inventory';
-import type { RoastLevel } from '@prisma/client';
 
 export default async function InventoryDetailPage({
   params,
@@ -47,16 +47,17 @@ export default async function InventoryDetailPage({
     : 0;
   const fifo = item.costLayers.length ? fifoStatus(item.costLayers, consumed) : null;
 
-  // Green→roasted cost estimate (§5): for green coffee, project roasted cost per
-  // roast type from this bean's cost-per-kg and the configured yields.
-  let roast: { lvl: RoastLevel; y: number; perKg: number; per250: number }[] | null = null;
+  // Green→roasted cost estimate (§5): for green coffee, project roasted cost
+  // per roast level (managed list — added levels use the MEDIUM yield) from
+  // this bean's cost-per-kg and the configured yields.
+  let roast: { lvl: string; y: number; perKg: number; per250: number }[] | null = null;
   if (item.category === 'GREEN_COFFEE' && item.unitCost != null) {
-    const cfg = await getRoastConfig();
+    const [cfg, levels] = await Promise.all([getRoastConfig(), getListOptions('roastLevel', locale)]);
     const greenPerKg = item.unitCost * (1000 / gramsPerUnit(item.unit));
-    roast = ROAST_LEVELS.map((lvl) => {
-      const y = cfg.yields[lvl as RoastLevel];
+    roast = levels.map(({ value: lvl }) => {
+      const y = roastYieldFor(cfg.yields, lvl);
       const perKg = roastedCostPerKg(greenPerKg, y, cfg.roastingCostPerKg);
-      return { lvl: lvl as RoastLevel, y, perKg, per250: Math.round(perKg * 0.25) };
+      return { lvl, y, perKg, per250: Math.round(perKg * 0.25) };
     });
   }
 

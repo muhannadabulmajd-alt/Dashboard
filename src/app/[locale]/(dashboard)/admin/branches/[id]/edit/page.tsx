@@ -7,6 +7,7 @@ import { PageHeader } from '@/components/ui/primitives';
 import { RecordForm } from '@/components/records/form';
 import { BackLink } from '@/components/records/parts';
 import { updateBranch } from '@/server/branches/actions';
+import { getListOptions } from '@/server/lists/resolver';
 import { branchFields } from '../../_fields';
 
 export default async function EditBranchPage({
@@ -20,7 +21,10 @@ export default async function EditBranchPage({
   const { id } = await params;
   const t = await getTranslations('branches');
   const tr = await getTranslations('records');
-  const b = await prisma.branch.findUnique({ where: { id } });
+  const [b, governorates] = await Promise.all([
+    prisma.branch.findUnique({ where: { id } }),
+    getListOptions('governorate', locale),
+  ]);
   if (!b) notFound();
 
   const initial: Record<string, string | number | boolean | null | undefined> = {
@@ -58,7 +62,7 @@ export default async function EditBranchPage({
       <PageHeader title={t('editTitle')} subtitle={b.code} />
       <RecordForm
         action={updateBranch.bind(null, b.id)}
-        fields={branchFields((k) => t(k), locale, 'edit')}
+        fields={branchFields((k) => t(k), locale, 'edit', governorates)}
         initial={initial}
         locale={locale}
         submitLabel={tr('save')}

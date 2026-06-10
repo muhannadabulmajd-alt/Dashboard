@@ -7,6 +7,7 @@ import { TopBar } from '@/components/layout/TopBar';
 import { getNavGroups } from '@/components/layout/nav';
 import { StaleDataBanner } from '@/components/layout/StaleDataBanner';
 import { FilterBar } from '@/components/filters/FilterBar';
+import { getListOptions } from '@/server/lists/resolver';
 import type { AppLocale } from '@/lib/money';
 
 export default async function DashboardLayout({
@@ -33,13 +34,22 @@ export default async function DashboardLayout({
         })
       ).map((b) => ({ value: b.id, label: locale === 'ar' ? b.nameAr : b.nameEn }));
 
+  // Global filter options come from the managed system lists (§9).
+  const [channel, governorate, productLine, grind] = await Promise.all([
+    getListOptions('channel', locale as AppLocale),
+    getListOptions('governorate', locale as AppLocale),
+    getListOptions('productLine', locale as AppLocale),
+    getListOptions('grind', locale as AppLocale),
+  ]);
+  const listOptions = { channel, governorate, productLine, grind };
+
   return (
     <div className="flex min-h-screen">
       <Sidebar groups={navGroups} />
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar user={{ name: user.name, role: user.role }} locale={locale} navGroups={navGroups} />
         <StaleDataBanner lastUpdated={lastUpdated} locale={locale as AppLocale} />
-        <FilterBar branchOptions={branchOptions} />
+        <FilterBar branchOptions={branchOptions} listOptions={listOptions} />
         <main className="flex-1 space-y-6 p-4 lg:p-6">{children}</main>
       </div>
     </div>

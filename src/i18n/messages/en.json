@@ -308,8 +308,9 @@
         "intro": "These are the standard categories used across the app (channels, governorates, grinds, roast levels, categories).",
         "points": [
           "They keep reports and filters consistent everywhere.",
-          "Branches are fully editable under Branches & Franchises.",
-          "Other list values are fixed for now to protect historical records."
+          "Owners and Admins can rename values (EN + AR), reorder, hide, add and merge them.",
+          "Built-in values and values used in old records can't be deleted — archive or merge them instead.",
+          "Every change is recorded in the audit log."
         ]
       }
     },
@@ -345,7 +346,7 @@
       "mergeTo": "Into",
       "mergeBtn": "Merge",
       "viewerNote": "Only Owners and Admins can edit these lists.",
-      "enumNote": "You can rename, reorder and hide these values now; adding brand-new ones is being enabled next.",
+      "enumNote": "This list is structural: you can rename, reorder and hide values, but not add new ones.",
       "names": {
         "channel": "Channels",
         "governorate": "Governorates",

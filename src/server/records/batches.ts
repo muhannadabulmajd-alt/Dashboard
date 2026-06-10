@@ -4,7 +4,6 @@ import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { prisma } from '@/server/db/client';
-import { ROAST_LEVELS } from '@/lib/enums';
 import { requireCap, audit, reqField, optField, type ActionState } from './shared';
 
 const LIST = '/[locale]/(dashboard)/admin/records/batches';
@@ -14,7 +13,7 @@ const schema = z.object({
   batchNumber: z.string().min(1),
   origin: z.string().min(1),
   roastDate: z.coerce.date().optional(),
-  roastLevel: z.enum(ROAST_LEVELS).optional(),
+  roastLevel: z.string().optional(), // list-managed code (§9)
   greenInputGrams: z.coerce.number().int().positive(),
   roastedOutputGrams: z.coerce.number().int().positive().optional(),
   qcScore: z.coerce.number().optional(),

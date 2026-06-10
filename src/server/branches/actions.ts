@@ -3,7 +3,6 @@
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
-import { GOVERNORATES } from '@/lib/enums';
 import { prisma } from '@/server/db/client';
 import { requireCap, audit, reqField, optField, type ActionState } from '@/server/records/shared';
 
@@ -15,7 +14,7 @@ const schema = z.object({
   nameEn: z.string().min(2),
   nameAr: z.string().min(2),
   branchType: z.enum(['HQ', 'COMPANY', 'FRANCHISE']),
-  governorate: z.enum(GOVERNORATES),
+  governorate: z.string().min(1), // list-managed code (§9)
   city: z.string().optional(),
   address: z.string().optional(),
   street: z.string().optional(),

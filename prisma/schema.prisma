@@ -220,7 +220,7 @@ model Branch {
   nameEn      String
   nameAr      String
   branchType  String      @default("COMPANY") // HQ | COMPANY | FRANCHISE (§12)
-  governorate Governorate @default(BAGHDAD)
+  governorate String      @default("BAGHDAD") // list-managed code
   isFranchise Boolean     @default(false) // kept in sync with branchType for data scoping
   isActive    Boolean     @default(true)
 
@@ -273,8 +273,8 @@ model Product {
   groupId         String? // CR/BRD: parent product group (variations module)
   sizeGrams       Int?
   sizeLabel       String
-  grind           Grind       @default(NONE)
-  roastLevel      RoastLevel?
+  grind           String      @default("NONE") // list-managed code
+  roastLevel      String? // list-managed code
   origin          String?
   isBlend         Boolean     @default(false)
   variationType   String? // what makes this variation differ: size / grind / roast / packaging / flavor
@@ -311,7 +311,7 @@ model ProductPrice {
   id            String    @id @default(cuid())
   productId     String
   kind          String    @default("BASE") // BASE | WHOLESALE | CHANNEL
-  channel       Channel? // set when kind = CHANNEL
+  channel       String? // set when kind = CHANNEL; list-managed code
   price         Int // minor units
   currency      Currency  @default(IQD)
   effectiveFrom DateTime
@@ -375,7 +375,7 @@ model Customer {
   email          String?
   nameEn         String?
   nameAr         String?
-  governorate    Governorate?
+  governorate    String? // list-managed code
   address1       String? // CR-6: street address line
   street         String? // CR-6: extra street / landmark details
   notes          String? // CR-6: free-form customer notes
@@ -403,10 +403,10 @@ model Order {
   placedAt          DateTime
   customerId        String?
   branchId          String?
-  channel           Channel
-  governorate       Governorate
+  channel           String // list-managed (§9): code from the "channel" system list
+  governorate       String // list-managed code
   fulfillmentMethod FulfillmentMethod
-  status            OrderStatus       @default(COMPLETED)
+  status            String            @default("COMPLETED") // list-managed code
   currency          Currency          @default(IQD)
   grossAmount       Int               @default(0)
   discountAmount    Int               @default(0) // total: line discounts + orderDiscount
@@ -463,7 +463,7 @@ model RoastBatch {
   roastDate          DateTime?
   packagingDate      DateTime?
   origin             String
-  roastLevel         RoastLevel?
+  roastLevel         String? // list-managed code
   profileNotes       String?
   greenInputGrams    Int
   roastedOutputGrams Int?
@@ -644,7 +644,7 @@ model Shipment {
   dispatchedAt  DateTime?
   deliveredAt   DateTime?
   shippingCost  Int            @default(0)
-  governorate   Governorate
+  governorate   String // list-managed code
   failureReason String?
   createdAt     DateTime       @default(now())
 

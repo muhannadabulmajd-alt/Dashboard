@@ -1,10 +1,10 @@
 import { getTranslations } from 'next-intl/server';
 import { getPageContext } from '@/server/page-context';
-import { enumLabel, CHANNELS, GOVERNORATES, FULFILLMENT_METHODS, ORDER_STATUSES } from '@/lib/enums';
 import { PageHeader } from '@/components/ui/primitives';
 import { BackLink } from '@/components/records/parts';
 import { OrderForm } from '@/components/records/OrderForm';
 import { getOrderCatalog } from '@/server/records/order-catalog';
+import { getListOptions } from '@/server/lists/resolver';
 import { createOrder } from '@/server/records/orders';
 
 export default async function NewOrderPage({
@@ -16,8 +16,15 @@ export default async function NewOrderPage({
 }) {
   const { locale } = await getPageContext(params, searchParams, 'manage:orders');
   const t = await getTranslations('records');
-  const opts = (vals: readonly string[]) => vals.map((v) => ({ value: v, label: enumLabel(v, locale) }));
-  const catalog = await getOrderCatalog(locale, t('ungrouped'));
+  // Dropdowns come from the managed system lists (§9) — relabels, reordering
+  // and user-added values all apply here.
+  const [catalog, channels, governorates, fulfillment, statuses] = await Promise.all([
+    getOrderCatalog(locale, t('ungrouped')),
+    getListOptions('channel', locale),
+    getListOptions('governorate', locale),
+    getListOptions('fulfillment', locale),
+    getListOptions('orderStatus', locale),
+  ]);
 
   const labels = {
     orderNumber: t('f.orderNumber'),
@@ -59,10 +66,10 @@ export default async function NewOrderPage({
       <OrderForm
         action={createOrder}
         locale={locale}
-        channelOptions={opts(CHANNELS)}
-        governorateOptions={opts(GOVERNORATES)}
-        fulfillmentOptions={opts(FULFILLMENT_METHODS)}
-        statusOptions={opts(ORDER_STATUSES)}
+        channelOptions={channels}
+        governorateOptions={governorates}
+        fulfillmentOptions={fulfillment}
+        statusOptions={statuses}
         labels={labels}
         errors={errors}
         cancelHref="/admin/records/orders"

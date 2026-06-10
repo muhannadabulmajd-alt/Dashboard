@@ -1,5 +1,4 @@
-import type { RoastLevel } from '@prisma/client';
-import type { BatchLike } from './types';
+import type { BatchLike, RoastLevel } from './types';
 
 /** Roasting yield = roasted output / green input (0..1). */
 export function roastingYieldPct(greenInputGrams: number, roastedOutputGrams: number): number {

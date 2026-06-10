@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { prisma } from '@/server/db/client';
-import { PRODUCT_LINES, GRINDS } from '@/lib/enums';
+import { PRODUCT_LINES } from '@/lib/enums';
 import { requireCap, audit, reqField, optField, type ActionState } from './shared';
 import { nextGroupCode } from './product-groups';
 
@@ -24,7 +24,7 @@ const schema = z.object({
   // Step 2 — first variation
   sku: z.string().min(3),
   sizeLabel: z.string().min(1),
-  grind: z.enum(GRINDS),
+  grind: z.string().min(1), // list-managed code (§9)
   variationType: z.string().optional(),
   // Step 3 — pricing
   sellingPrice: z.coerce.number().int().nonnegative(),

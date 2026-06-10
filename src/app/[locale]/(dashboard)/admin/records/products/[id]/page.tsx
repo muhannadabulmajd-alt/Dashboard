@@ -3,7 +3,8 @@ import { getTranslations } from 'next-intl/server';
 import { Plus } from 'lucide-react';
 import { getPageContext } from '@/server/page-context';
 import { prisma } from '@/server/db/client';
-import { enumLabel, CHANNELS } from '@/lib/enums';
+import { enumLabel } from '@/lib/enums';
+import { getListOptions } from '@/server/lists/resolver';
 import { formatMoney, formatNumber, formatPercent, type AppLocale } from '@/lib/money';
 import { formatDate, formatDateTime, dateInputValue } from '@/lib/dates';
 import { productionCapacity } from '@/lib/metrics/inventory';
@@ -162,7 +163,7 @@ export default async function ProductDetailPage({
 
 type T = Awaited<ReturnType<typeof getTranslations>>;
 
-function PricingTab({
+async function PricingTab({
   product,
   price,
   now,
@@ -178,7 +179,7 @@ function PricingTab({
   const scheduled = scheduledPrices(product.prices, now);
   const history = product.prices.filter((e) => e.kind === 'BASE' && e.effectiveFrom <= now);
   const special = product.prices.filter((e) => e.kind !== 'BASE' && e.effectiveFrom <= now);
-  const channels = CHANNELS.map((c) => ({ value: c, label: enumLabel(c, locale) }));
+  const channels = await getListOptions('channel', locale);
   const kindLabel = (k: string) => t(`price.${k === 'WHOLESALE' ? 'wholesale' : k === 'CHANNEL' ? 'channel' : 'base'}`);
 
   return (

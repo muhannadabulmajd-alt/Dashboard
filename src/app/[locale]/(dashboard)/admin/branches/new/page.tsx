@@ -4,6 +4,7 @@ import { PageHeader } from '@/components/ui/primitives';
 import { RecordForm } from '@/components/records/form';
 import { BackLink } from '@/components/records/parts';
 import { createBranch } from '@/server/branches/actions';
+import { getListOptions } from '@/server/lists/resolver';
 import { branchFields } from '../_fields';
 
 export default async function NewBranchPage({
@@ -16,6 +17,7 @@ export default async function NewBranchPage({
   const { locale } = await getPageContext(params, searchParams, 'manage:branches');
   const t = await getTranslations('branches');
   const tr = await getTranslations('records');
+  const governorates = await getListOptions('governorate', locale);
   const errors = { invalid: tr('err.invalid'), exists: t('exists'), forbidden: tr('err.forbidden') };
 
   return (
@@ -24,7 +26,7 @@ export default async function NewBranchPage({
       <PageHeader title={t('newTitle')} />
       <RecordForm
         action={createBranch}
-        fields={branchFields((k) => t(k), locale, 'new')}
+        fields={branchFields((k) => t(k), locale, 'new', governorates)}
         locale={locale}
         submitLabel={t('create')}
         cancelHref="/admin/branches"

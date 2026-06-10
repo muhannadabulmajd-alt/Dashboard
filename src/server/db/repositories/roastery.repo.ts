@@ -1,5 +1,4 @@
 import 'server-only';
-import type { RoastLevel } from '@prisma/client';
 import { prisma } from '../client';
 import type { DashboardFilters } from '@/lib/filters';
 import type { ResolvedRange } from '@/lib/dates';
@@ -10,7 +9,7 @@ export interface BatchRow {
   batchNumber: string;
   roastDate: Date | null;
   origin: string;
-  roastLevel: RoastLevel | null;
+  roastLevel: string | null; // list-managed code
   greenInputGrams: number;
   roastedOutputGrams: number | null;
   qcScore: number | null;

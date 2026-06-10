@@ -5,8 +5,8 @@ import { prisma } from '@/server/db/client';
 import { PageHeader } from '@/components/ui/primitives';
 import { RecordForm } from '@/components/records/form';
 import { BackLink } from '@/components/records/parts';
-import { CUSTOMER_SOURCES } from '@/lib/enums';
 import { updateCustomer } from '@/server/records/customers';
+import { getListOptions } from '@/server/lists/resolver';
 import { customerFields } from '../../_fields';
 
 export default async function EditCustomerPage({
@@ -36,11 +36,13 @@ export default async function EditCustomerPage({
     segment: c.segment,
     campaignSource: c.campaignSource ?? '',
   };
+  const [sourceOpts, governorates] = await Promise.all([
+    getListOptions('customerSource', locale),
+    getListOptions('governorate', locale),
+  ]);
   // Keep any legacy/custom source value selectable so editing never wipes it.
-  const sources =
-    c.campaignSource && !CUSTOMER_SOURCES.includes(c.campaignSource as (typeof CUSTOMER_SOURCES)[number])
-      ? [...CUSTOMER_SOURCES, c.campaignSource]
-      : CUSTOMER_SOURCES;
+  const managed = sourceOpts.map((o) => o.value);
+  const sources = c.campaignSource && !managed.includes(c.campaignSource) ? [...managed, c.campaignSource] : managed;
   const errors = { invalid: t('err.invalid'), exists: t('err.exists'), forbidden: t('err.forbidden') };
 
   return (
@@ -49,7 +51,7 @@ export default async function EditCustomerPage({
       <PageHeader title={t('editTitle', { entity: t('entities.customers') })} subtitle={c.externalId ?? ''} />
       <RecordForm
         action={updateCustomer.bind(null, id)}
-        fields={customerFields(tk, locale, 'edit', sources)}
+        fields={customerFields(tk, locale, 'edit', sources, governorates)}
         initial={initial}
         locale={locale}
         submitLabel={t('save')}

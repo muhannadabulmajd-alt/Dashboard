@@ -1,12 +1,12 @@
 import { notFound } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { getPageContext } from '@/server/page-context';
-import { enumLabel, CHANNELS, GOVERNORATES, FULFILLMENT_METHODS, ORDER_STATUSES } from '@/lib/enums';
 import { prisma } from '@/server/db/client';
 import { PageHeader } from '@/components/ui/primitives';
 import { BackLink } from '@/components/records/parts';
 import { OrderForm, type OrderLineInput } from '@/components/records/OrderForm';
 import { getOrderCatalog } from '@/server/records/order-catalog';
+import { getListOptions } from '@/server/lists/resolver';
 import { updateOrder } from '@/server/records/orders';
 
 export default async function EditOrderPage({
@@ -19,8 +19,13 @@ export default async function EditOrderPage({
   const { locale } = await getPageContext(params, searchParams, 'manage:orders');
   const { id } = await params;
   const t = await getTranslations('records');
-  const opts = (vals: readonly string[]) => vals.map((v) => ({ value: v, label: enumLabel(v, locale) }));
-  const catalog = await getOrderCatalog(locale, t('ungrouped'));
+  const [catalog, channels, governorates, fulfillment, statuses] = await Promise.all([
+    getOrderCatalog(locale, t('ungrouped')),
+    getListOptions('channel', locale),
+    getListOptions('governorate', locale),
+    getListOptions('fulfillment', locale),
+    getListOptions('orderStatus', locale),
+  ]);
 
   const o = await prisma.order.findUnique({
     where: { id },
@@ -94,10 +99,10 @@ export default async function EditOrderPage({
       <OrderForm
         action={updateOrder.bind(null, id)}
         locale={locale}
-        channelOptions={opts(CHANNELS)}
-        governorateOptions={opts(GOVERNORATES)}
-        fulfillmentOptions={opts(FULFILLMENT_METHODS)}
-        statusOptions={opts(ORDER_STATUSES)}
+        channelOptions={channels}
+        governorateOptions={governorates}
+        fulfillmentOptions={fulfillment}
+        statusOptions={statuses}
         labels={labels}
         errors={errors}
         cancelHref={`/admin/records/orders/${id}`}

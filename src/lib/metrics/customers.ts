@@ -1,5 +1,5 @@
-import type { OrderStatus, CustomerSegment } from '@prisma/client';
-import type { OrderLike, CustomerLike } from './types';
+import type { CustomerSegment } from '@prisma/client';
+import type { OrderLike, CustomerLike, OrderStatus } from './types';
 import { isSalesOrder } from './sales';
 
 function monthKey(d: Date): string {

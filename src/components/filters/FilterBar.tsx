@@ -43,7 +43,15 @@ function pageConfig(path: string): FilterConfig | null {
   return map[path] ?? { groups: ALL_GROUPS, branch: true };
 }
 
-export function FilterBar({ branchOptions }: { branchOptions?: Option[] }) {
+export function FilterBar({
+  branchOptions,
+  listOptions,
+}: {
+  branchOptions?: Option[];
+  /** Managed system-list options (§9) keyed by filter group; overrides the
+   * static enum lists so relabels and user-added values apply. */
+  listOptions?: Partial<Record<'channel' | 'governorate' | 'productLine' | 'grind', Option[]>>;
+}) {
   const t = useTranslations('filters');
   const tc = useTranslations('common');
   const locale = useLocale() as AppLocale;
@@ -83,7 +91,7 @@ export function FilterBar({ branchOptions }: { branchOptions?: Option[] }) {
         ...ENUM_GROUPS.filter((g) => cfg.groups.includes(g.key)).map((g) => ({
           key: g.key,
           label: t(g.labelKey),
-          options: g.options.map((o) => ({ value: o, label: enumLabel(o, locale) })),
+          options: listOptions?.[g.key] ?? g.options.map((o) => ({ value: o, label: enumLabel(o, locale) })),
         })),
         ...(cfg.branch && branchOptions && branchOptions.length
           ? [{ key: 'branchId', label: t('branch'), options: branchOptions }]

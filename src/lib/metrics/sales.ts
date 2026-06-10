@@ -1,4 +1,3 @@
-import type { OrderStatus } from '@prisma/client';
 import { bucketKey, bucketLabel } from '../dates';
 import type {
   OrderLike,
@@ -7,6 +6,7 @@ import type {
   DimensionBucket,
   TimePoint,
   ProductRank,
+  OrderStatus,
 } from './types';
 
 /** Orders that represent real sales (placed & paid). Cancelled/pending excluded. */

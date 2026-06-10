@@ -1,13 +1,5 @@
 import { z } from 'zod';
-import {
-  CHANNELS,
-  GOVERNORATES,
-  PRODUCT_LINES,
-  GRINDS,
-  ROAST_LEVELS,
-  CUSTOMER_SEGMENTS,
-  FULFILLMENT_METHODS,
-} from './enums';
+import { PRODUCT_LINES, CUSTOMER_SEGMENTS, FULFILLMENT_METHODS } from './enums';
 
 export const RANGE_PRESETS = [
   'today',
@@ -23,11 +15,14 @@ export const DashboardFiltersSchema = z.object({
   range: z.enum(RANGE_PRESETS).default('all'),
   from: z.string().optional(),
   to: z.string().optional(),
-  channel: z.array(z.enum(CHANNELS)).optional(),
-  governorate: z.array(z.enum(GOVERNORATES)).optional(),
+  // channel/governorate/grind/roastLevel are list-managed codes (BRD §9) —
+  // plain strings so user-added values are filterable. Bad values just match
+  // nothing; the remaining enum-backed filters keep strict validation.
+  channel: z.array(z.string()).optional(),
+  governorate: z.array(z.string()).optional(),
   productLine: z.array(z.enum(PRODUCT_LINES)).optional(),
-  grind: z.array(z.enum(GRINDS)).optional(),
-  roastLevel: z.array(z.enum(ROAST_LEVELS)).optional(),
+  grind: z.array(z.string()).optional(),
+  roastLevel: z.array(z.string()).optional(),
   segment: z.array(z.enum(CUSTOMER_SEGMENTS)).optional(),
   fulfillment: z.array(z.enum(FULFILLMENT_METHODS)).optional(),
   sku: z.array(z.string()).optional(),

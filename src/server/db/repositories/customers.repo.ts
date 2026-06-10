@@ -21,7 +21,7 @@ export async function getCustomers(scope: Scope): Promise<CustomerLike[]> {
 /** Minimal all-time order history (branch-scoped) for cohort + conversion analysis. */
 export async function getOrderHistory(
   scope: Scope,
-): Promise<{ customerId: string | null; placedAt: Date; status: import('@prisma/client').OrderStatus }[]> {
+): Promise<{ customerId: string | null; placedAt: Date; status: string }[]> {
   return prisma.order.findMany({
     where: scope.branchId ? { branchId: scope.branchId } : {},
     select: { customerId: true, placedAt: true, status: true },

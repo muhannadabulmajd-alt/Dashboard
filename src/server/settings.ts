@@ -1,7 +1,6 @@
 import 'server-only';
-import type { RoastLevel } from '@prisma/client';
 import { prisma } from '@/server/db/client';
-import { DEFAULT_ROAST_YIELDS, DEFAULT_ROASTING_COST_PER_KG } from '@/lib/roast';
+import { DEFAULT_ROAST_YIELDS, DEFAULT_ROASTING_COST_PER_KG, type BuiltinRoastLevel } from '@/lib/roast';
 
 export const DEFAULT_USD_TO_IQD = 1500;
 export const USD_TO_IQD_KEY = 'usd_to_iqd';
@@ -14,11 +13,11 @@ export async function getUsdToIqd(): Promise<number> {
 }
 
 /** Roast yields per type + roasting cost/kg (§5), defaults overridable via Settings. */
-export async function getRoastConfig(): Promise<{ yields: Record<RoastLevel, number>; roastingCostPerKg: number }> {
+export async function getRoastConfig(): Promise<{ yields: Record<BuiltinRoastLevel, number>; roastingCostPerKg: number }> {
   const rows = await prisma.setting.findMany({ where: { key: { startsWith: 'roast_' } } });
   const map = new Map(rows.map((r) => [r.key, r.value]));
   const yields = { ...DEFAULT_ROAST_YIELDS };
-  for (const lvl of Object.keys(yields) as RoastLevel[]) {
+  for (const lvl of Object.keys(yields) as BuiltinRoastLevel[]) {
     const v = Number(map.get(`roast_yield_${lvl}`));
     if (Number.isFinite(v) && v > 0 && v <= 1) yields[lvl] = v;
   }

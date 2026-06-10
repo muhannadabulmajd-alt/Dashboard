@@ -1,8 +1,9 @@
 import { getTranslations } from 'next-intl/server';
-import type { Prisma, OrderStatus } from '@prisma/client';
+import type { Prisma } from '@prisma/client';
 import { getPageContext } from '@/server/page-context';
 import { prisma } from '@/server/db/client';
-import { enumLabel, ORDER_STATUSES } from '@/lib/enums';
+import { enumLabel } from '@/lib/enums';
+import { getListOptions } from '@/server/lists/resolver';
 import { formatMoney, formatNumber } from '@/lib/money';
 import { Badge, PageHeader } from '@/components/ui/primitives';
 import { DataTable, type Column } from '@/components/data-table/DataTable';
@@ -63,7 +64,7 @@ export default async function OrdersRecordsPage({
             ],
           }
         : {},
-      statusFilter ? { status: statusFilter as OrderStatus } : {},
+      statusFilter ? { status: statusFilter } : {},
     ],
   };
 
@@ -93,7 +94,7 @@ export default async function OrdersRecordsPage({
   ];
 
   const sortOpts = ['newest', 'oldest', 'amountDesc', 'amountAsc'].map((v) => ({ value: v, label: t(`tools.${v}`) }));
-  const statusOpts = ORDER_STATUSES.map((s) => ({ value: s, label: enumLabel(s, locale) }));
+  const statusOpts = await getListOptions('orderStatus', locale);
 
   const cols: Column[] = [
     { label: t('f.orderNumber') },

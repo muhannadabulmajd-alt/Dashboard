@@ -9,7 +9,12 @@ const FRANCHISE_ONLY = { field: 'branchType', in: ['FRANCHISE'] };
  * create, immutable afterwards (§14). Franchise contact + agreement fields show
  * only when the type is Franchise.
  */
-export function branchFields(t: (key: string) => string, locale: AppLocale, mode: 'new' | 'edit' = 'new'): FieldDef[] {
+export function branchFields(
+  t: (key: string) => string,
+  locale: AppLocale,
+  mode: 'new' | 'edit' = 'new',
+  governorates?: { value: string; label: string }[],
+): FieldDef[] {
   return [
     { name: 'code', label: t('code'), type: 'text', required: true, disabled: mode === 'edit', placeholder: 'CAFE-BGD' },
     { name: 'nameEn', label: t('nameEn'), type: 'text', required: true },
@@ -21,7 +26,7 @@ export function branchFields(t: (key: string) => string, locale: AppLocale, mode
       required: true,
       options: ['HQ', 'COMPANY', 'FRANCHISE'].map((v) => ({ value: v, label: t(`types.${v}`) })),
     },
-    { name: 'governorate', label: t('governorate'), type: 'select', required: true, options: GOVERNORATES.map((v) => ({ value: v, label: enumLabel(v, locale) })) },
+    { name: 'governorate', label: t('governorate'), type: 'select', required: true, options: governorates ?? GOVERNORATES.map((v) => ({ value: v, label: enumLabel(v, locale) })) },
     { name: 'city', label: t('city'), type: 'text' },
     { name: 'address', label: t('address'), type: 'text' },
     { name: 'street', label: t('street'), type: 'text' },

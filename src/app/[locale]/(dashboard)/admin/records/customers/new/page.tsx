@@ -17,7 +17,11 @@ export default async function NewCustomerPage({
   const { locale } = await getPageContext(params, searchParams, 'manage:customers');
   const t = await getTranslations('records');
   const tk = (k: string) => t(k);
-  const sources = (await getListOptions('customerSource', locale)).map((o) => o.value);
+  const [sourceOpts, governorates] = await Promise.all([
+    getListOptions('customerSource', locale),
+    getListOptions('governorate', locale),
+  ]);
+  const sources = sourceOpts.map((o) => o.value);
   const errors = { invalid: t('err.invalid'), exists: t('err.exists'), forbidden: t('err.forbidden') };
 
   return (
@@ -26,7 +30,7 @@ export default async function NewCustomerPage({
       <PageHeader title={t('newTitle', { entity: t('entities.customers') })} />
       <RecordForm
         action={createCustomer}
-        fields={customerFields(tk, locale, 'new', sources)}
+        fields={customerFields(tk, locale, 'new', sources, governorates)}
         locale={locale}
         submitLabel={t('create')}
         cancelHref="/admin/records/customers"

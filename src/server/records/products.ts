@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { prisma } from '@/server/db/client';
-import { PRODUCT_LINES, GRINDS, ROAST_LEVELS } from '@/lib/enums';
+import { PRODUCT_LINES } from '@/lib/enums';
 import { requireCap, audit, reqField, optField, type ActionState } from './shared';
 
 const LIST = '/[locale]/(dashboard)/admin/records/products';
@@ -18,8 +18,8 @@ const schema = z.object({
   variationType: z.string().optional(),
   sizeLabel: z.string().min(1),
   sizeGrams: z.coerce.number().int().positive().optional(),
-  grind: z.enum(GRINDS),
-  roastLevel: z.enum(ROAST_LEVELS).optional(),
+  grind: z.string().min(1), // list-managed code (§9)
+  roastLevel: z.string().optional(),
   origin: z.string().optional(),
   imageUrl: z.string().url().optional().or(z.literal('')),
   groupId: z.string().optional(), // parent product group (variations module)

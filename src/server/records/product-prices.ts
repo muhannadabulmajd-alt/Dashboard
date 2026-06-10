@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { prisma } from '@/server/db/client';
-import { CHANNELS, CURRENCIES } from '@/lib/enums';
+import { CURRENCIES } from '@/lib/enums';
 import { requireCap, audit, reqField, optField, type ActionState } from './shared';
 
 const LIST = '/[locale]/(dashboard)/admin/records/products';
@@ -13,7 +13,7 @@ const CAP = 'manage:products' as const;
 const schema = z
   .object({
     kind: z.enum(['BASE', 'WHOLESALE', 'CHANNEL']),
-    channel: z.enum(CHANNELS).optional(),
+    channel: z.string().optional(), // list-managed code (§9)
     price: z.coerce.number().int().nonnegative(),
     currency: z.enum(CURRENCIES).default('IQD'),
     effectiveFrom: z.coerce.date(),

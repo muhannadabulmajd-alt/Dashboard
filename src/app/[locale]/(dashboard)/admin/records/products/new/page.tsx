@@ -5,6 +5,7 @@ import { PageHeader } from '@/components/ui/primitives';
 import { RecordForm } from '@/components/records/form';
 import { BackLink } from '@/components/records/parts';
 import { createProduct } from '@/server/records/products';
+import { getListOptions } from '@/server/lists/resolver';
 import { productFields } from '../_fields';
 
 /** Active parent groups as form options (value = id, label = code · name). */
@@ -24,7 +25,11 @@ export default async function NewProductPage({
   const sp = await searchParams;
   const t = await getTranslations('records');
   const tk = (k: string) => t(k);
-  const groups = await groupOptions(locale);
+  const [groups, grinds, roastLevels] = await Promise.all([
+    groupOptions(locale),
+    getListOptions('grind', locale),
+    getListOptions('roastLevel', locale),
+  ]);
   const errors = { invalid: t('err.invalid'), exists: t('err.exists'), forbidden: t('err.forbidden') };
 
   // When adding a variation from a main product, pre-select it and inherit its
@@ -42,7 +47,7 @@ export default async function NewProductPage({
       <PageHeader title={t('newTitle', { entity: t('f.variation') })} />
       <RecordForm
         action={createProduct}
-        fields={productFields(tk, locale, 'new', groups)}
+        fields={productFields(tk, locale, 'new', groups, { grinds, roastLevels })}
         initial={initial}
         locale={locale}
         submitLabel={t('create')}

@@ -5,7 +5,7 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/server/db/client';
-import { CHANNELS, GOVERNORATES, FULFILLMENT_METHODS, ORDER_STATUSES } from '@/lib/enums';
+import { FULFILLMENT_METHODS } from '@/lib/enums';
 import { syncActiveCostForProducts } from '@/server/inventory/fifo';
 import { requireCap, audit, reqField, optField, type ActionState } from './shared';
 
@@ -55,10 +55,12 @@ const headerSchema = z.object({
   orderNumber: z.string().min(1),
   placedAt: z.coerce.date(),
   customerExternalId: z.string().optional(),
-  channel: z.enum(CHANNELS),
-  governorate: z.enum(GOVERNORATES),
+  // channel/governorate/status are list-managed codes (§9): the dropdowns are
+  // built from the managed lists, so accept any non-empty code.
+  channel: z.string().min(1),
+  governorate: z.string().min(1),
   fulfillmentMethod: z.enum(FULFILLMENT_METHODS),
-  status: z.enum(ORDER_STATUSES),
+  status: z.string().min(1),
   deliveryFee: z.coerce.number().int().nonnegative().default(0),
   deliveryCost: z.coerce.number().int().nonnegative().default(0),
   orderDiscount: z.coerce.number().int().nonnegative().default(0),
