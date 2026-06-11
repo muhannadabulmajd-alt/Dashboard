@@ -7,12 +7,14 @@ import { enumLabel } from '@/lib/enums';
 import { buildExportHref, buildFinanceExportHref } from '@/lib/filters';
 import { formatMoney, formatNumber, formatPercent } from '@/lib/money';
 import { monthProgress } from '@/lib/dates';
+import { can } from '@/lib/rbac';
 import { prisma } from '@/server/db/client';
 import { Download } from 'lucide-react';
 import { KpiCard } from '@/components/kpi/KpiCard';
 import { WaterfallChart, BarChartCard, type WaterfallStep } from '@/components/charts/Charts';
 import { DataTable } from '@/components/data-table/DataTable';
 import { Badge, PageHeader } from '@/components/ui/primitives';
+import { SectionGuide } from '@/components/records/SectionGuide';
 
 const CUPS_PER_KG = 83; // ~12g per cup
 
@@ -24,11 +26,13 @@ export default async function PnlPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   // Finance-gated: non-finance roles are redirected to the dashboard home.
-  const { locale, filters, scope, range } = await getPageContext(params, searchParams, 'view:financial');
+  const { locale, user, filters, scope, range } = await getPageContext(params, searchParams, 'view:financial');
   const t = await getTranslations('pnl');
+  const tf = await getTranslations('finance');
   const tk = await getTranslations('kpi');
   const tt = await getTranslations('table');
   const tc = await getTranslations('common');
+  const canExport = can(user.role, 'export:financial');
 
   const [orders, lines, expenses, batches] = await Promise.all([
     getOrders(filters, scope, range),
@@ -108,14 +112,21 @@ export default async function PnlPage({
     <>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <PageHeader title={t('title')} subtitle={t('subtitle')} />
-        <a
-          href={buildFinanceExportHref('pnl', filters, locale)}
-          className="inline-flex items-center gap-1.5 rounded-md border bg-card px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-muted"
-        >
-          <Download className="size-3.5" />
-          {tc('exportCsv')}
-        </a>
+        {canExport ? (
+          <a
+            href={buildFinanceExportHref('pnl', filters, locale)}
+            className="inline-flex items-center gap-1.5 rounded-md border bg-card px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-muted"
+          >
+            <Download className="size-3.5" />
+            {tc('exportCsv')}
+          </a>
+        ) : null}
       </div>
+      <SectionGuide
+        title={tf('guide.pnl.title')}
+        intro={tf('guide.pnl.intro')}
+        points={tf.raw('guide.pnl.points')}
+      />
 
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard label={tk('netSales')} value={formatMoney(net, 'IQD', locale)} locale={locale} />

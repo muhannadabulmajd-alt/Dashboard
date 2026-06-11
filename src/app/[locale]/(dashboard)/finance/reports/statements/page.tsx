@@ -4,6 +4,7 @@ import { getPartyStatementsReport, type PartyStatementRow } from '@/server/finan
 import { buildFinanceExportHref } from '@/lib/filters';
 import { formatDate } from '@/lib/dates';
 import { formatMoney } from '@/lib/money';
+import { can } from '@/lib/rbac';
 import { KpiCard } from '@/components/kpi/KpiCard';
 import { DataTable, type Column } from '@/components/data-table/DataTable';
 import { BackLink } from '@/components/records/parts';
@@ -17,10 +18,11 @@ export default async function PartyStatementsPage({
   params: Promise<{ locale: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { locale, filters, scope, range } = await getPageContext(params, searchParams, 'view:finance');
+  const { locale, user, filters, scope, range } = await getPageContext(params, searchParams, 'view:finance');
   const t = await getTranslations('finance');
   const tr = await getTranslations('records');
   const tc = await getTranslations('common');
+  const canExport = can(user.role, 'export:financial');
 
   const report = await getPartyStatementsReport(filters, scope, range);
   const columns: Column[] = [
@@ -60,7 +62,7 @@ export default async function PartyStatementsPage({
         <DataTable
           columns={columns}
           rows={rowsFor(report.customers)}
-          exportHref={buildFinanceExportHref('statements', filters, locale, { kind: 'customer' })}
+          exportHref={canExport ? buildFinanceExportHref('statements', filters, locale, { kind: 'customer' }) : undefined}
           exportLabel={tc('exportCsv')}
           emptyLabel={tc('noData')}
         />
@@ -71,7 +73,7 @@ export default async function PartyStatementsPage({
         <DataTable
           columns={columns}
           rows={rowsFor(report.suppliers)}
-          exportHref={buildFinanceExportHref('statements', filters, locale, { kind: 'supplier' })}
+          exportHref={canExport ? buildFinanceExportHref('statements', filters, locale, { kind: 'supplier' }) : undefined}
           exportLabel={tc('exportCsv')}
           emptyLabel={tc('noData')}
         />

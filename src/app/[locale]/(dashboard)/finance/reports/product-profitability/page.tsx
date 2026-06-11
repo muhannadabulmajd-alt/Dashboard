@@ -3,6 +3,7 @@ import { getPageContext } from '@/server/page-context';
 import { getProductProfitabilityReport } from '@/server/finance/reports';
 import { buildFinanceExportHref } from '@/lib/filters';
 import { formatMoney, formatNumber, formatPercent } from '@/lib/money';
+import { can } from '@/lib/rbac';
 import { KpiCard } from '@/components/kpi/KpiCard';
 import { BarChartCard } from '@/components/charts/Charts';
 import { DataTable, type Column } from '@/components/data-table/DataTable';
@@ -16,11 +17,12 @@ export default async function ProductProfitabilityPage({
   params: Promise<{ locale: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { locale, filters, scope, range } = await getPageContext(params, searchParams, 'view:finance');
+  const { locale, user, filters, scope, range } = await getPageContext(params, searchParams, 'view:finance');
   const t = await getTranslations('finance');
   const tt = await getTranslations('table');
   const tr = await getTranslations('records');
   const tc = await getTranslations('common');
+  const canExport = can(user.role, 'export:financial');
 
   const report = await getProductProfitabilityReport(filters, scope, range);
   const columns: Column[] = [
@@ -68,7 +70,7 @@ export default async function ProductProfitabilityPage({
         <DataTable
           columns={columns}
           rows={rows}
-          exportHref={buildFinanceExportHref('product-profitability', filters, locale)}
+          exportHref={canExport ? buildFinanceExportHref('product-profitability', filters, locale) : undefined}
           exportLabel={tc('exportCsv')}
           emptyLabel={tc('noData')}
         />

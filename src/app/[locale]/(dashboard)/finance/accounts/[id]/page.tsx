@@ -6,6 +6,7 @@ import { enumLabel } from '@/lib/enums';
 import { formatMoney } from '@/lib/money';
 import { formatDate } from '@/lib/dates';
 import { accountBalance, type FinanceEntryLike } from '@/lib/metrics/finance';
+import { can } from '@/lib/rbac';
 import { Badge, PageHeader } from '@/components/ui/primitives';
 import { BackLink, DetailGrid, type DetailField } from '@/components/records/parts';
 import { RecordActions } from '@/components/records/RecordActions';
@@ -19,11 +20,12 @@ export default async function FinanceAccountDetailPage({
   params: Promise<{ locale: string; id: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { locale } = await getPageContext(params, searchParams, 'manage:finance');
+  const { locale, user } = await getPageContext(params, searchParams, 'view:finance');
   const { id } = await params;
   const t = await getTranslations('finance');
   const tr = await getTranslations('records');
   const trf = await getTranslations('records.f');
+  const canManage = can(user.role, 'manage:finance');
   const a = await prisma.financeAccount.findUnique({ where: { id } });
   if (!a) notFound();
 
@@ -78,19 +80,21 @@ export default async function FinanceAccountDetailPage({
     <>
       <BackLink href="/finance/accounts" label={tr('back')} />
       <PageHeader title={a.name} subtitle={t('accounts')} />
-      <RecordActions
-        editHref={`/finance/accounts/${a.id}/edit`}
-        isActive={a.isActive}
-        archiveAction={archiveAccount.bind(null, a.id, locale, !a.isActive)}
-        deleteAction={deleteAccount.bind(null, a.id, locale)}
-        labels={{
-          edit: tr('edit'),
-          archive: tr('archive'),
-          restore: tr('restore'),
-          delete: tr('delete'),
-          confirm: tr('confirmDelete'),
-        }}
-      />
+      {canManage ? (
+        <RecordActions
+          editHref={`/finance/accounts/${a.id}/edit`}
+          isActive={a.isActive}
+          archiveAction={archiveAccount.bind(null, a.id, locale, !a.isActive)}
+          deleteAction={deleteAccount.bind(null, a.id, locale)}
+          labels={{
+            edit: tr('edit'),
+            archive: tr('archive'),
+            restore: tr('restore'),
+            delete: tr('delete'),
+            confirm: tr('confirmDelete'),
+          }}
+        />
+      ) : null}
       <DetailGrid items={items} />
       <div className="mt-4 space-y-2">
         <h3 className="text-sm font-semibold">{t('statement')}</h3>

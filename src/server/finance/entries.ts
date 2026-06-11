@@ -8,10 +8,33 @@ import { FINANCE_TYPES, CURRENCIES, OBLIGATION_KINDS, EXPENSE_CATEGORY_TYPES } f
 import { toMinor, convertToIqd } from '@/lib/money';
 import { getUsdToIqd } from '@/server/settings';
 import { requireCap, audit, reqField, optField, type ActionState } from '@/server/records/shared';
+import type { Prisma } from '@prisma/client';
 
 const HUB = '/[locale]/(dashboard)/finance';
 const LIST = '/[locale]/(dashboard)/finance/ledger';
 const CAP = 'manage:finance' as const;
+const entryAuditSelect = {
+  date: true,
+  type: true,
+  amount: true,
+  currency: true,
+  origCurrency: true,
+  origAmount: true,
+  fxRate: true,
+  obligation: true,
+  obligationKind: true,
+  dueDate: true,
+  accountId: true,
+  toAccountId: true,
+  partyId: true,
+  categoryType: true,
+  settlesId: true,
+  branchId: true,
+  orderId: true,
+  description: true,
+  reference: true,
+  attachmentUrl: true,
+} as const;
 
 const schema = z.object({
   type: z.enum(FINANCE_TYPES),
@@ -94,6 +117,34 @@ function toData(p: Parsed, obligation: boolean, fallbackRate: number) {
   };
 }
 
+type AuditScalar = string | number | boolean | null;
+
+function auditValue(value: unknown): AuditScalar {
+  if (value instanceof Date) return value.toISOString();
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value;
+  return String(value);
+}
+
+function auditEntrySnapshot(data: object): Prisma.InputJsonObject {
+  const row = data as Record<string, unknown>;
+  return Object.fromEntries(Object.keys(entryAuditSelect).map((key) => [key, auditValue(row[key])]));
+}
+
+function changedEntryFields(before: object | null, after: object): Prisma.InputJsonObject {
+  if (!before) return {};
+  const beforeRow = before as Record<string, unknown>;
+  const afterRow = after as Record<string, unknown>;
+  const changes: Record<string, Prisma.InputJsonValue> = {};
+  for (const key of Object.keys(entryAuditSelect)) {
+    if (!(key in afterRow)) continue;
+    const oldValue = auditValue(beforeRow[key]);
+    const nextValue = auditValue(afterRow[key]);
+    if (oldValue !== nextValue) changes[key] = { old: oldValue, next: nextValue };
+  }
+  return changes;
+}
+
 export async function createEntry(_prev: ActionState, fd: FormData): Promise<ActionState> {
   const user = await requireCap(CAP);
   if (!user) return { error: 'forbidden' };
@@ -103,7 +154,7 @@ export async function createEntry(_prev: ActionState, fd: FormData): Promise<Act
   if (!data) return { error: 'invalid' };
   const locale = reqField(fd, 'locale') || 'ar';
   const row = await prisma.financeEntry.create({ data: { ...data, createdById: user.id } });
-  await audit(user.id, 'CREATE', 'FinanceEntry', { type: data.type, amount: data.amount });
+  await audit(user.id, 'CREATE', 'FinanceEntry', { id: row.id, ...auditEntrySnapshot(data) });
   revalidatePath(HUB, 'page');
   revalidatePath(LIST, 'page');
   redirect(`/${locale}/finance/ledger/${row.id}`);
@@ -117,16 +168,19 @@ export async function updateEntry(id: string, _prev: ActionState, fd: FormData):
   const data = toData(res.data, obligation, await getUsdToIqd());
   if (!data) return { error: 'invalid' };
   const locale = reqField(fd, 'locale') || 'ar';
+  const before = await prisma.financeEntry.findUnique({ where: { id }, select: entryAuditSelect });
   await prisma.financeEntry.update({ where: { id }, data });
-  await audit(user.id, 'UPDATE', 'FinanceEntry', { id });
+  await audit(user.id, 'UPDATE', 'FinanceEntry', {
+    id,
+    reason: optField(fd, 'changeReason') ?? null,
+    changes: changedEntryFields(before, data),
+  });
   revalidatePath(HUB, 'page');
   revalidatePath(LIST, 'page');
   redirect(`/${locale}/finance/ledger/${id}`);
 }
 
-export async function reverseEntry(id: string, locale: string): Promise<void> {
-  const user = await requireCap(CAP);
-  if (!user) return;
+async function reverseEntryForUser(id: string, user: { id: string }, locale: string, reason: string): Promise<void> {
   const entry = await prisma.financeEntry.findUnique({
     where: { id },
     include: { settlements: { where: { reversedAt: null, reversalOfId: null }, select: { id: true } } },
@@ -142,7 +196,7 @@ export async function reverseEntry(id: string, locale: string): Promise<void> {
       data: {
         reversedAt: new Date(),
         reversedById: user.id,
-        reversalReason: 'Manual reversal',
+        reversalReason: reason,
       },
     });
     await tx.financeEntry.create({
@@ -166,17 +220,44 @@ export async function reverseEntry(id: string, locale: string): Promise<void> {
         orderId: entry.orderId,
         reference: entry.reference,
         attachmentUrl: entry.attachmentUrl,
-        description: `Reversal marker for ${entry.reference ?? entry.id}`,
+        description: `Reversal marker for ${entry.reference ?? entry.id}: ${reason}`,
         reversalOfId: entry.id,
         createdById: user.id,
       },
     });
   });
-  await audit(user.id, 'REVERSE', 'FinanceEntry', { id });
+  await audit(user.id, 'REVERSE', 'FinanceEntry', {
+    id,
+    reason,
+    reversed: auditEntrySnapshot(entry),
+    related: {
+      orderId: entry.orderId,
+      importKey: entry.importKey,
+      accountId: entry.accountId,
+      toAccountId: entry.toAccountId,
+      partyId: entry.partyId,
+      branchId: entry.branchId,
+    },
+  });
   revalidatePath(HUB, 'page');
   revalidatePath(LIST, 'page');
   revalidatePath('/[locale]/(dashboard)/finance/dues', 'page');
   redirect(`/${locale}/finance/ledger`);
+}
+
+export async function reverseEntry(id: string, locale: string): Promise<void> {
+  const user = await requireCap(CAP);
+  if (!user) return;
+  await reverseEntryForUser(id, user, locale, 'Manual reversal');
+}
+
+export async function reverseEntryWithReason(id: string, _prev: ActionState, fd: FormData): Promise<ActionState> {
+  const user = await requireCap(CAP);
+  if (!user) return { error: 'forbidden' };
+  const locale = reqField(fd, 'locale') || 'ar';
+  const reason = reqField(fd, 'reason');
+  if (reason.length < 3) return { error: 'reason' };
+  await reverseEntryForUser(id, user, locale, reason);
 }
 
 export async function deleteEntry(id: string, locale: string): Promise<void> {
@@ -215,7 +296,7 @@ export async function settleEntry(
   if (outstanding <= 0) return { error: 'invalid' };
   const amount = Math.min(toMinor(r.data.amount, ob.currency), outstanding);
 
-  await prisma.financeEntry.create({
+  const settlement = await prisma.financeEntry.create({
     data: {
       date: r.data.date,
       type: ob.obligationKind === 'PAYABLE' ? 'PAYMENT_OUT' : 'PAYMENT_IN',
@@ -230,7 +311,15 @@ export async function settleEntry(
       createdById: user.id,
     },
   });
-  await audit(user.id, 'SETTLE', 'FinanceEntry', { obligationId, amount });
+  await audit(user.id, 'SETTLE', 'FinanceEntry', {
+    id: settlement.id,
+    obligationId,
+    amount,
+    accountId: r.data.accountId,
+    partyId: ob.partyId,
+    branchId: ob.branchId,
+    date: r.data.date.toISOString(),
+  });
   revalidatePath(HUB, 'page');
   revalidatePath(LIST, 'page');
   revalidatePath('/[locale]/(dashboard)/finance/dues', 'page');

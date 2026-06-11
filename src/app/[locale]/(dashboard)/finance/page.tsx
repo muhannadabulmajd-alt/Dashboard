@@ -15,6 +15,11 @@ import {
   Plus,
   ChevronRight,
   Scale,
+  AlertTriangle,
+  ShieldCheck,
+  CheckCircle2,
+  XCircle,
+  History,
   type LucideIcon,
 } from 'lucide-react';
 import { getPageContext } from '@/server/page-context';
@@ -32,6 +37,7 @@ import { RateEditor } from '@/components/finance/RateEditor';
 import { PageHeader } from '@/components/ui/primitives';
 import { DataTable, type Column } from '@/components/data-table/DataTable';
 import { BarChartCard, DonutChartCard } from '@/components/charts/Charts';
+import { SectionGuide } from '@/components/records/SectionGuide';
 import { Link } from '@/i18n/navigation';
 import type { Currency, ExpenseCategoryType } from '@prisma/client';
 
@@ -59,7 +65,12 @@ const TONES: Record<Tone, string> = {
   neutral: 'bg-primary/10 text-primary',
   warn: 'bg-warning-soft text-warning',
 };
+const ALERT_TONES = {
+  danger: 'border-danger/40 bg-danger-soft text-danger',
+  warning: 'border-warning/40 bg-warning-soft text-warning',
+} as const;
 type Tile = { label: string; value: number; Icon: LucideIcon; tone: Tone; href?: string };
+type FinancialAlert = { title: string; body: string; href: string; tone: keyof typeof ALERT_TONES };
 
 function Kpi({
   label,
@@ -215,6 +226,71 @@ export default async function FinancePage({
     },
     { payables: 0, receivables: 0 },
   );
+  const openPayables = entries
+    .filter((e) => e.obligation && e.obligationKind === 'PAYABLE')
+    .map((e) => Math.max(0, iqd(e) - (paidByObligation.get(e.id) ?? 0)))
+    .filter((amount) => amount > 0);
+  const largeExpenses = entries
+    .filter((e) => (e.type === 'EXPENSE' || e.type === 'PURCHASE') && iqd(e) >= 1_000_000)
+    .sort((a, b) => iqd(b) - iqd(a))
+    .slice(0, 3);
+  const largestExpense = largeExpenses[0] ? iqd(largeExpenses[0]) : 0;
+  const financialAlerts: FinancialAlert[] = [
+    ...(overdue.payables > 0
+      ? [{
+          title: t('alerts.overduePayables.title'),
+          body: t('alerts.overduePayables.body', { amount: formatMoney(overdue.payables, 'IQD', locale) }),
+          href: '/finance/dues',
+          tone: 'danger' as const,
+        }]
+      : []),
+    ...(overdue.receivables > 0
+      ? [{
+          title: t('alerts.overdueReceivables.title'),
+          body: t('alerts.overdueReceivables.body', { amount: formatMoney(overdue.receivables, 'IQD', locale) }),
+          href: '/finance/dues',
+          tone: 'warning' as const,
+        }]
+      : []),
+    ...(combined.cash < 0 || (combined.payable > 0 && combined.cash < combined.payable)
+      ? [{
+          title: t('alerts.lowCash.title'),
+          body: t('alerts.lowCash.body', {
+            cash: formatMoney(combined.cash, 'IQD', locale),
+            payables: formatMoney(combined.payable, 'IQD', locale),
+          }),
+          href: '/finance/accounts',
+          tone: 'danger' as const,
+        }]
+      : []),
+    ...(gross.amount < 0 || gross.pct < 0
+      ? [{
+          title: t('alerts.negativeMargin.title'),
+          body: t('alerts.negativeMargin.body', { amount: formatMoney(gross.amount, 'IQD', locale) }),
+          href: '/pnl',
+          tone: 'danger' as const,
+        }]
+      : []),
+    ...(openPayables.length > 0
+      ? [{
+          title: t('alerts.unpaidSupplierInvoices.title'),
+          body: t('alerts.unpaidSupplierInvoices.body', { count: openPayables.length }),
+          href: '/finance/dues',
+          tone: 'warning' as const,
+        }]
+      : []),
+    ...(largeExpenses.length > 0
+      ? [{
+          title: t('alerts.largeExpense.title'),
+          body: t('alerts.largeExpense.body', {
+            amount: formatMoney(largestExpense, 'IQD', locale),
+            count: largeExpenses.length,
+          }),
+          href: '/finance/ledger',
+          tone: 'warning' as const,
+        }]
+      : []),
+  ];
 
   // Charts (all converted to IQD at the rate).
   const isSpend = (e: ChartEntry) => e.type === 'EXPENSE' || e.type === 'PURCHASE';
@@ -283,6 +359,15 @@ export default async function FinancePage({
     { href: '/balance-sheet', key: 'balanceSheet', Icon: Scale },
     { href: '/finance/accounts', key: 'accounts', Icon: Wallet },
     { href: '/finance/parties', key: 'parties', Icon: Users },
+    { href: '/finance/audit', key: 'auditLog', Icon: History },
+  ];
+  const permissions = [
+    { label: t('permissions.viewDashboard'), allowed: can(user.role, 'view:finance') },
+    { label: t('permissions.recordEditReverse'), allowed: canManage },
+    { label: t('permissions.viewFinancialReports'), allowed: can(user.role, 'view:financial') },
+    { label: t('permissions.exportReports'), allowed: can(user.role, 'export:financial') },
+    { label: t('permissions.manageAccountsParties'), allowed: canManage },
+    { label: t('permissions.changeExchangeRate'), allowed: canManage },
   ];
 
   return (
@@ -303,6 +388,59 @@ export default async function FinancePage({
       {canManage ? (
         <RateEditor action={setUsdToIqd} locale={locale} rate={rate} label={t('rate')} apply={t('apply')} />
       ) : null}
+
+      <SectionGuide
+        title={t('guide.home.title')}
+        intro={t('guide.home.intro')}
+        points={t.raw('guide.home.points')}
+      />
+
+      <section className="space-y-3 rounded-[var(--radius)] border bg-card p-4">
+        <div className="flex items-center gap-2">
+          <AlertTriangle className="size-4 text-warning" />
+          <h2 className="text-sm font-semibold text-foreground">{t('financialAlerts')}</h2>
+        </div>
+        {financialAlerts.length ? (
+          <div className="grid gap-2 md:grid-cols-2">
+            {financialAlerts.map((alert) => (
+              <Link
+                key={alert.title}
+                href={alert.href}
+                className={`rounded-lg border p-3 hover:opacity-90 ${ALERT_TONES[alert.tone]}`}
+              >
+                <div className="text-sm font-semibold">{alert.title}</div>
+                <div className="mt-1 text-xs leading-5 opacity-90">{alert.body}</div>
+              </Link>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-lg border border-success/30 bg-success-soft px-3 py-2 text-sm text-success">
+            {t('alertsClear')}
+          </div>
+        )}
+      </section>
+
+      <section className="space-y-3 rounded-[var(--radius)] border bg-card p-4">
+        <div className="flex items-center gap-2">
+          <ShieldCheck className="size-4 text-primary" />
+          <div>
+            <h2 className="text-sm font-semibold text-foreground">{t('permissionControl')}</h2>
+            <p className="text-xs text-muted-foreground">{t('permissionControlHint', { role: enumLabel(user.role, locale) })}</p>
+          </div>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {permissions.map((permission) => (
+            <div key={permission.label} className="flex items-center gap-2 rounded-lg border bg-background px-3 py-2 text-sm">
+              {permission.allowed ? (
+                <CheckCircle2 className="size-4 text-success" />
+              ) : (
+                <XCircle className="size-4 text-muted-foreground" />
+              )}
+              <span className={permission.allowed ? 'text-foreground' : 'text-muted-foreground'}>{permission.label}</span>
+            </div>
+          ))}
+        </div>
+      </section>
 
       <section className="space-y-3">
         <div className="flex items-center gap-2">

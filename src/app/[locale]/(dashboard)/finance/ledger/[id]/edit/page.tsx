@@ -52,6 +52,10 @@ export default async function EditEntryPage({
   const accountOptions = accounts.map((a) => ({ value: a.id, label: a.name }));
   const partyOptions = parties.map((p) => ({ value: p.id, label: p.name }));
   const branchOptions = branches.map((b) => ({ value: b.id, label: locale === 'ar' ? b.nameAr : b.nameEn }));
+  const fields = [
+    ...entryFields((k) => t(k), locale, accountOptions, partyOptions, branchOptions),
+    { name: 'changeReason', label: t('f.changeReason'), type: 'text' as const, hint: t('h.changeReason') },
+  ];
   const errors = { invalid: tr('err.invalid'), forbidden: tr('err.forbidden') };
 
   return (
@@ -60,7 +64,7 @@ export default async function EditEntryPage({
       <PageHeader title={tr('editTitle', { entity: t('recordEntry') })} />
       <RecordForm
         action={updateEntry.bind(null, id)}
-        fields={entryFields((k) => t(k), locale, accountOptions, partyOptions, branchOptions)}
+        fields={fields}
         initial={initial}
         locale={locale}
         submitLabel={tr('save')}

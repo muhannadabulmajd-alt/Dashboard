@@ -6,6 +6,7 @@ import { enumLabel } from '@/lib/enums';
 import { formatMoney, convertToIqd } from '@/lib/money';
 import { formatDate } from '@/lib/dates';
 import { getUsdToIqd } from '@/server/settings';
+import { can } from '@/lib/rbac';
 import { Badge, PageHeader } from '@/components/ui/primitives';
 import { BackLink, DetailGrid, type DetailField } from '@/components/records/parts';
 import { RecordActions } from '@/components/records/RecordActions';
@@ -20,11 +21,12 @@ export default async function FinancePartyDetailPage({
   params: Promise<{ locale: string; id: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { locale } = await getPageContext(params, searchParams, 'manage:finance');
+  const { locale, user } = await getPageContext(params, searchParams, 'view:finance');
   const { id } = await params;
   const t = await getTranslations('finance');
   const tr = await getTranslations('records');
   const trf = await getTranslations('records.f');
+  const canManage = can(user.role, 'manage:finance');
   const [p, entries, rate] = await Promise.all([
     prisma.party.findUnique({ where: { id } }),
     prisma.financeEntry.findMany({
@@ -111,19 +113,21 @@ export default async function FinancePartyDetailPage({
     <>
       <BackLink href="/finance/parties" label={tr('back')} />
       <PageHeader title={p.name} subtitle={t('parties')} />
-      <RecordActions
-        editHref={`/finance/parties/${p.id}/edit`}
-        isActive={p.isActive}
-        archiveAction={archiveParty.bind(null, p.id, locale, !p.isActive)}
-        deleteAction={deleteParty.bind(null, p.id, locale)}
-        labels={{
-          edit: tr('edit'),
-          archive: tr('archive'),
-          restore: tr('restore'),
-          delete: tr('delete'),
-          confirm: tr('confirmDelete'),
-        }}
-      />
+      {canManage ? (
+        <RecordActions
+          editHref={`/finance/parties/${p.id}/edit`}
+          isActive={p.isActive}
+          archiveAction={archiveParty.bind(null, p.id, locale, !p.isActive)}
+          deleteAction={deleteParty.bind(null, p.id, locale)}
+          labels={{
+            edit: tr('edit'),
+            archive: tr('archive'),
+            restore: tr('restore'),
+            delete: tr('delete'),
+            confirm: tr('confirmDelete'),
+          }}
+        />
+      ) : null}
       <DetailGrid items={items} />
       <div className="mt-4 space-y-2">
         <h3 className="text-sm font-semibold">{t('statement')}</h3>

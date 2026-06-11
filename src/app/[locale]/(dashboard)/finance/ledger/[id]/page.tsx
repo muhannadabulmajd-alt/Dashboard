@@ -5,10 +5,14 @@ import { prisma } from '@/server/db/client';
 import { enumLabel } from '@/lib/enums';
 import { formatMoney } from '@/lib/money';
 import { formatDate } from '@/lib/dates';
+import { can } from '@/lib/rbac';
 import { Badge, PageHeader } from '@/components/ui/primitives';
 import { BackLink, DetailGrid, type DetailField } from '@/components/records/parts';
 import { RecordActions } from '@/components/records/RecordActions';
-import { reverseEntry } from '@/server/finance/entries';
+import { SectionGuide } from '@/components/records/SectionGuide';
+import { ReverseEntryForm } from '@/components/finance/ReverseEntryForm';
+import { reverseEntryWithReason } from '@/server/finance/entries';
+import { Link } from '@/i18n/navigation';
 
 export default async function EntryDetailPage({
   params,
@@ -17,14 +21,20 @@ export default async function EntryDetailPage({
   params: Promise<{ locale: string; id: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { locale } = await getPageContext(params, searchParams, 'manage:finance');
+  const { locale, user } = await getPageContext(params, searchParams, 'view:finance');
   const { id } = await params;
   const t = await getTranslations('finance');
   const tr = await getTranslations('records');
+  const canManage = can(user.role, 'manage:finance');
 
   const e = await prisma.financeEntry.findUnique({
     where: { id },
-    include: { party: true, account: true, toAccount: true },
+    include: {
+      party: true,
+      account: true,
+      toAccount: true,
+      settlements: { where: { reversedAt: null, reversalOfId: null }, select: { id: true } },
+    },
   });
   if (!e) notFound();
   const [branch, createdBy, reversedBy] = await Promise.all([
@@ -36,6 +46,9 @@ export default async function EntryDetailPage({
   const isReversed = Boolean(e.reversedAt);
   const isReversalMarker = Boolean(e.reversalOfId);
   const managedBySync = Boolean(e.importKey);
+  const hasSettlements = e.obligation && e.settlements.length > 0;
+  const canEdit = canManage && !isReversed && !isReversalMarker && !managedBySync;
+  const canReverse = canEdit && !hasSettlements;
 
   const items: DetailField[] = [
     { label: t('f.transactionId'), value: e.id },
@@ -82,18 +95,50 @@ export default async function EntryDetailPage({
     <>
       <BackLink href="/finance/ledger" label={tr('back')} />
       <PageHeader title={enumLabel(e.type, locale)} subtitle={formatMoney(e.amount, e.currency, locale)} />
-      <RecordActions
-        editHref={!isReversed && !isReversalMarker && !managedBySync ? `/finance/ledger/${e.id}/edit` : undefined}
-        deleteAction={!isReversed && !isReversalMarker && !managedBySync ? reverseEntry.bind(null, e.id, locale) : undefined}
-        labels={{
-          edit: tr('edit'),
-          archive: tr('archive'),
-          restore: tr('restore'),
-          delete: t('reverse'),
-          confirm: t('confirmReverse'),
-        }}
+      <SectionGuide
+        title={t('guide.audit.title')}
+        intro={t('guide.audit.intro')}
+        points={t.raw('guide.audit.points')}
       />
+      {canManage ? (
+        <RecordActions
+          editHref={canEdit ? `/finance/ledger/${e.id}/edit` : undefined}
+          labels={{
+            edit: tr('edit'),
+            archive: tr('archive'),
+            restore: tr('restore'),
+            delete: t('reverse'),
+            confirm: t('confirmReverse'),
+          }}
+        />
+      ) : null}
       <DetailGrid items={items} />
+      {canReverse ? (
+        <div className="space-y-2">
+          <ReverseEntryForm
+            action={reverseEntryWithReason.bind(null, e.id)}
+            locale={locale}
+            labels={{
+              title: t('reversalFlow'),
+              hint: t('reversalFlowHint'),
+              reason: t('reversalReason'),
+              placeholder: t('reversalReasonPlaceholder'),
+              submit: t('reverse'),
+              error: t('reversalReasonRequired'),
+            }}
+          />
+          <p className="text-xs text-muted-foreground">
+            {t('correctionHint')}{' '}
+            <Link href="/finance/ledger/new" className="font-medium text-primary hover:underline">
+              {t('correctionEntry')}
+            </Link>
+          </p>
+        </div>
+      ) : canManage && hasSettlements ? (
+        <div className="rounded-[var(--radius)] border border-warning/30 bg-warning-soft/40 p-4 text-sm text-muted-foreground">
+          {t('reverseBlockedSettled')}
+        </div>
+      ) : null}
     </>
   );
 }

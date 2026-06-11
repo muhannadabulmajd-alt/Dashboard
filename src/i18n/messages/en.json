@@ -69,6 +69,8 @@
     "shareholders": "Shareholders",
     "reports": "Management reports",
     "reportsSubtitle": "P&L, balance sheet, cash flow, profitability and statements from the finance ledger.",
+    "auditLog": "Finance audit log",
+    "auditLogSubtitle": "Finance changes, exports, settlements and reversals.",
     "pnlReport": "P&L report",
     "cashFlow": "Cash flow summary",
     "cashFlowSubtitle": "Cash collected and paid during the selected period.",
@@ -84,6 +86,38 @@
     "statementParties": "Parties with activity",
     "reportPack": "Priority 2 report pack",
     "reportPackHint": "This hub covers the BRD management reports: P&L, balance sheet, cash flow summary, product profitability, branch profitability, and customer/supplier statements.",
+    "exportOptions": "Export options",
+    "exportOptionsHint": "Download finance reports as CSV. Use browser print on the balance sheet for PDF.",
+    "exportOptionsForbidden": "Your role can view this report pack, but export is disabled.",
+    "financialAlerts": "Financial alerts",
+    "alertsClear": "No finance alerts for the current data.",
+    "permissionControl": "Permission control",
+    "permissionControlHint": "Current role: {role}. Sensitive finance actions are shown only when this role allows them.",
+    "alerts": {
+      "overduePayables": { "title": "Overdue payables", "body": "Supplier or expense dues past their due date total {amount}." },
+      "overdueReceivables": { "title": "Overdue receivables", "body": "Customer amounts past their due date total {amount}." },
+      "lowCash": { "title": "Cash pressure", "body": "Available cash is {cash} against open payables of {payables}." },
+      "negativeMargin": { "title": "Negative gross margin", "body": "COGS is higher than sales by {amount} in the selected data." },
+      "unpaidSupplierInvoices": { "title": "Unpaid supplier invoices", "body": "{count} supplier payable(s) still have an outstanding balance." },
+      "largeExpense": { "title": "Large expense", "body": "{count} expense/purchase item(s) are at least {amount}; review the ledger." }
+    },
+    "permissions": {
+      "viewDashboard": "View finance dashboard",
+      "recordEditReverse": "Record, edit and reverse transactions",
+      "viewFinancialReports": "View P&L and sensitive reports",
+      "exportReports": "Export finance reports",
+      "manageAccountsParties": "Manage accounts, parties and shareholders",
+      "changeExchangeRate": "Change exchange rate"
+    },
+    "exportLinks": {
+      "pnl": "P&L CSV",
+      "balanceSheet": "Balance sheet CSV",
+      "cashFlow": "Cash flow CSV",
+      "productProfitability": "Product profitability CSV",
+      "branchProfitability": "Branch profitability CSV",
+      "customerStatements": "Customer statements CSV",
+      "supplierStatements": "Supplier statements CSV"
+    },
     "cashIn": "Cash in",
     "cashOut": "Cash out",
     "cashFlowChart": "Cash movement",
@@ -185,6 +219,13 @@
     "reversedAt": "Reversed at",
     "reversedBy": "Reversed by",
     "reversalReason": "Reversal reason",
+    "reversalFlow": "Audit log and reversal flow",
+    "reversalFlowHint": "Important finance entries are not deleted. Enter the reason, then the system marks this entry reversed and keeps both the original and reversal marker in history.",
+    "reversalReasonPlaceholder": "Example: duplicate supplier payment entered on the wrong date",
+    "reversalReasonRequired": "Enter a clear reversal reason before submitting.",
+    "reverseBlockedSettled": "This due already has active settlements. Reverse or correct those settlement entries before reversing the original due.",
+    "correctionHint": "After reversing an incorrect entry, add the corrected transaction as a new ledger entry:",
+    "correctionEntry": "Add correction entry",
     "viewAttachment": "View attachment",
     "sortDateDesc": "Newest first",
     "sortDateAsc": "Oldest first",
@@ -217,7 +258,123 @@
       "dues": "Payables & receivables",
       "shareholders": "Capital & ownership",
       "reports": "Management report pack",
-      "balanceSheet": "Assets, liabilities & equity"
+      "balanceSheet": "Assets, liabilities & equity",
+      "auditLog": "Changes, exports & reversals"
+    },
+    "guide": {
+      "home": {
+        "title": "Finance home guide",
+        "intro": "Use this page as the finance control room: balances, profit, dues, alerts, permissions and quick links.",
+        "points": [
+          "Record Entry adds money in, money out, dues, transfers and capital with the correct ledger shape.",
+          "Alerts point to overdue dues, cash pressure, negative margin, unpaid supplier invoices and large expenses.",
+          "Permissions show what the current role can view, export, edit, reverse and control."
+        ]
+      },
+      "ledger": {
+        "title": "Ledger guide",
+        "intro": "The ledger is the full history of finance movements. It is the source for balances, reports and audit review.",
+        "points": [
+          "Paid entries affect cash or bank accounts immediately.",
+          "Due entries become payables or receivables until they are settled.",
+          "Important entries should be reversed with a reason instead of deleted."
+        ]
+      },
+      "dues": {
+        "title": "Payables and receivables guide",
+        "intro": "Payables are amounts Laheeb owes others. Receivables are amounts others owe Laheeb.",
+        "points": [
+          "Use Settle when a supplier is paid or a customer pays against an outstanding due.",
+          "Aging buckets help prioritize collection and supplier payment timing.",
+          "Overdue rows should be reviewed before cash planning."
+        ]
+      },
+      "accounts": {
+        "title": "Accounts guide",
+        "intro": "Accounts are where money is stored or processed: cash boxes, bank accounts, wallets and gateways.",
+        "points": [
+          "Pick the correct currency so account balances match the real account.",
+          "Opening balances should be set once when the account is created.",
+          "Archived accounts stay in history but stop appearing in new entries."
+        ]
+      },
+      "parties": {
+        "title": "Parties guide",
+        "intro": "Parties are suppliers, customers, shareholders, branches or other people/companies connected to finance movements.",
+        "points": [
+          "Party links make statements, payables and receivables meaningful.",
+          "Opening balances capture money owed before the system start date.",
+          "Shareholder ownership percentage is used for capital tracking."
+        ]
+      },
+      "reports": {
+        "title": "Management reports guide",
+        "intro": "These reports translate the ledger, orders and inventory costs into owner-level management views.",
+        "points": [
+          "P&L explains revenue, COGS, gross profit, expenses and operating profit.",
+          "Balance sheet explains assets, liabilities and equity as of today.",
+          "Cash flow, product, branch and party statements help decisions by movement, SKU, branch and relationship."
+        ]
+      },
+      "pnl": {
+        "title": "P&L guide",
+        "intro": "P&L explains whether the business made money in the selected period.",
+        "points": [
+          "Revenue is sales before cost; COGS is product cost tied to sold items.",
+          "Gross profit is revenue minus COGS.",
+          "Operating profit subtracts operating expenses from gross profit."
+        ]
+      },
+      "balanceSheet": {
+        "title": "Balance sheet guide",
+        "intro": "The balance sheet shows what Laheeb owns, owes and keeps as equity.",
+        "points": [
+          "Assets include cash, bank, receivables and inventory value.",
+          "Liabilities are payables still owed to suppliers or others.",
+          "Equity includes capital plus retained earnings."
+        ]
+      },
+      "audit": {
+        "title": "Audit and reversal guide",
+        "intro": "Finance history is preserved for control. Corrections should be explained and visible.",
+        "points": [
+          "Creates, edits, settlements, exports and reversals are logged with user and time.",
+          "Reversal keeps the original entry and adds a reversal marker instead of deleting it.",
+          "Use the reason field to explain why the correction was needed."
+        ]
+      }
+    },
+    "h": {
+      "type": "Choose the business meaning of the movement so reports classify it correctly.",
+      "amount": "Enter the amount paid, received, owed or transferred.",
+      "currency": "Choose the currency used in the real transaction.",
+      "rate": "For USD payments, save the IQD rate used at the time of payment.",
+      "date": "The accounting date used in reports and statements.",
+      "paymentStatus": "Paid affects cash/bank now. Due creates a payable or receivable to settle later.",
+      "kind": "Payable means Laheeb owes someone. Receivable means someone owes Laheeb.",
+      "dueDate": "Reminder date for payment or collection follow-up.",
+      "account": "The cash, bank, wallet or gateway where money entered or left.",
+      "toAccount": "The destination account for transfers.",
+      "party": "The related person or company, such as a customer, supplier or shareholder.",
+      "branch": "The branch connected to this entry for branch reporting.",
+      "category": "The business reason for the cost; this feeds P&L and management reports.",
+      "description": "Short explanation visible in the ledger and statements.",
+      "reference": "Invoice, order, receipt or internal reference number.",
+      "attachmentUrl": "Optional link to supporting evidence such as invoice or receipt.",
+      "accountName": "Use a clear name such as Main Cash, Rafidain Bank or Zain Cash.",
+      "accountType": "Account type controls how balances are grouped.",
+      "bank": "Optional bank or provider name for reconciliation.",
+      "openingBalance": "Starting balance when this account begins in the system.",
+      "notes": "Internal notes for finance operators.",
+      "partyName": "Use the real customer, supplier, shareholder or company name.",
+      "partyType": "Party type controls statements and due tracking.",
+      "contact": "Optional contact detail for follow-up.",
+      "address": "Optional address for the party record.",
+      "openingPayable": "Amount Laheeb already owed this party before tracking began.",
+      "openingReceivable": "Amount this party already owed Laheeb before tracking began.",
+      "equityShare": "Ownership share for shareholder/capital tracking.",
+      "settlementAmount": "Amount being paid or collected against this due.",
+      "changeReason": "Optional audit note explaining why this saved entry was changed."
     },
     "f": {
       "name": "Name", "type": "Type", "bank": "Bank", "branch": "Branch", "currency": "Currency",
@@ -231,7 +388,7 @@
       "related": "Related", "createdBy": "Created by", "attachmentUrl": "Attachment URL",
       "settles": "Settles", "none": "—",
       "rate": "Rate (IQD per $1)", "ratePlaceholder": "Only for USD payments, e.g. 1500",
-      "origPaid": "Paid in USD (× rate)"
+      "origPaid": "Paid in USD (× rate)", "changeReason": "Reason for change"
     }
   },
   "records": {

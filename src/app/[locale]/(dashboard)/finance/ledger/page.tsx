@@ -6,10 +6,12 @@ import { enumLabel, FINANCE_TYPES } from '@/lib/enums';
 import { formatMoney } from '@/lib/money';
 import { formatDate } from '@/lib/dates';
 import { signedEffect, type FinanceEntryLike } from '@/lib/metrics/finance';
+import { can } from '@/lib/rbac';
 import { Badge, PageHeader } from '@/components/ui/primitives';
 import { DataTable, type Column } from '@/components/data-table/DataTable';
 import { BackLink } from '@/components/records/parts';
 import { AssignAccountForm } from '@/components/finance/AssignAccountForm';
+import { SectionGuide } from '@/components/records/SectionGuide';
 import { assignImportedAccount } from '@/server/finance/entries';
 import { Link } from '@/i18n/navigation';
 import type { FinanceType, Prisma } from '@prisma/client';
@@ -31,11 +33,13 @@ export default async function LedgerPage({
   params: Promise<{ locale: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { locale } = await getPageContext(params, searchParams, 'manage:finance');
+  const { locale, user } = await getPageContext(params, searchParams, 'view:finance');
   const rawParams = await searchParams;
   const t = await getTranslations('finance');
   const tr = await getTranslations('records');
   const tc = await getTranslations('common');
+  const canManage = can(user.role, 'manage:finance');
+  const canExport = can(user.role, 'export:financial');
   const q = one(rawParams.q).trim();
   const type = one(rawParams.type);
   const status = one(rawParams.status);
@@ -162,20 +166,29 @@ export default async function LedgerPage({
       <BackLink href="/finance" label={tr('back')} />
       <div className="flex items-center justify-between gap-3">
         <PageHeader title={t('ledger')} subtitle={tr('total', { n: entries.length })} />
-        <Link
-          href="/finance/ledger/new"
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:opacity-95"
-        >
-          <Plus className="size-4" />
-          {tr('add')}
-        </Link>
+        {canManage ? (
+          <Link
+            href="/finance/ledger/new"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:opacity-95"
+          >
+            <Plus className="size-4" />
+            {tr('add')}
+          </Link>
+        ) : null}
       </div>
-      <AssignAccountForm
-        action={assignImportedAccount}
-        locale={locale}
-        accounts={accountOptions}
-        labels={{ title: t('assignAccount'), hint: t('assignHint'), apply: t('apply') }}
+      <SectionGuide
+        title={t('guide.ledger.title')}
+        intro={t('guide.ledger.intro')}
+        points={t.raw('guide.ledger.points')}
       />
+      {canManage ? (
+        <AssignAccountForm
+          action={assignImportedAccount}
+          locale={locale}
+          accounts={accountOptions}
+          labels={{ title: t('assignAccount'), hint: t('assignHint'), apply: t('apply') }}
+        />
+      ) : null}
       <form className="grid gap-2 rounded-[var(--radius)] border bg-card p-3 md:grid-cols-4 xl:grid-cols-7">
         <input name="q" defaultValue={q} placeholder={tc('search')} className={input} />
         <select name="type" defaultValue={type} className={input}>
@@ -221,7 +234,7 @@ export default async function LedgerPage({
         columns={cols}
         rows={rows}
         emptyLabel={tr('none')}
-        exportHref={exportHref}
+        exportHref={canExport ? exportHref : undefined}
         exportLabel={tc('exportCsv')}
       />
     </>

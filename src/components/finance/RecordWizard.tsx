@@ -11,6 +11,21 @@ type Opt = { value: string; label: string };
 type FieldKey = 'amount' | 'currency' | 'date' | 'account' | 'toAccount' | 'party' | 'category' | 'dueDate' | 'branch' | 'description' | 'reference' | 'attachmentUrl';
 type Group = 'in' | 'out' | 'due' | 'transfer';
 
+const FIELD_HELP: Record<FieldKey, string> = {
+  amount: 'h.amount',
+  currency: 'h.currency',
+  date: 'h.date',
+  account: 'h.account',
+  toAccount: 'h.toAccount',
+  party: 'h.party',
+  category: 'h.category',
+  dueDate: 'h.dueDate',
+  branch: 'h.branch',
+  description: 'h.description',
+  reference: 'h.reference',
+  attachmentUrl: 'h.attachmentUrl',
+};
+
 interface RecordOption {
   key: string;
   group: Group;
@@ -201,6 +216,7 @@ function RecordForm({
       <label className="flex flex-col gap-1">
         <span className="text-xs font-medium text-muted-foreground">{label}</span>
         {control}
+        {key in FIELD_HELP ? <span className="text-xs text-muted-foreground">{t(FIELD_HELP[key as FieldKey])}</span> : null}
       </label>
     );
   }

@@ -35,9 +35,9 @@ export default async function SettlePage({
   });
 
   const fields: FieldDef[] = [
-    { name: 'amount', label: t('f.amount'), type: 'number', required: true },
-    { name: 'accountId', label: t('f.account'), type: 'select', required: true, options: accounts.map((a) => ({ value: a.id, label: a.name })) },
-    { name: 'date', label: t('f.date'), type: 'date', required: true },
+    { name: 'amount', label: t('f.amount'), type: 'number', required: true, hint: t('h.settlementAmount') },
+    { name: 'accountId', label: t('f.account'), type: 'select', required: true, options: accounts.map((a) => ({ value: a.id, label: a.name })), hint: t('h.account') },
+    { name: 'date', label: t('f.date'), type: 'date', required: true, hint: t('h.date') },
   ];
   const initial = { amount: toMajor(outstanding, ob.currency), date: new Date().toISOString().slice(0, 10) };
   const errors = { invalid: tr('err.invalid'), forbidden: tr('err.forbidden') };

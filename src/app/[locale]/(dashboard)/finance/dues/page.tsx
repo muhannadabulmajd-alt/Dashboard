@@ -5,10 +5,12 @@ import { enumLabel } from '@/lib/enums';
 import { formatMoney } from '@/lib/money';
 import { formatDate } from '@/lib/dates';
 import { agingBuckets, type AgingBuckets } from '@/lib/metrics/finance';
+import { can } from '@/lib/rbac';
 import { PageHeader } from '@/components/ui/primitives';
 import { DataTable, type Column } from '@/components/data-table/DataTable';
 import { RecordsSummary, type SummaryStat } from '@/components/records/Summary';
 import { BackLink } from '@/components/records/parts';
+import { SectionGuide } from '@/components/records/SectionGuide';
 import { Link } from '@/i18n/navigation';
 
 export default async function DuesPage({
@@ -18,10 +20,12 @@ export default async function DuesPage({
   params: Promise<{ locale: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { locale } = await getPageContext(params, searchParams, 'view:finance');
+  const { locale, user } = await getPageContext(params, searchParams, 'view:finance');
   const t = await getTranslations('finance');
   const tr = await getTranslations('records');
   const tc = await getTranslations('common');
+  const canManage = can(user.role, 'manage:finance');
+  const canExport = can(user.role, 'export:financial');
 
   const obligations = await prisma.financeEntry.findMany({
     where: { obligation: true, reversedAt: null, reversalOfId: null },
@@ -80,9 +84,11 @@ export default async function DuesPage({
         ) : (
           '—'
         ),
-        <Link key="s" href={`/finance/dues/${o.id}/settle`} className="font-medium text-primary hover:underline">
-          {t('f.settle')}
-        </Link>,
+        canManage ? (
+          <Link key="s" href={`/finance/dues/${o.id}/settle`} className="font-medium text-primary hover:underline">
+            {t('f.settle')}
+          </Link>
+        ) : '—',
       ];
     });
 
@@ -90,6 +96,11 @@ export default async function DuesPage({
     <>
       <BackLink href="/finance" label={tr('back')} />
       <PageHeader title={t('dues')} subtitle={t('subtitle')} />
+      <SectionGuide
+        title={t('guide.dues.title')}
+        intro={t('guide.dues.intro')}
+        points={t.raw('guide.dues.points')}
+      />
       {overdue.length ? (
         <div className="rounded-lg border border-danger/40 bg-danger-soft px-4 py-2 text-sm font-medium text-danger">
           {t('overdueAlert', { count: overdue.length, amount: formatMoney(overdueTotal, 'IQD', locale) })}
@@ -102,7 +113,7 @@ export default async function DuesPage({
           columns={cols}
           rows={toRows(open('PAYABLE'))}
           emptyLabel={t('noDues')}
-          exportHref={`/api/finance/export?type=dues&kind=PAYABLE&locale=${locale}`}
+          exportHref={canExport ? `/api/finance/export?type=dues&kind=PAYABLE&locale=${locale}` : undefined}
           exportLabel={tc('exportCsv')}
         />
       </section>
@@ -113,7 +124,7 @@ export default async function DuesPage({
           columns={cols}
           rows={toRows(open('RECEIVABLE'))}
           emptyLabel={t('noDues')}
-          exportHref={`/api/finance/export?type=dues&kind=RECEIVABLE&locale=${locale}`}
+          exportHref={canExport ? `/api/finance/export?type=dues&kind=RECEIVABLE&locale=${locale}` : undefined}
           exportLabel={tc('exportCsv')}
         />
       </section>

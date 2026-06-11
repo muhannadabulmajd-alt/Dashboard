@@ -76,7 +76,7 @@ function ledgerOrderBy(p: URLSearchParams): Prisma.FinanceEntryOrderByWithRelati
 export async function GET(req: NextRequest) {
   const user = await getCurrentUser();
   if (!user) return new NextResponse('Unauthorized', { status: 401 });
-  if (!can(user.role, 'view:finance')) return new NextResponse('Forbidden', { status: 403 });
+  if (!can(user.role, 'export:financial')) return new NextResponse('Forbidden', { status: 403 });
 
   const p = req.nextUrl.searchParams;
   const type = p.get('type') ?? 'ledger';

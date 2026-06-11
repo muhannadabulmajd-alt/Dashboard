@@ -5,8 +5,10 @@ import { prisma } from '@/server/db/client';
 import { formatMoney, convertToIqd, type AppLocale } from '@/lib/money';
 import { formatDate } from '@/lib/dates';
 import { accountBalance, netCash, unassignedCash, financeTotals, type FinanceEntryLike } from '@/lib/metrics/finance';
+import { can } from '@/lib/rbac';
 import { getUsdToIqd } from '@/server/settings';
 import { PrintButton } from '@/components/PrintButton';
+import { SectionGuide } from '@/components/records/SectionGuide';
 
 function BalanceRow({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
   return (
@@ -19,9 +21,10 @@ function BalanceRow({ label, value, strong }: { label: string; value: string; st
 
 export default async function BalanceSheetPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
-  await requireCapability(locale, 'view:finance');
+  const user = await requireCapability(locale, 'view:finance');
   const t = await getTranslations('finance');
   const loc = locale as AppLocale;
+  const canExport = can(user.role, 'export:financial');
 
   const [accounts, entriesRaw, inventoryItems] = await Promise.all([
     prisma.financeAccount.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }),
@@ -72,15 +75,25 @@ export default async function BalanceSheetPage({ params }: { params: Promise<{ l
           {t('title')}
         </a>
         <div className="flex items-center gap-2">
-          <a
-            href={`/api/finance/export?type=balances&locale=${locale}`}
-            className="inline-flex items-center gap-1.5 rounded-lg border bg-card px-3 py-2 text-sm font-medium hover:bg-muted"
-          >
-            <Download className="size-4" />
-            CSV
-          </a>
+          {canExport ? (
+            <a
+              href={`/api/finance/export?type=balances&locale=${locale}`}
+              className="inline-flex items-center gap-1.5 rounded-lg border bg-card px-3 py-2 text-sm font-medium hover:bg-muted"
+            >
+              <Download className="size-4" />
+              CSV
+            </a>
+          ) : null}
           <PrintButton label={t('print')} />
         </div>
+      </div>
+
+      <div className="mx-auto max-w-[820px] px-4 print:hidden">
+        <SectionGuide
+          title={t('guide.balanceSheet.title')}
+          intro={t('guide.balanceSheet.intro')}
+          points={t.raw('guide.balanceSheet.points')}
+        />
       </div>
 
       <div className="invoice-paper mx-auto my-2 max-w-[820px] bg-card p-8 shadow-sm print:my-0 print:max-w-none print:shadow-none">
