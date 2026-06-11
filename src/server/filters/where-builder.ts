@@ -58,6 +58,7 @@ function orderScalarWhere(
     placedAt: { gte: range.start, lte: range.end },
   };
   if (scope.branchId) where.branchId = scope.branchId;
+  else if (filters.branchId?.length) where.branchId = { in: filters.branchId };
   if (filters.channel?.length) where.channel = { in: filters.channel };
   if (filters.governorate?.length) where.governorate = { in: filters.governorate };
   if (filters.fulfillment?.length) where.fulfillmentMethod = { in: filters.fulfillment };
@@ -105,6 +106,7 @@ export function buildMovementWhere(
 ): Prisma.StockMovementWhereInput {
   const where: Prisma.StockMovementWhereInput = { occurredAt: { lte: range.end } };
   if (scope.branchId) where.branchId = scope.branchId;
+  else if (filters.branchId?.length) where.branchId = { in: filters.branchId };
   return where;
 }
 
@@ -117,6 +119,7 @@ export function buildExpenseWhere(
     incurredAt: { gte: range.start, lte: range.end },
   };
   if (scope.branchId) where.branchId = scope.branchId;
+  else if (filters.branchId?.length) where.branchId = { in: filters.branchId };
   return where;
 }
 
@@ -129,6 +132,7 @@ export function buildBatchWhere(
     roastDate: { gte: range.start, lte: range.end },
   };
   if (scope.branchId) where.branchId = scope.branchId;
+  else if (filters.branchId?.length) where.branchId = { in: filters.branchId };
   if (filters.roastLevel?.length) where.roastLevel = { in: filters.roastLevel };
   return where;
 }

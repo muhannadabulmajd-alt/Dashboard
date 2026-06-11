@@ -88,3 +88,19 @@ export function buildExportHref(dataset: string, filters: DashboardFilters, loca
   sp.set('locale', locale);
   return `/api/export?${sp.toString()}`;
 }
+
+/** Build a Finance CSV export URL carrying active filters + report type. */
+export function buildFinanceExportHref(
+  type: string,
+  filters: DashboardFilters,
+  locale: string,
+  extra?: Record<string, string | undefined>,
+): string {
+  const sp = serializeFilters(filters);
+  sp.set('type', type);
+  sp.set('locale', locale);
+  for (const [key, value] of Object.entries(extra ?? {})) {
+    if (value) sp.set(key, value);
+  }
+  return `/api/finance/export?${sp.toString()}`;
+}

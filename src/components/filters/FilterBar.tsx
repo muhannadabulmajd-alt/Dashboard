@@ -27,6 +27,13 @@ interface Option {
 type FilterConfig = { groups: string[]; branch: boolean };
 const ALL_GROUPS = ['channel', 'governorate', 'productLine', 'grind'];
 function pageConfig(path: string): FilterConfig | null {
+  if (path.startsWith('/finance/reports/product-profitability')) {
+    return { groups: ['channel', 'productLine', 'grind'], branch: true };
+  }
+  if (path.startsWith('/finance/reports/branch-profitability')) {
+    return { groups: ['channel'], branch: false };
+  }
+  if (path.startsWith('/finance/reports')) return { groups: [], branch: true };
   if (path.startsWith('/finance') || path.startsWith('/admin')) return null;
   const map: Record<string, FilterConfig> = {
     '/': { groups: ALL_GROUPS, branch: true },

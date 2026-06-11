@@ -10,6 +10,7 @@ import {
   Package,
   Users,
   BookOpen,
+  FileBarChart2,
   PieChart,
   Plus,
   ChevronRight,
@@ -275,6 +276,7 @@ export default async function FinancePage({
   ];
 
   const cards: { href: string; key: string; Icon: LucideIcon }[] = [
+    { href: '/finance/reports', key: 'reports', Icon: FileBarChart2 },
     { href: '/finance/ledger', key: 'ledger', Icon: BookOpen },
     { href: '/finance/dues', key: 'dues', Icon: Clock },
     { href: '/finance/shareholders', key: 'shareholders', Icon: PieChart },

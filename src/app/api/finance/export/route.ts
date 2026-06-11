@@ -3,11 +3,35 @@ import { getCurrentUser } from '@/server/auth/session';
 import { can } from '@/lib/rbac';
 import { prisma } from '@/server/db/client';
 import { toCsv } from '@/server/export/csv';
+import { parseFilters } from '@/lib/filters';
 import { enumLabel, FINANCE_TYPES } from '@/lib/enums';
 import { formatDate } from '@/lib/dates';
 import { toMajor, type AppLocale } from '@/lib/money';
 import { accountBalance, netCash, unassignedCash, financeTotals, signedEffect, type FinanceEntryLike } from '@/lib/metrics/finance';
+import { buildBranchScope, rangeFor } from '@/server/filters/where-builder';
+import {
+  getBranchProfitabilityReport,
+  getCashFlowReport,
+  getPartyStatementsReport,
+  getPnlReport,
+  getProductProfitabilityReport,
+  type CashFlowBucketKey,
+} from '@/server/finance/reports';
 import type { ObligationKind, Currency, FinanceType, Prisma } from '@prisma/client';
+
+const CASH_FLOW_LABELS: Record<CashFlowBucketKey, string> = {
+  salesCollected: 'Sales collected',
+  receivablesCollected: 'Receivables collected',
+  capitalContributions: 'Capital contributions',
+  otherIncome: 'Other income',
+  supplierPayments: 'Supplier payments',
+  expensesPaid: 'Expenses paid',
+  inventoryPurchasesPaid: 'Inventory purchases paid',
+  ownerWithdrawals: 'Owner withdrawals',
+  otherPayments: 'Other payments',
+  transfersIn: 'Transfers in',
+  transfersOut: 'Transfers out',
+};
 
 function ledgerWhere(p: URLSearchParams): Prisma.FinanceEntryWhereInput {
   const q = (p.get('q') ?? '').trim();
@@ -57,6 +81,9 @@ export async function GET(req: NextRequest) {
   const p = req.nextUrl.searchParams;
   const type = p.get('type') ?? 'ledger';
   const locale = (p.get('locale') ?? 'en') as AppLocale;
+  const filters = parseFilters(Object.fromEntries(p.entries()));
+  const scope = buildBranchScope(user);
+  const range = rangeFor(filters);
 
   let headers: string[];
   let rows: (string | number)[][];
@@ -120,6 +147,80 @@ export async function GET(req: NextRequest) {
       rows.push(['Equity', 'Retained', cur, toMajor(retained, cur)]);
     }
     filename = 'balance-sheet';
+  } else if (type === 'pnl') {
+    const report = await getPnlReport(filters, scope, range);
+    headers = ['Line', 'Amount_IQD'];
+    rows = [
+      ['Gross revenue', report.grossRevenue],
+      ['Discounts', -report.discounts],
+      ['Refunds', -report.refunds],
+      ['Net sales', report.netSales],
+      ['COGS', -report.cogs],
+      ['Gross profit', report.grossProfit],
+      ['Gross margin %', (report.grossMarginPct * 100).toFixed(1)],
+      ['Operating expenses', -report.operatingExpenses],
+      ['Operating profit', report.operatingProfit],
+    ];
+    filename = 'pnl';
+  } else if (type === 'cash-flow') {
+    const report = await getCashFlowReport(filters, scope, range, {
+      accountId: p.get('accountId') ?? undefined,
+      partyId: p.get('partyId') ?? undefined,
+    });
+    headers = ['Section', 'Category', 'Count', 'Amount_IQD'];
+    rows = [
+      ...report.cashIn.map((row) => ['Cash in', CASH_FLOW_LABELS[row.key], row.count, row.amount]),
+      ...report.cashOut.map((row) => ['Cash out', CASH_FLOW_LABELS[row.key], row.count, row.amount]),
+      ['Net', 'Net cash movement', '', report.netMovement],
+    ];
+    filename = 'cash-flow-summary';
+  } else if (type === 'product-profitability') {
+    const report = await getProductProfitabilityReport(filters, scope, range);
+    headers = ['SKU', 'Product', 'Group', 'Units', 'NetSales_IQD', 'COGS_IQD', 'GrossProfit_IQD', 'GrossMargin_%'];
+    rows = report.rows.map((row) => [
+      row.sku,
+      row.name[locale],
+      row.groupName[locale],
+      row.units,
+      row.netSales,
+      row.cogs,
+      row.grossProfit,
+      (row.grossMarginPct * 100).toFixed(1),
+    ]);
+    filename = 'product-profitability';
+  } else if (type === 'branch-profitability') {
+    const report = await getBranchProfitabilityReport(filters, scope, range);
+    headers = ['Branch', 'Orders', 'GrossRevenue_IQD', 'Discounts_IQD', 'Refunds_IQD', 'NetSales_IQD', 'COGS_IQD', 'GrossProfit_IQD', 'OperatingExpenses_IQD', 'OperatingProfit_IQD', 'OperatingMargin_%'];
+    rows = report.map((row) => [
+      row.branchName[locale],
+      row.orders,
+      row.grossRevenue,
+      row.discounts,
+      row.refunds,
+      row.netSales,
+      row.cogs,
+      row.grossProfit,
+      row.operatingExpenses,
+      row.operatingProfit,
+      (row.operatingMarginPct * 100).toFixed(1),
+    ]);
+    filename = 'branch-profitability';
+  } else if (type === 'statements') {
+    const report = await getPartyStatementsReport(filters, scope, range);
+    const kind = p.get('kind');
+    const statementRows =
+      kind === 'customer' ? report.customers : kind === 'supplier' ? report.suppliers : [...report.customers, ...report.suppliers];
+    headers = ['Kind', 'Party', 'Opening_IQD', 'Charges_IQD', 'Payments_IQD', 'Closing_IQD', 'LastActivity'];
+    rows = statementRows.map((row) => [
+      row.partyType,
+      row.partyName,
+      row.opening,
+      row.charges,
+      row.payments,
+      row.closing,
+      row.lastActivity ? formatDate(row.lastActivity, locale) : '',
+    ]);
+    filename = kind === 'customer' ? 'customer-statements' : kind === 'supplier' ? 'supplier-statements' : 'party-statements';
   } else {
     const [entries, branches, users] = await Promise.all([
       prisma.financeEntry.findMany({

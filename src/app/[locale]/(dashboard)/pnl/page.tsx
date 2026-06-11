@@ -4,10 +4,11 @@ import { getOrders, getOrderLines } from '@/server/db/repositories/sales.repo';
 import { getExpenses, getBatches } from '@/server/db/repositories/finance.repo';
 import * as M from '@/lib/metrics';
 import { enumLabel } from '@/lib/enums';
-import { buildExportHref } from '@/lib/filters';
+import { buildExportHref, buildFinanceExportHref } from '@/lib/filters';
 import { formatMoney, formatNumber, formatPercent } from '@/lib/money';
 import { monthProgress } from '@/lib/dates';
 import { prisma } from '@/server/db/client';
+import { Download } from 'lucide-react';
 import { KpiCard } from '@/components/kpi/KpiCard';
 import { WaterfallChart, BarChartCard, type WaterfallStep } from '@/components/charts/Charts';
 import { DataTable } from '@/components/data-table/DataTable';
@@ -105,7 +106,16 @@ export default async function PnlPage({
 
   return (
     <>
-      <PageHeader title={t('title')} subtitle={t('subtitle')} />
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <PageHeader title={t('title')} subtitle={t('subtitle')} />
+        <a
+          href={buildFinanceExportHref('pnl', filters, locale)}
+          className="inline-flex items-center gap-1.5 rounded-md border bg-card px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-muted"
+        >
+          <Download className="size-3.5" />
+          {tc('exportCsv')}
+        </a>
+      </div>
 
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard label={tk('netSales')} value={formatMoney(net, 'IQD', locale)} locale={locale} />

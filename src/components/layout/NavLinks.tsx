@@ -17,6 +17,7 @@ import {
   Building2,
   Cable,
   Database,
+  FileBarChart2,
   Wallet,
   History,
   ChevronDown,
@@ -41,6 +42,7 @@ const ICONS: Record<string, LucideIcon> = {
   Building2,
   Cable,
   Database,
+  FileBarChart2,
   Wallet,
   History,
 };
