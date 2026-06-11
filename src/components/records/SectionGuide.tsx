@@ -1,4 +1,4 @@
-import { Info } from 'lucide-react';
+import { ChevronDown, Info } from 'lucide-react';
 
 /**
  * Collapsible "How to use this section" guide shown at the top of a data
@@ -8,18 +8,23 @@ import { Info } from 'lucide-react';
  */
 export function SectionGuide({ title, intro, points }: { title: string; intro?: string; points: string[] }) {
   return (
-    <details className="rounded-[var(--radius)] border bg-primary/5 [&_summary::-webkit-details-marker]:hidden">
-      <summary className="flex cursor-pointer list-none items-center gap-2 p-3 text-sm font-semibold text-foreground">
-        <Info className="size-4 shrink-0 text-primary" />
-        {title}
-        <span className="ms-auto text-xs font-normal text-muted-foreground">▾</span>
+    <details className="group rounded-[var(--radius)] border bg-card/70 shadow-sm [&_summary::-webkit-details-marker]:hidden">
+      <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-sm font-semibold text-foreground">
+        <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+          <Info className="size-4" />
+        </span>
+        <span className="min-w-0 flex-1 truncate">{title}</span>
+        <ChevronDown className="size-4 shrink-0 text-muted-foreground group-open:rotate-180" />
       </summary>
-      <div className="space-y-2 border-t border-primary/10 px-4 py-3 text-sm text-muted-foreground">
-        {intro ? <p>{intro}</p> : null}
+      <div className="space-y-2 border-t px-4 py-3 text-sm leading-6 text-muted-foreground">
+        {intro ? <p className="max-w-4xl">{intro}</p> : null}
         {points.length ? (
-          <ul className="list-disc space-y-1 ps-5">
+          <ul className="grid gap-1 ps-0 sm:grid-cols-2">
             {points.map((p, i) => (
-              <li key={i}>{p}</li>
+              <li key={i} className="flex gap-2">
+                <span className="mt-2 size-1.5 shrink-0 rounded-full bg-primary/60" />
+                <span>{p}</span>
+              </li>
             ))}
           </ul>
         ) : null}

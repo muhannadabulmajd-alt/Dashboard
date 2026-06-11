@@ -16,7 +16,7 @@ export function branchFields(
   governorates?: { value: string; label: string }[],
 ): FieldDef[] {
   return [
-    { name: 'code', label: t('code'), type: 'text', required: true, disabled: mode === 'edit', placeholder: 'CAFE-BGD' },
+    { name: 'code', label: t('code'), type: 'text', required: true, disabled: mode === 'edit', placeholder: 'CAFE-BGD', hint: t('h.code') },
     { name: 'nameEn', label: t('nameEn'), type: 'text', required: true },
     { name: 'nameAr', label: t('nameAr'), type: 'text', required: true },
     {
@@ -25,13 +25,14 @@ export function branchFields(
       type: 'select',
       required: true,
       options: ['HQ', 'COMPANY', 'FRANCHISE'].map((v) => ({ value: v, label: t(`types.${v}`) })),
+      hint: t('h.type'),
     },
     { name: 'governorate', label: t('governorate'), type: 'select', required: true, options: governorates ?? GOVERNORATES.map((v) => ({ value: v, label: enumLabel(v, locale) })) },
     { name: 'city', label: t('city'), type: 'text' },
     { name: 'address', label: t('address'), type: 'text' },
     { name: 'street', label: t('street'), type: 'text' },
-    { name: 'phone', label: t('phone'), type: 'text' },
-    { name: 'email', label: t('email'), type: 'email' },
+    { name: 'phone', label: t('phone'), type: 'text', hint: t('h.contact') },
+    { name: 'email', label: t('email'), type: 'email', hint: t('h.contact') },
     { name: 'managerName', label: t('managerName'), type: 'text' },
     { name: 'managerPhone', label: t('managerPhone'), type: 'text' },
     { name: 'managerEmail', label: t('managerEmail'), type: 'email' },

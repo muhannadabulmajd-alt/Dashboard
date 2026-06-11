@@ -17,20 +17,20 @@
     "offers": "Offers & Campaigns",
     "compare": "Compare",
     "franchise": "Franchise Readiness",
-    "records": "Manage data",
+    "records": "Data management",
     "uploads": "Data import",
     "connectors": "Connectors",
     "branches": "Branches",
     "users": "Users",
     "audit": "Audit log",
     "section": "Dashboards",
-    "admin": "Administration",
+    "admin": "Management",
     "group": {
       "overview": "Overview",
       "sales": "Sales & Customers",
       "operations": "Operations",
       "finance": "Finance",
-      "admin": "Administration"
+      "admin": "Management"
     }
   },
   "finance": {
@@ -347,8 +347,8 @@
     }
   },
   "records": {
-    "title": "Manage data",
-    "subtitle": "Browse every record; open one to see full details.",
+    "title": "Data management",
+    "subtitle": "Create and maintain the daily records that feed orders, inventory, finance and reports.",
     "open": "Open",
     "back": "Back",
     "search": "Search",
@@ -501,6 +501,16 @@
       "by": "By"
     },
     "guide": {
+      "hub": {
+        "title": "Data management guide",
+        "intro": "Start here when you need to create, clean up or review operating records. Each section opens the focused workflow for that record type.",
+        "points": [
+          "Use Products & Variations before selling a new item.",
+          "Use Orders for sales, invoices, customer history, stock deduction and finance sync.",
+          "Use Inventory and Roast batches to keep stock, cost layers and production accurate.",
+          "Use Branches & Franchises and System lists for controlled setup data."
+        ]
+      },
       "products": {
         "title": "How to use Products & Variations",
         "intro": "A main product is the umbrella (e.g. Turkish Coffee). A variation is what you actually sell (e.g. 250g · Cardamom · Medium). Start with the main product, then add its variations.",
@@ -562,8 +572,35 @@
         ]
       }
     },
+    "orderForm": {
+      "detailsTitle": "Order details",
+      "detailsHint": "Enter the customer, channel, date and delivery context once; line items and payment below complete the order.",
+      "customerHint": "Use the permanent customer ID or phone. Search Customers first if you are not sure.",
+      "newCustomer": "Create customer",
+      "paymentTitle": "Payment and finance",
+      "paymentHint": "Paid now updates cash or bank. Create receivable keeps the amount due for later collection.",
+      "itemsHint": "Choose active variations. Prices fill automatically and can be adjusted when the variation allows it.",
+      "reviewTitle": "Review total"
+    },
     "impact": {
       "cost": "Changing the price or cost affects future orders only — past orders keep the price and cost recorded at the time."
+    },
+    "h": {
+      "customerName": "Use the real customer name as it should appear in customer history and invoices.",
+      "phone": "Include the country code where possible to avoid duplicate customer records.",
+      "customerAddress": "Use delivery-ready address details so invoices and shipments stay clear.",
+      "customerSource": "Tracks where the customer came from for campaign and channel reporting.",
+      "productGroup": "Link this variation to its main product so reporting and setup stay together.",
+      "variationType": "Describe what makes this variation different, such as size, grind, roast or packaging.",
+      "sellingPrice": "Used for new orders by default. Price history keeps old orders unchanged.",
+      "inventoryUnit": "Use the unit you count day to day, such as g, kg, bag, box or unit.",
+      "linkedVariation": "When linked, completed orders can deduct this stock automatically.",
+      "reorderPoint": "Low-stock alerts trigger when current stock falls below this level.",
+      "avgDailyUsage": "Used to estimate stock coverage days on dashboards.",
+      "inventoryCost": "Used for stock value and future cost calculations.",
+      "greenInput": "Green coffee weight before roasting, in grams.",
+      "roastedOutput": "Roasted output after loss. The system uses it to calculate yield and shrinkage.",
+      "qcScore": "Optional quality score for production review."
     },
     "wizard": {
       "title": "New product — guided setup",
@@ -642,6 +679,7 @@
       "externalId": "ID", "phone": "Phone", "email": "Email", "governorate": "Governorate",
       "segment": "Segment", "ordersCount": "Orders", "firstOrder": "First order", "lastOrder": "Last order",
       "firstUsed": "First used", "lastUsed": "Last used",
+      "totalSpend": "Total spend", "purchasedProducts": "Purchased products", "orderHistory": "Recent orders",
       "campaign": "Source",
       "orderNumber": "Order #", "date": "Date", "customer": "Customer", "channel": "Channel",
       "fulfillment": "Fulfillment", "gross": "Gross", "discount": "Discount", "net": "Net",
@@ -987,6 +1025,8 @@
   "branches": {
     "title": "Branches & franchises",
     "subtitle": "Create and review branches. Franchise accounts only see their own branch.",
+    "search": "Search branches…",
+    "none": "No branches match the current view.",
     "create": "Create branch",
     "code": "Code",
     "nameEn": "Name (English)",
@@ -1032,6 +1072,11 @@
     "trackInventory": "Track inventory",
     "trackInventoryHint": "Stock and movements are tracked for this branch.",
     "hasWarehouse": "Has warehouse",
+    "h": {
+      "code": "Permanent branch code used in users, orders, reports and filters.",
+      "type": "Franchise branches reveal franchise contact and agreement fields.",
+      "contact": "Shown to operators who need branch or franchise follow-up."
+    },
     "guide": {
       "title": "How to use Branches & Franchises",
       "intro": "Branches are your HQ, company-owned shops and franchise locations. Their code links orders, users and reports, so set it carefully.",

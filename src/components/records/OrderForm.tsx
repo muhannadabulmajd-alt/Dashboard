@@ -24,33 +24,49 @@ function HeaderField({
   type = 'text',
   defaultValue,
   disabled,
+  hint,
 }: {
   name: string;
   label: string;
   type?: string;
   defaultValue?: string;
   disabled?: boolean;
+  hint?: string;
 }) {
+  const fieldId = `${name}-field`;
+  const hintId = `${name}-hint`;
   return (
     <div className="flex flex-col gap-1">
-      <label className="text-xs font-medium text-muted-foreground">{label}</label>
-      <input name={disabled ? undefined : name} type={type} defaultValue={defaultValue} disabled={disabled} className={cn(input, disabled && disabledInput)} />
+      <label htmlFor={fieldId} className="text-xs font-medium text-muted-foreground">{label}</label>
+      <input
+        id={fieldId}
+        name={disabled ? undefined : name}
+        type={type}
+        defaultValue={defaultValue}
+        disabled={disabled}
+        aria-describedby={hint ? hintId : undefined}
+        className={cn(input, disabled && disabledInput)}
+      />
       {disabled ? <input type="hidden" name={name} value={defaultValue ?? ''} /> : null}
+      {hint ? <p id={hintId} className="text-xs leading-5 text-muted-foreground">{hint}</p> : null}
     </div>
   );
 }
 
-function HeaderSelect({ name, label, options, defaultValue }: { name: string; label: string; options: Opt[]; defaultValue?: string }) {
+function HeaderSelect({ name, label, options, defaultValue, hint }: { name: string; label: string; options: Opt[]; defaultValue?: string; hint?: string }) {
+  const fieldId = `${name}-field`;
+  const hintId = `${name}-hint`;
   return (
     <div className="flex flex-col gap-1">
-      <label className="text-xs font-medium text-muted-foreground">{label}</label>
-      <select name={name} className={input} defaultValue={defaultValue ?? options[0]?.value}>
+      <label htmlFor={fieldId} className="text-xs font-medium text-muted-foreground">{label}</label>
+      <select id={fieldId} name={name} className={input} defaultValue={defaultValue ?? options[0]?.value} aria-describedby={hint ? hintId : undefined}>
         {options.map((o) => (
           <option key={o.value} value={o.value}>
             {o.label}
           </option>
         ))}
       </select>
+      {hint ? <p id={hintId} className="text-xs leading-5 text-muted-foreground">{hint}</p> : null}
     </div>
   );
 }
@@ -134,10 +150,19 @@ export function OrderForm({
       <input type="hidden" name="locale" value={locale} />
       <input type="hidden" name="lines" value={JSON.stringify(lines)} />
 
-      <div className="grid gap-3 rounded-[var(--radius)] border bg-card p-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-3 rounded-[var(--radius)] border bg-card p-4 shadow-sm sm:grid-cols-2 lg:grid-cols-3">
+        <div className="space-y-1 sm:col-span-2 lg:col-span-3">
+          <h2 className="text-sm font-semibold text-foreground">{labels.detailsTitle}</h2>
+          <p className="text-xs leading-5 text-muted-foreground">{labels.detailsHint}</p>
+        </div>
         <HeaderField name="orderNumber" label={labels.orderNumber} defaultValue={h.orderNumber} disabled={editing} />
         <HeaderField name="placedAt" label={labels.date} type="date" defaultValue={h.placedAt} />
-        <HeaderField name="customerExternalId" label={labels.customer} defaultValue={h.customerExternalId} />
+        <div className="space-y-1">
+          <HeaderField name="customerExternalId" label={labels.customer} defaultValue={h.customerExternalId} hint={labels.customerHint} />
+          <Link href="/admin/records/customers/new" className="inline-flex text-xs font-medium text-primary hover:underline">
+            {labels.newCustomer}
+          </Link>
+        </div>
         <HeaderSelect name="channel" label={labels.channel} options={channelOptions} defaultValue={h.channel} />
         <HeaderSelect name="governorate" label={labels.governorate} options={governorateOptions} defaultValue={h.governorate} />
         <HeaderSelect name="fulfillmentMethod" label={labels.fulfillment} options={fulfillmentOptions} defaultValue={h.fulfillmentMethod} />
@@ -147,10 +172,15 @@ export function OrderForm({
         <HeaderField name="notes" label={labels.notes} defaultValue={h.notes} />
       </div>
 
-      <div className="grid gap-3 rounded-[var(--radius)] border bg-card p-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-3 rounded-[var(--radius)] border bg-card p-4 shadow-sm sm:grid-cols-2 lg:grid-cols-3">
+        <div className="space-y-1 sm:col-span-2 lg:col-span-3">
+          <h2 className="text-sm font-semibold text-foreground">{labels.paymentTitle}</h2>
+          <p className="text-xs leading-5 text-muted-foreground">{labels.paymentHint}</p>
+        </div>
         <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-muted-foreground">{labels.financeMode}</label>
+          <label htmlFor="finance-mode-field" className="text-xs font-medium text-muted-foreground">{labels.financeMode}</label>
           <select
+            id="finance-mode-field"
             name="financeMode"
             value={financeMode}
             onChange={(e) => setFinanceMode(e.target.value)}
@@ -163,8 +193,8 @@ export function OrderForm({
         </div>
         {financeMode === 'PAID' ? (
           <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-muted-foreground">{labels.paymentAccount}</label>
-            <select name="financeAccountId" required className={input} defaultValue={h.financeAccountId}>
+            <label htmlFor="finance-account-field" className="text-xs font-medium text-muted-foreground">{labels.paymentAccount}</label>
+            <select id="finance-account-field" name="financeAccountId" required className={input} defaultValue={h.financeAccountId}>
               <option value="">—</option>
               {accountOptions.map((o) => (
                 <option key={o.value} value={o.value}>
@@ -181,7 +211,10 @@ export function OrderForm({
 
       <div className="rounded-[var(--radius)] border bg-card p-4">
         <div className="mb-2 flex items-center justify-between">
-          <h3 className="text-sm font-semibold">{labels.items}</h3>
+          <div>
+            <h3 className="text-sm font-semibold">{labels.items}</h3>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">{labels.itemsHint}</p>
+          </div>
           <button
             type="button"
             onClick={() => setLines((ls) => [...ls, { ...emptyLine }])}
@@ -271,16 +304,20 @@ export function OrderForm({
 
       {state?.error ? <p className="text-sm font-medium text-danger">{errors[state.error] ?? state.error}</p> : null}
 
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3 rounded-[var(--radius)] border bg-card p-3 shadow-sm">
+        <div className="me-auto">
+          <div className="text-xs font-medium text-muted-foreground">{labels.reviewTitle}</div>
+          <div className="text-lg font-bold tabular-nums text-foreground">{fmt(totals.net)}</div>
+        </div>
         <button
           type="submit"
           disabled={pending}
-          className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-95 disabled:opacity-60"
+          className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-95 disabled:opacity-60"
         >
           {pending ? <Loader2 className="size-4 animate-spin" /> : null}
           {submitLabel}
         </button>
-        <Link href={cancelHref} className="rounded-lg border px-4 py-2 text-sm font-medium hover:bg-muted">
+        <Link href={cancelHref} className="inline-flex min-h-10 items-center rounded-lg border px-4 py-2 text-sm font-medium hover:bg-muted">
           {labels.cancel}
         </Link>
       </div>

@@ -17,9 +17,9 @@ export function batchFields(
     { name: 'origin', label: t('f.origin'), type: 'text', required: true },
     { name: 'roastDate', label: t('f.roastDate'), type: 'date' },
     { name: 'roastLevel', label: t('f.roastLevel'), type: 'select', options: opts(ROAST_LEVELS) },
-    { name: 'greenInputGrams', label: t('f.green'), type: 'number', required: true },
-    { name: 'roastedOutputGrams', label: t('f.output'), type: 'number' },
-    { name: 'qcScore', label: t('f.qc'), type: 'number', step: '0.1' },
+    { name: 'greenInputGrams', label: t('f.green'), type: 'number', required: true, hint: t('h.greenInput') },
+    { name: 'roastedOutputGrams', label: t('f.output'), type: 'number', hint: t('h.roastedOutput') },
+    { name: 'qcScore', label: t('f.qc'), type: 'number', step: '0.1', hint: t('h.qcScore') },
     { name: 'qcNotes', label: t('f.qcNotes'), type: 'text' },
   ];
 }

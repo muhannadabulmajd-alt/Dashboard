@@ -15,7 +15,7 @@ export type FieldDef =
   | { name: string; label: string; type: 'checkbox'; hint?: string; showWhen?: ShowWhen; disabled?: boolean };
 
 const input =
-  'w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:border-primary';
+  'min-h-10 w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:border-primary';
 const disabledInput = 'cursor-not-allowed bg-muted text-muted-foreground';
 
 type Action = (prev: ActionState, fd: FormData) => Promise<ActionState>;
@@ -67,10 +67,10 @@ export function RecordForm({
   });
 
   return (
-    <form action={formAction} className="grid gap-3 rounded-[var(--radius)] border bg-card p-4 sm:grid-cols-2">
+    <form action={formAction} className="grid gap-3 rounded-[var(--radius)] border bg-card p-4 shadow-sm sm:grid-cols-2">
       <input type="hidden" name="locale" value={locale} />
       {note ? (
-        <p className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-muted-foreground sm:col-span-2">{note}</p>
+        <p className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs leading-5 text-muted-foreground sm:col-span-2">{note}</p>
       ) : null}
       {fields.map((f) => {
         if (f.showWhen && !f.showWhen.in.includes(values[f.showWhen.field] ?? '')) return null;
@@ -81,29 +81,41 @@ export function RecordForm({
           : undefined;
         if (f.type === 'checkbox') {
           const checked = v === true || v === 'true' || v === 'on' || v === 1;
+          const hintId = `${f.name}-hint`;
           return (
             <label key={f.name} className="flex cursor-pointer items-start gap-2.5 rounded-lg border p-3 hover:bg-muted/40 sm:col-span-2">
-              <input type="checkbox" name={f.name} defaultChecked={checked} disabled={f.disabled} className="mt-0.5 size-4 accent-primary" />
+              <input
+                type="checkbox"
+                name={f.name}
+                defaultChecked={checked}
+                disabled={f.disabled}
+                aria-describedby={f.hint ? hintId : undefined}
+                className="mt-0.5 size-4 accent-primary"
+              />
               <span>
                 <span className="block text-sm font-medium text-foreground">{f.label}</span>
-                {f.hint ? <span className="block text-xs text-muted-foreground">{f.hint}</span> : null}
+                {f.hint ? <span id={hintId} className="block text-xs leading-5 text-muted-foreground">{f.hint}</span> : null}
               </span>
             </label>
           );
         }
+        const fieldId = `${f.name}-field`;
+        const hintId = `${f.name}-hint`;
         return (
           <div key={f.name} className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-muted-foreground">
+            <label htmlFor={fieldId} className="text-xs font-medium text-muted-foreground">
               {f.label}
               {f.required ? <span className="text-danger"> *</span> : null}
             </label>
             {f.type === 'select' ? (
               <select
+                id={fieldId}
                 name={f.name}
                 defaultValue={dv}
                 required={f.required}
                 disabled={f.disabled}
                 onChange={track ? (e) => track(e.target.value) : undefined}
+                aria-describedby={f.hint ? hintId : undefined}
                 className={cn(input, f.disabled && disabledInput)}
               >
                 {!f.required ? <option value="">—</option> : null}
@@ -115,6 +127,7 @@ export function RecordForm({
               </select>
             ) : (
               <input
+                id={fieldId}
                 name={f.name}
                 type={f.type}
                 defaultValue={dv}
@@ -123,6 +136,7 @@ export function RecordForm({
                 placeholder={'placeholder' in f ? f.placeholder : undefined}
                 step={'step' in f ? f.step : undefined}
                 onChange={track ? (e) => track(e.target.value) : undefined}
+                aria-describedby={f.hint ? hintId : undefined}
                 className={cn(input, f.disabled && disabledInput)}
               />
             )}
@@ -130,27 +144,27 @@ export function RecordForm({
                 validation still passes. The server is the source of truth and
                 ignores changes to immutable keys regardless. */}
             {f.disabled ? <input type="hidden" name={f.name} value={dv} /> : null}
-            {f.hint ? <p className="text-xs text-muted-foreground">{f.hint}</p> : null}
+            {f.hint ? <p id={hintId} className="text-xs leading-5 text-muted-foreground">{f.hint}</p> : null}
           </div>
         );
       })}
 
       {state?.error ? (
-        <p className="text-sm font-medium text-danger sm:col-span-2">
+        <p role="alert" className="rounded-lg border border-danger/20 bg-danger-soft px-3 py-2 text-sm font-medium text-danger sm:col-span-2">
           {errors[state.error] ?? state.error}
         </p>
       ) : null}
 
-      <div className="flex items-center gap-3 sm:col-span-2">
+      <div className="flex flex-wrap items-center gap-3 border-t pt-3 sm:col-span-2">
         <button
           type="submit"
           disabled={pending}
-          className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-95 disabled:opacity-60"
+          className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-95 disabled:opacity-60"
         >
           {pending ? <Loader2 className="size-4 animate-spin" /> : null}
           {submitLabel}
         </button>
-        <Link href={cancelHref} className="rounded-lg border px-4 py-2 text-sm font-medium hover:bg-muted">
+        <Link href={cancelHref} className="inline-flex min-h-10 items-center rounded-lg border px-4 py-2 text-sm font-medium hover:bg-muted">
           {cancelLabel}
         </Link>
       </div>

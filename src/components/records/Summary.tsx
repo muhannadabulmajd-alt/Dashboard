@@ -19,7 +19,7 @@ export function RecordsSummary({ stats }: { stats: SummaryStat[] }) {
   return (
     <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
       {stats.map((s) => (
-        <div key={s.label} className="rounded-xl border bg-card p-3 shadow-sm">
+        <div key={s.label} className="rounded-[var(--radius)] border bg-card p-3 shadow-sm">
           <div className="text-xs font-medium text-muted-foreground">{s.label}</div>
           <div className={cn('mt-1 text-xl font-bold tabular-nums', TONE[s.tone ?? 'default'])}>{s.value}</div>
         </div>

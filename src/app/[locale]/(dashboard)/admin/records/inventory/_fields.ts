@@ -13,10 +13,10 @@ export function inventoryFields(
     { name: 'nameEn', label: t('f.nameEn'), type: 'text', required: true },
     { name: 'nameAr', label: t('f.nameAr'), type: 'text', required: true },
     { name: 'category', label: t('f.category'), type: 'select', required: true, options: opts(INVENTORY_CATEGORIES) },
-    { name: 'unit', label: t('f.unit'), type: 'text', required: true },
-    { name: 'productId', label: t('f.linkedVariation'), type: 'select', options: products },
-    { name: 'reorderPoint', label: t('f.reorderPoint'), type: 'number' },
-    { name: 'avgDailyUsage', label: t('f.avgDailyUsage'), type: 'number', step: '0.1' },
-    { name: 'unitCost', label: t('f.unitCost'), type: 'number' },
+    { name: 'unit', label: t('f.unit'), type: 'text', required: true, hint: t('h.inventoryUnit') },
+    { name: 'productId', label: t('f.linkedVariation'), type: 'select', options: products, hint: t('h.linkedVariation') },
+    { name: 'reorderPoint', label: t('f.reorderPoint'), type: 'number', hint: t('h.reorderPoint') },
+    { name: 'avgDailyUsage', label: t('f.avgDailyUsage'), type: 'number', step: '0.1', hint: t('h.avgDailyUsage') },
+    { name: 'unitCost', label: t('f.unitCost'), type: 'number', hint: t('h.inventoryCost') },
   ];
 }

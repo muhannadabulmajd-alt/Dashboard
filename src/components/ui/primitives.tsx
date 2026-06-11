@@ -1,4 +1,5 @@
 import { cn } from '@/lib/utils';
+import { Link } from '@/i18n/navigation';
 
 export function Card({ className, children }: { className?: string; children: React.ReactNode }) {
   return (
@@ -21,11 +22,11 @@ export function CardContent({ className, children }: { className?: string; child
 type BadgeVariant = 'default' | 'success' | 'danger' | 'warning' | 'muted';
 
 const badgeStyles: Record<BadgeVariant, string> = {
-  default: 'bg-primary/10 text-primary',
-  success: 'bg-success-soft text-success',
-  danger: 'bg-danger-soft text-danger',
-  warning: 'bg-warning-soft text-warning',
-  muted: 'bg-muted text-muted-foreground',
+  default: 'border-primary/20 bg-primary/10 text-primary',
+  success: 'border-success/20 bg-success-soft text-success',
+  danger: 'border-danger/20 bg-danger-soft text-danger',
+  warning: 'border-warning/20 bg-warning-soft text-warning',
+  muted: 'border-border bg-muted text-muted-foreground',
 };
 
 export function Badge({
@@ -41,6 +42,7 @@ export function Badge({
     <span
       className={cn(
         'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium',
+        'border',
         badgeStyles[variant],
         className,
       )}
@@ -50,19 +52,76 @@ export function Badge({
   );
 }
 
-export function PageHeader({ title, subtitle }: { title: string; subtitle?: string }) {
+export function PageHeader({
+  title,
+  subtitle,
+  actions,
+}: {
+  title: string;
+  subtitle?: string;
+  actions?: React.ReactNode;
+}) {
   return (
-    <div className="mb-1">
-      <h1 className="text-xl font-bold text-foreground">{title}</h1>
-      {subtitle ? <p className="text-sm text-muted-foreground">{subtitle}</p> : null}
+    <div className="mb-1 flex flex-wrap items-start justify-between gap-3">
+      <div className="min-w-0">
+        <h1 className="text-xl font-bold tracking-tight text-foreground">{title}</h1>
+        {subtitle ? <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">{subtitle}</p> : null}
+      </div>
+      {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div> : null}
     </div>
   );
 }
 
-export function EmptyState({ message }: { message: string }) {
+export function EmptyState({
+  title,
+  message,
+  actionHref,
+  actionLabel,
+}: {
+  title?: string;
+  message: string;
+  actionHref?: string;
+  actionLabel?: string;
+}) {
   return (
-    <div className="flex h-40 items-center justify-center rounded-[var(--radius)] border border-dashed text-sm text-muted-foreground">
-      {message}
+    <div className="flex min-h-40 flex-col items-center justify-center gap-2 rounded-[var(--radius)] border border-dashed bg-muted/20 p-6 text-center">
+      {title ? <p className="text-sm font-semibold text-foreground">{title}</p> : null}
+      <p className="max-w-md text-sm leading-6 text-muted-foreground">{message}</p>
+      {actionHref && actionLabel ? (
+        <Link
+          href={actionHref}
+          className="mt-1 inline-flex items-center rounded-lg border bg-card px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-muted"
+        >
+          {actionLabel}
+        </Link>
+      ) : null}
     </div>
+  );
+}
+
+export function ActionLink({
+  href,
+  children,
+  variant = 'primary',
+  className,
+}: {
+  href: string;
+  children: React.ReactNode;
+  variant?: 'primary' | 'secondary';
+  className?: string;
+}) {
+  return (
+    <Link
+      href={href}
+      className={cn(
+        'inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold',
+        variant === 'primary'
+          ? 'bg-primary text-primary-foreground hover:opacity-95'
+          : 'border bg-card text-foreground hover:bg-muted',
+        className,
+      )}
+    >
+      {children}
+    </Link>
   );
 }

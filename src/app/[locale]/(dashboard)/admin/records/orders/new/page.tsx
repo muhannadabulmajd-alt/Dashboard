@@ -29,9 +29,13 @@ export default async function NewOrderPage({
   ]);
 
   const labels = {
+    detailsTitle: t('orderForm.detailsTitle'),
+    detailsHint: t('orderForm.detailsHint'),
     orderNumber: t('f.orderNumber'),
     date: t('f.date'),
     customer: t('f.customer'),
+    customerHint: t('orderForm.customerHint'),
+    newCustomer: t('orderForm.newCustomer'),
     channel: t('f.channel'),
     governorate: t('f.governorate'),
     fulfillment: t('f.fulfillment'),
@@ -49,6 +53,8 @@ export default async function NewOrderPage({
     orderDiscount: t('f.orderDiscount'),
     extraCharges: t('f.extraCharges'),
     notes: t('f.notes'),
+    paymentTitle: t('orderForm.paymentTitle'),
+    paymentHint: t('orderForm.paymentHint'),
     financeMode: t('f.financeMode'),
     financeCredit: t('f.financeCredit'),
     financePaid: t('f.financePaid'),
@@ -57,6 +63,8 @@ export default async function NewOrderPage({
     paymentDueDate: t('f.paymentDueDate'),
     addLine: t('addLine'),
     removeLine: t('removeLine'),
+    itemsHint: t('orderForm.itemsHint'),
+    reviewTitle: t('orderForm.reviewTitle'),
     cancel: t('cancel'),
   };
   const errors = {

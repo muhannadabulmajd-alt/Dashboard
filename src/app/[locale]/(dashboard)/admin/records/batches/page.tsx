@@ -4,6 +4,7 @@ import { prisma } from '@/server/db/client';
 import { Badge, PageHeader } from '@/components/ui/primitives';
 import { DataTable, type Column } from '@/components/data-table/DataTable';
 import { RecordsSummary, type SummaryStat } from '@/components/records/Summary';
+import { TableToolbar } from '@/components/records/TableToolbar';
 import { Plus } from 'lucide-react';
 import { BackLink } from '@/components/records/parts';
 import { SectionGuide } from '@/components/records/SectionGuide';
@@ -20,7 +21,11 @@ export default async function BatchesRecordsPage({
 }) {
   const { locale } = await getPageContext(params, searchParams, 'manage:batches');
   const t = await getTranslations('records');
+  const sp = await searchParams;
   const batches = await prisma.roastBatch.findMany({ orderBy: { batchNumber: 'asc' } });
+  const q = (typeof sp.q === 'string' ? sp.q.trim() : '').toLowerCase();
+  const status = typeof sp.status === 'string' ? sp.status : '';
+  const sort = typeof sp.sort === 'string' ? sp.sort : '';
 
   const roastedBatches = batches.filter((b) => b.roastedOutputGrams != null);
   const outputKg = roastedBatches.reduce((s, b) => s + (b.roastedOutputGrams ?? 0), 0) / 1000;
@@ -41,7 +46,20 @@ export default async function BatchesRecordsPage({
     { label: '', align: 'end' },
   ];
 
-  const rows = batches.map((b) => {
+  const visible = batches
+    .filter((b) => {
+      const roasted = b.roastedOutputGrams != null;
+      const matchesStatus = !status || (status === 'roasted' ? roasted : !roasted);
+      const matchesSearch = !q || `${b.batchNumber} ${b.origin}`.toLowerCase().includes(q);
+      return matchesStatus && matchesSearch;
+    })
+    .sort((a, b) => {
+      if (sort === 'newest') return (b.roastDate?.getTime() ?? b.createdAt.getTime()) - (a.roastDate?.getTime() ?? a.createdAt.getTime());
+      if (sort === 'oldest') return (a.roastDate?.getTime() ?? a.createdAt.getTime()) - (b.roastDate?.getTime() ?? b.createdAt.getTime());
+      return a.batchNumber.localeCompare(b.batchNumber);
+    });
+
+  const rows = visible.map((b) => {
     const roasted = b.roastedOutputGrams != null;
     return [
       b.batchNumber,
@@ -72,7 +90,19 @@ export default async function BatchesRecordsPage({
       </div>
       <SectionGuide title={t('guide.batches.title')} intro={t('guide.batches.intro')} points={t.raw('guide.batches.points') as string[]} />
       <RecordsSummary stats={stats} />
-      <DataTable columns={cols} rows={rows} emptyLabel={t('none')} />
+      <TableToolbar
+        searchPlaceholder={t('tools.search')}
+        filters={[{ name: 'status', label: t('f.status'), options: [{ value: 'roasted', label: t('f.roasted') }, { value: 'pending', label: t('f.pending') }] }]}
+        sorts={['newest', 'oldest'].map((v) => ({ value: v, label: t(`tools.${v}`) }))}
+        sortLabel={t('tools.sort')}
+      />
+      <DataTable
+        columns={cols}
+        rows={rows}
+        emptyLabel={t('none')}
+        emptyActionHref="/admin/records/batches/new"
+        emptyActionLabel={t('add')}
+      />
     </>
   );
 }
