@@ -161,7 +161,6 @@ export const NAV_ITEMS: NavItem[] = [
   { href: '/pnl', key: 'pnl', icon: 'TrendingUp', capability: 'view:financial', group: 'finance' },
   { href: '/finance', key: 'finance', icon: 'Wallet', capability: 'view:finance', group: 'finance' },
   { href: '/finance/reports', key: 'reports', icon: 'FileBarChart2', capability: 'view:finance', group: 'finance' },
-  { href: '/finance/audit', key: 'audit', icon: 'History', capability: 'view:finance', group: 'finance' },
   { href: '/admin/records', key: 'records', icon: 'Database', capability: 'view:records', group: 'admin' },
   { href: '/admin/uploads', key: 'uploads', icon: 'Upload', capability: 'upload:data', group: 'admin' },
   { href: '/admin/connectors', key: 'connectors', icon: 'Cable', capability: 'manage:connectors', group: 'admin' },

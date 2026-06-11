@@ -16,10 +16,6 @@ import {
   ChevronRight,
   Scale,
   AlertTriangle,
-  ShieldCheck,
-  CheckCircle2,
-  XCircle,
-  History,
   type LucideIcon,
 } from 'lucide-react';
 import { getPageContext } from '@/server/page-context';
@@ -37,7 +33,6 @@ import { RateEditor } from '@/components/finance/RateEditor';
 import { PageHeader } from '@/components/ui/primitives';
 import { DataTable, type Column } from '@/components/data-table/DataTable';
 import { BarChartCard, DonutChartCard } from '@/components/charts/Charts';
-import { SectionGuide } from '@/components/records/SectionGuide';
 import { Link } from '@/i18n/navigation';
 import type { Currency, ExpenseCategoryType } from '@prisma/client';
 
@@ -359,15 +354,6 @@ export default async function FinancePage({
     { href: '/balance-sheet', key: 'balanceSheet', Icon: Scale },
     { href: '/finance/accounts', key: 'accounts', Icon: Wallet },
     { href: '/finance/parties', key: 'parties', Icon: Users },
-    { href: '/finance/audit', key: 'auditLog', Icon: History },
-  ];
-  const permissions = [
-    { label: t('permissions.viewDashboard'), allowed: can(user.role, 'view:finance') },
-    { label: t('permissions.recordEditReverse'), allowed: canManage },
-    { label: t('permissions.viewFinancialReports'), allowed: can(user.role, 'view:financial') },
-    { label: t('permissions.exportReports'), allowed: can(user.role, 'export:financial') },
-    { label: t('permissions.manageAccountsParties'), allowed: canManage },
-    { label: t('permissions.changeExchangeRate'), allowed: canManage },
   ];
 
   return (
@@ -388,12 +374,6 @@ export default async function FinancePage({
       {canManage ? (
         <RateEditor action={setUsdToIqd} locale={locale} rate={rate} label={t('rate')} apply={t('apply')} />
       ) : null}
-
-      <SectionGuide
-        title={t('guide.home.title')}
-        intro={t('guide.home.intro')}
-        points={t.raw('guide.home.points')}
-      />
 
       <section className="space-y-3 rounded-[var(--radius)] border bg-card p-4">
         <div className="flex items-center gap-2">
@@ -418,28 +398,6 @@ export default async function FinancePage({
             {t('alertsClear')}
           </div>
         )}
-      </section>
-
-      <section className="space-y-3 rounded-[var(--radius)] border bg-card p-4">
-        <div className="flex items-center gap-2">
-          <ShieldCheck className="size-4 text-primary" />
-          <div>
-            <h2 className="text-sm font-semibold text-foreground">{t('permissionControl')}</h2>
-            <p className="text-xs text-muted-foreground">{t('permissionControlHint', { role: enumLabel(user.role, locale) })}</p>
-          </div>
-        </div>
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-          {permissions.map((permission) => (
-            <div key={permission.label} className="flex items-center gap-2 rounded-lg border bg-background px-3 py-2 text-sm">
-              {permission.allowed ? (
-                <CheckCircle2 className="size-4 text-success" />
-              ) : (
-                <XCircle className="size-4 text-muted-foreground" />
-              )}
-              <span className={permission.allowed ? 'text-foreground' : 'text-muted-foreground'}>{permission.label}</span>
-            </div>
-          ))}
-        </div>
       </section>
 
       <section className="space-y-3">

@@ -12,15 +12,22 @@ const ACTION_VARIANT: Record<string, 'success' | 'warning' | 'danger' | 'muted'>
   ARCHIVE: 'warning',
   RESTORE: 'success',
   COST_CHANGE: 'warning',
+  REVERSE: 'danger',
+  SETTLE: 'success',
+  ASSIGN_ACCOUNT: 'warning',
+  EXPORT: 'muted',
   cleanup_duplicate_imports: 'danger',
 };
 
 /** Compact one-line summary of an audit entry's JSON metadata. */
 function summarize(meta: unknown): string {
   if (!meta || typeof meta !== 'object') return '—';
-  const parts = Object.entries(meta as Record<string, unknown>).map(([k, v]) => `${k}: ${v}`);
+  const parts = Object.entries(meta as Record<string, unknown>).map(([k, v]) => {
+    const value = v && typeof v === 'object' ? JSON.stringify(v) : String(v ?? '—');
+    return `${k}: ${value}`;
+  });
   const s = parts.join(' · ');
-  return s.length > 140 ? `${s.slice(0, 140)}…` : s || '—';
+  return s.length > 180 ? `${s.slice(0, 180)}...` : s || '—';
 }
 
 export default async function AuditPage({
