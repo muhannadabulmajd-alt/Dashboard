@@ -26,27 +26,27 @@ export function MobileNav({ groups, title }: { groups: NavGroup[]; title: string
         type="button"
         onClick={() => setOpen(true)}
         aria-label={title}
-        className="inline-flex size-9 items-center justify-center rounded-lg border bg-card text-muted-foreground hover:bg-muted hover:text-foreground md:hidden"
+        className="inline-flex size-9 items-center justify-center rounded-lg border border-border/80 bg-card text-roast hover:bg-linen/45 md:hidden"
       >
         <Menu className="size-5" />
       </button>
 
       {open ? (
         <div className="fixed inset-0 z-50 md:hidden" role="dialog" aria-modal="true">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setOpen(false)} />
-          <div className="absolute inset-y-0 start-0 flex w-72 max-w-[82%] flex-col bg-card shadow-xl">
-            <div className="flex items-center justify-between border-b px-4 py-4">
+          <div className="absolute inset-0 bg-grove/55" onClick={() => setOpen(false)} />
+          <div className="absolute inset-y-0 start-0 flex w-72 max-w-[82%] flex-col bg-card shadow-xl shadow-roast/20">
+            <div className="flex items-center justify-between border-b border-border/80 px-4 py-4">
               <div className="flex items-center gap-2">
                 <div className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
                   <Coffee className="size-4" />
                 </div>
-                <span className="text-sm font-bold">{title}</span>
+                <span className="text-sm font-bold text-roast">{title}</span>
               </div>
               <button
                 type="button"
                 onClick={() => setOpen(false)}
                 aria-label="Close"
-                className="inline-flex size-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"
+                className="inline-flex size-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-linen/45 hover:text-roast"
               >
                 <X className="size-5" />
               </button>

@@ -1,7 +1,6 @@
 import { getTranslations } from 'next-intl/server';
 import {
   Wallet,
-  Landmark,
   Banknote,
   TrendingDown,
   TrendingUp,
@@ -21,20 +20,20 @@ import {
 import { getPageContext } from '@/server/page-context';
 import { prisma } from '@/server/db/client';
 import { enumLabel } from '@/lib/enums';
-import { formatMoney, convertToIqd, type AppLocale } from '@/lib/money';
+import { formatMoney, convertToIqd } from '@/lib/money';
 import { can } from '@/lib/rbac';
-import { cn } from '@/lib/utils';
 import { accountBalance, netCash, unassignedCash, financeTotals, type FinanceEntryLike } from '@/lib/metrics/finance';
 import { cogs, grossMargin, netSales } from '@/lib/metrics';
 import { getUsdToIqd } from '@/server/settings';
 import { getOrders, getOrderLines } from '@/server/db/repositories/sales.repo';
 import { setUsdToIqd } from '@/server/finance/settings';
 import { RateEditor } from '@/components/finance/RateEditor';
-import { PageHeader } from '@/components/ui/primitives';
+import { Badge, Card, CardContent, CardHeader, CardTitle, PageHeader } from '@/components/ui/primitives';
+import { KpiCard } from '@/components/kpi/KpiCard';
 import { DataTable, type Column } from '@/components/data-table/DataTable';
 import { BarChartCard, DonutChartCard } from '@/components/charts/Charts';
 import { Link } from '@/i18n/navigation';
-import type { Currency, ExpenseCategoryType } from '@prisma/client';
+import type { ExpenseCategoryType } from '@prisma/client';
 
 type Vals = {
   cash: number;
@@ -53,71 +52,11 @@ type ChartEntry = FinanceEntryLike & {
   party: { name: string } | null;
 };
 
-type Tone = 'in' | 'out' | 'neutral' | 'warn';
-const TONES: Record<Tone, string> = {
-  in: 'bg-success-soft text-success',
-  out: 'bg-danger-soft text-danger',
-  neutral: 'bg-primary/10 text-primary',
-  warn: 'bg-warning-soft text-warning',
-};
 const ALERT_TONES = {
   danger: 'border-danger/40 bg-danger-soft text-danger',
   warning: 'border-warning/40 bg-warning-soft text-warning',
 } as const;
-type Tile = { label: string; value: number; Icon: LucideIcon; tone: Tone; href?: string };
 type FinancialAlert = { title: string; body: string; href: string; tone: keyof typeof ALERT_TONES };
-
-function Kpi({
-  label,
-  value,
-  Icon,
-  tone,
-  href,
-}: {
-  label: string;
-  value: string;
-  Icon: LucideIcon;
-  tone: Tone;
-  href?: string;
-}) {
-  const body = (
-    <div className="flex h-full items-start gap-3 rounded-[var(--radius)] border bg-card p-4 transition-colors hover:border-primary/40">
-      <div className={cn('flex size-9 shrink-0 items-center justify-center rounded-lg', TONES[tone])}>
-        <Icon className="size-4" />
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-xs font-medium text-muted-foreground">{label}</div>
-        <div className="mt-1 truncate text-xl font-bold tabular-nums text-foreground" title={value}>
-          {value}
-        </div>
-      </div>
-    </div>
-  );
-  return href ? (
-    <Link href={href} className="block">
-      {body}
-    </Link>
-  ) : (
-    body
-  );
-}
-
-function KpiGrid({ tiles, currency, locale }: { tiles: Tile[]; currency: Currency; locale: AppLocale }) {
-  return (
-    <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-      {tiles.map((tile) => (
-        <Kpi
-          key={tile.label}
-          label={tile.label}
-          value={formatMoney(tile.value, currency, locale)}
-          Icon={tile.Icon}
-          tone={tile.tone}
-          href={tile.href}
-        />
-      ))}
-    </div>
-  );
-}
 
 export default async function FinancePage({
   params,
@@ -182,8 +121,6 @@ export default async function FinancePage({
     },
     { cash: 0, capitalIn: 0, expenses: 0, received: 0, cashIn: 0, cashOut: 0, payable: 0, receivable: 0 },
   );
-  const showCombined = currencies.length > 1;
-
   const iqd = (e: ChartEntry) => convertToIqd(e.amount, e.currency, rate);
   const accountBalanceIqd = (account: (typeof accounts)[number]) =>
     convertToIqd(
@@ -314,37 +251,57 @@ export default async function FinancePage({
     return [...map.entries()].map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value).slice(0, 8);
   })();
 
-  const tiles = (v: Vals): Tile[] => [
-    { label: t('cashOnHand'), value: v.cash, Icon: Wallet, tone: 'neutral', href: '/finance/accounts' },
-    { label: t('capital'), value: v.capitalIn, Icon: Landmark, tone: 'in', href: '/finance/shareholders' },
-    { label: t('spent'), value: v.expenses, Icon: TrendingDown, tone: 'out', href: '/finance/ledger' },
-    { label: t('received'), value: v.received, Icon: TrendingUp, tone: 'in', href: '/finance/ledger' },
-    { label: t('payables'), value: v.payable, Icon: Clock, tone: 'warn', href: '/finance/dues' },
-    { label: t('receivables'), value: v.receivable, Icon: HandCoins, tone: 'in', href: '/finance/dues' },
-  ];
-  const commandCards: Tile[] = [
-    { label: t('cashOnHand'), value: cashAccounts, Icon: Wallet, tone: 'neutral', href: '/finance/accounts' },
-    { label: t('bankBalance'), value: bankAccounts, Icon: Banknote, tone: 'neutral', href: '/finance/accounts' },
-    { label: t('totalAvailable'), value: totalAvailable, Icon: Wallet, tone: 'in', href: '/finance/accounts' },
-    { label: t('totalRevenue'), value: revenue, Icon: TrendingUp, tone: 'in', href: '/sales' },
-    { label: t('totalExpenses'), value: operatingExpenses, Icon: TrendingDown, tone: 'out', href: '/finance/ledger' },
-    { label: t('netProfit'), value: netProfit, Icon: PieChart, tone: netProfit >= 0 ? 'in' : 'out', href: '/pnl' },
-    { label: t('grossProfit'), value: gross.amount, Icon: PieChart, tone: gross.amount >= 0 ? 'in' : 'out', href: '/pnl' },
-    { label: t('cogs'), value: costOfGoods, Icon: Package, tone: 'out', href: '/pnl' },
-    { label: t('payables'), value: combined.payable, Icon: Clock, tone: 'warn', href: '/finance/dues' },
-    { label: t('receivables'), value: combined.receivable, Icon: HandCoins, tone: 'in', href: '/finance/dues' },
-    { label: t('capital'), value: combined.capitalIn, Icon: Landmark, tone: 'in', href: '/finance/shareholders' },
-    { label: t('inventoryValue'), value: inventoryValue, Icon: Package, tone: 'neutral', href: '/inventory' },
-    { label: t('netCashMovement'), value: netCashMovement, Icon: netCashMovement >= 0 ? TrendingUp : TrendingDown, tone: netCashMovement >= 0 ? 'in' : 'out' },
-    { label: t('overdueReceivables'), value: overdue.receivables, Icon: HandCoins, tone: overdue.receivables > 0 ? 'warn' : 'in', href: '/finance/dues' },
-    { label: t('overduePayables'), value: overdue.payables, Icon: Clock, tone: overdue.payables > 0 ? 'warn' : 'neutral', href: '/finance/dues' },
+  const overdueRisk = overdue.receivables + overdue.payables;
+  const cockpitCards = [
+    {
+      label: t('totalAvailable'),
+      value: totalAvailable,
+      Icon: Wallet,
+      tone: totalAvailable >= 0 ? 'success' as const : 'danger' as const,
+      href: '/finance/accounts',
+      description: `${t('cashOnHand')}: ${formatMoney(cashAccounts, 'IQD', locale)} · ${t('bankBalance')}: ${formatMoney(bankAccounts, 'IQD', locale)}`,
+      emphasis: true,
+    },
+    {
+      label: t('netProfit'),
+      value: netProfit,
+      Icon: PieChart,
+      tone: netProfit >= 0 ? 'success' as const : 'danger' as const,
+      href: '/pnl',
+      description: `${t('grossProfit')}: ${formatMoney(gross.amount, 'IQD', locale)} · ${t('netCashMovement')}: ${formatMoney(netCashMovement, 'IQD', locale)}`,
+    },
+    { label: t('totalRevenue'), value: revenue, Icon: TrendingUp, tone: 'success' as const, href: '/sales' },
+    { label: t('totalExpenses'), value: operatingExpenses, Icon: TrendingDown, tone: 'danger' as const, href: '/finance/ledger' },
+    { label: t('receivables'), value: combined.receivable, Icon: HandCoins, tone: 'accent' as const, href: '/finance/dues' },
+    { label: t('payables'), value: combined.payable, Icon: Clock, tone: 'warning' as const, href: '/finance/dues' },
+    { label: t('inventoryValue'), value: inventoryValue, Icon: Package, tone: 'default' as const, href: '/inventory' },
+    {
+      label: t('overdueRisk'),
+      value: overdueRisk,
+      Icon: AlertTriangle,
+      tone: overdueRisk > 0 ? 'warning' as const : 'success' as const,
+      href: '/finance/dues',
+      description: `${t('overdueReceivables')}: ${formatMoney(overdue.receivables, 'IQD', locale)} · ${t('overduePayables')}: ${formatMoney(overdue.payables, 'IQD', locale)}`,
+    },
   ];
 
   const accCols: Column[] = [
+    { label: t('f.currency') },
     { label: t('f.name') },
     { label: t('f.type') },
     { label: t('f.balance'), align: 'end' },
   ];
+  const accountRows = byCur.flatMap(({ cur, ce, ca }) => [
+    ...ca.map((a) => [
+      cur,
+      a.name,
+      enumLabel(a.type, locale),
+      formatMoney(accountBalance(a, ce), cur, locale),
+    ]),
+    ...(unassignedCash(ce)
+      ? [[cur, t('unassigned'), '—', formatMoney(unassignedCash(ce), cur, locale)]]
+      : []),
+  ]);
 
   const cards: { href: string; key: string; Icon: LucideIcon }[] = [
     { href: '/finance/reports', key: 'reports', Icon: FileBarChart2 },
@@ -359,11 +316,11 @@ export default async function FinancePage({
   return (
     <>
       <div className="flex items-center justify-between gap-3">
-        <PageHeader title={t('title')} subtitle={t('subtitle')} />
+        <PageHeader title={t('title')} subtitle={t('subtitle')} eyebrow={t('commandCenter')} />
         {canManage ? (
           <Link
             href="/finance/record"
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:opacity-95"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:bg-amber/90"
           >
             <Plus className="size-4" />
             {t('recordEntry')}
@@ -375,94 +332,90 @@ export default async function FinancePage({
         <RateEditor action={setUsdToIqd} locale={locale} rate={rate} label={t('rate')} apply={t('apply')} />
       ) : null}
 
-      <section className="space-y-3 rounded-[var(--radius)] border bg-card p-4">
-        <div className="flex items-center gap-2">
-          <AlertTriangle className="size-4 text-warning" />
-          <h2 className="text-sm font-semibold text-foreground">{t('financialAlerts')}</h2>
-        </div>
-        {financialAlerts.length ? (
-          <div className="grid gap-2 md:grid-cols-2">
-            {financialAlerts.map((alert) => (
+      <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {cockpitCards.map((card) => (
+          <KpiCard
+            key={card.label}
+            label={card.label}
+            value={formatMoney(card.value, 'IQD', locale)}
+            icon={card.Icon}
+            tone={card.tone}
+            href={card.href}
+            description={card.description}
+            emphasis={card.emphasis}
+            locale={locale}
+          />
+        ))}
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="size-4 text-warning" />
+              <CardTitle>{t('financialAlerts')}</CardTitle>
+            </div>
+            <Badge variant={financialAlerts.length ? 'warning' : 'success'}>
+              {financialAlerts.length ? financialAlerts.length : t('alertsClearShort')}
+            </Badge>
+          </CardHeader>
+          <CardContent>
+            {financialAlerts.length ? (
+              <div className="grid gap-2 md:grid-cols-2">
+                {financialAlerts.map((alert) => (
+                  <Link
+                    key={alert.title}
+                    href={alert.href}
+                    className={`rounded-lg border p-3 hover:opacity-90 ${ALERT_TONES[alert.tone]}`}
+                  >
+                    <div className="text-sm font-semibold">{alert.title}</div>
+                    <div className="mt-1 text-xs leading-5 opacity-90">{alert.body}</div>
+                  </Link>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-lg border border-success/30 bg-success-soft px-3 py-2 text-sm font-semibold text-success">
+                {t('alertsClear')}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card variant="surface">
+          <CardHeader>
+            <CardTitle>{t('cashBreakdown')}</CardTitle>
+            <Badge variant="muted">{currencies.join(' / ')}</Badge>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {[
+              { label: t('cashOnHand'), value: cashAccounts, Icon: Wallet },
+              { label: t('bankBalance'), value: bankAccounts, Icon: Banknote },
+            ].map(({ label, value, Icon }) => (
               <Link
-                key={alert.title}
-                href={alert.href}
-                className={`rounded-lg border p-3 hover:opacity-90 ${ALERT_TONES[alert.tone]}`}
+                key={label}
+                href="/finance/accounts"
+                className="flex items-center justify-between gap-3 rounded-lg border border-border/80 bg-card px-3 py-2.5 hover:bg-linen/40"
               >
-                <div className="text-sm font-semibold">{alert.title}</div>
-                <div className="mt-1 text-xs leading-5 opacity-90">{alert.body}</div>
+                <span className="flex items-center gap-2 text-sm font-semibold text-roast">
+                  <span className="flex size-8 items-center justify-center rounded-lg bg-amber/10 text-primary">
+                    <Icon className="size-4" />
+                  </span>
+                  {label}
+                </span>
+                <span className="tabular text-sm font-bold text-roast">{formatMoney(value, 'IQD', locale)}</span>
               </Link>
             ))}
-          </div>
-        ) : (
-          <div className="rounded-lg border border-success/30 bg-success-soft px-3 py-2 text-sm text-success">
-            {t('alertsClear')}
-          </div>
-        )}
+          </CardContent>
+        </Card>
       </section>
 
-      <section className="space-y-3">
-        <div className="flex items-center gap-2">
-          <span className="rounded-md bg-primary/10 px-2 py-0.5 text-xs font-bold tracking-wide text-primary">
-            {t('commandCenter')}
-          </span>
-          <div className="h-px flex-1 bg-border" />
+      <section className="space-y-2">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-sm font-bold text-roast">{t('accountBalances')}</h2>
+          <Badge variant="muted">{t('allInIqd')}</Badge>
         </div>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
-          {commandCards.map((card) => (
-            <Kpi
-              key={card.label}
-              label={card.label}
-              value={formatMoney(card.value, 'IQD', locale)}
-              Icon={card.Icon}
-              tone={card.tone}
-              href={card.href}
-            />
-          ))}
-        </div>
+        <DataTable columns={accCols} rows={accountRows} emptyLabel="—" />
       </section>
-
-      {showCombined ? (
-        <section className="space-y-3">
-          <div className="flex items-center gap-2">
-            <span className="rounded-md bg-primary/10 px-2 py-0.5 text-xs font-bold tracking-wide text-primary">
-              {t('allInIqd')}
-            </span>
-            <div className="h-px flex-1 bg-border" />
-          </div>
-          <KpiGrid tiles={tiles(combined)} currency="IQD" locale={locale} />
-        </section>
-      ) : null}
-
-      {byCur.map(({ cur, ce, ca, vals }) => (
-        <section key={cur} className="space-y-3">
-          <div className="flex items-center gap-2">
-            <span className="rounded-md border bg-card px-2 py-0.5 text-xs font-bold tracking-wide text-muted-foreground">
-              {cur}
-            </span>
-            <div className="h-px flex-1 bg-border" />
-          </div>
-          <KpiGrid tiles={tiles(vals)} currency={cur as Currency} locale={locale} />
-          {ca.length || unassignedCash(ce) ? (
-            <div className="space-y-1.5">
-              <div className="text-xs font-medium text-muted-foreground">{t('byAccount')}</div>
-              <DataTable
-                columns={accCols}
-                rows={[
-                  ...ca.map((a) => [
-                    a.name,
-                    enumLabel(a.type, locale),
-                    formatMoney(accountBalance(a, ce), cur, locale),
-                  ]),
-                  ...(unassignedCash(ce)
-                    ? [[t('unassigned'), '—', formatMoney(unassignedCash(ce), cur, locale)]]
-                    : []),
-                ]}
-                emptyLabel="—"
-              />
-            </div>
-          ) : null}
-        </section>
-      ))}
 
       {spendByCategory.length ? (
         <section className="space-y-4">
@@ -475,7 +428,7 @@ export default async function FinancePage({
           ) : null}
         </section>
       ) : (
-        <div className="rounded-[var(--radius)] border border-dashed bg-card p-6 text-center text-sm text-muted-foreground">
+        <div className="rounded-[var(--radius)] border border-dashed border-amber/25 bg-linen/20 p-6 text-center text-sm text-muted-foreground">
           {t('noSpend')}
         </div>
       )}
@@ -485,13 +438,13 @@ export default async function FinancePage({
           <Link
             key={key}
             href={href}
-            className="group flex items-center gap-3 rounded-[var(--radius)] border bg-card p-4 hover:border-primary hover:shadow-sm"
+            className="group flex items-center gap-3 rounded-[var(--radius)] border border-border/80 bg-card p-4 shadow-[0_1px_0_rgba(83,45,31,0.05)] hover:border-primary/45 hover:bg-linen/25"
           >
-            <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-amber/10 text-primary">
               <Icon className="size-5" />
             </div>
             <div className="min-w-0 flex-1">
-              <div className="text-sm font-semibold text-foreground">{t(key)}</div>
+              <div className="text-sm font-semibold text-roast">{t(key)}</div>
               <div className="truncate text-xs text-muted-foreground">{t(`entityHints.${key}`)}</div>
             </div>
             <ChevronRight className="size-4 shrink-0 text-muted-foreground rtl:rotate-180 group-hover:text-primary" />

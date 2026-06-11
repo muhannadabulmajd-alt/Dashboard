@@ -9,7 +9,7 @@ type Opt = { value: string; label: string };
 export type FilterDef = { name: string; label: string; options: Opt[] };
 
 const control =
-  'min-h-10 rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:border-primary';
+  'min-h-10 rounded-lg border border-input bg-background px-3 py-2 text-sm text-roast outline-none focus:border-primary focus:bg-card';
 
 /**
  * URL-driven search / filter / sort bar for the data-management tables (CR-9).
@@ -67,7 +67,7 @@ export function TableToolbar({
     q.length > 0 || Boolean(params.get('sort')) || filters.some((f) => Boolean(params.get(f.name)));
 
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-[var(--radius)] border bg-card p-2 shadow-sm">
+    <div className="flex flex-wrap items-center gap-2 rounded-[var(--radius)] border border-border/80 bg-card p-2 shadow-[0_1px_0_rgba(83,45,31,0.05)]">
       <div className="relative min-w-[200px] flex-1">
         <Search className="pointer-events-none absolute inset-y-0 start-3 my-auto size-4 text-muted-foreground" />
         <input
@@ -113,7 +113,7 @@ export function TableToolbar({
         <button
           type="button"
           onClick={clearAll}
-          className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+          className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-border/80 bg-card px-3 py-2 text-sm font-semibold text-muted-foreground hover:bg-linen/45 hover:text-roast"
         >
           <X className="size-4" />
           {t('clear')}

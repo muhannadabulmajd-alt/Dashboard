@@ -62,7 +62,7 @@ const OPTIONS: RecordOption[] = [
 ];
 
 const GROUPS: Group[] = ['in', 'out', 'due', 'transfer'];
-const inputCls = 'w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:border-primary';
+const inputCls = 'w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-roast outline-none focus:border-primary focus:bg-card';
 
 export function RecordWizard({
   locale,
@@ -87,17 +87,17 @@ export function RecordWizard({
       <div className="space-y-5">
         {GROUPS.map((g) => (
           <div key={g} className="space-y-2">
-            <h3 className="text-sm font-semibold text-muted-foreground">{t(`wizard.groups.${g}`)}</h3>
+            <h3 className="text-sm font-bold text-roast">{t(`wizard.groups.${g}`)}</h3>
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
               {OPTIONS.filter((o) => o.group === g).map((o) => (
                 <button
                   key={o.key}
                   type="button"
                   onClick={() => setPicked(o)}
-                  className="group flex items-center justify-between gap-2 rounded-[var(--radius)] border bg-card p-3 text-start hover:border-primary hover:shadow-sm"
+                  className="group flex items-center justify-between gap-2 rounded-[var(--radius)] border border-border/80 bg-card p-3 text-start shadow-[0_1px_0_rgba(83,45,31,0.05)] hover:border-primary/45 hover:bg-linen/25"
                 >
                   <span>
-                    <span className="block text-sm font-medium text-foreground">{t(`wizard.options.${o.key}.label`)}</span>
+                    <span className="block text-sm font-semibold text-roast">{t(`wizard.options.${o.key}.label`)}</span>
                     <span className="block text-xs text-muted-foreground">{t(`wizard.options.${o.key}.hint`)}</span>
                   </span>
                   <ChevronRight className="size-4 shrink-0 text-muted-foreground rtl:rotate-180 group-hover:text-primary" />
@@ -180,13 +180,13 @@ function RecordForm({
 
   return (
     <form action={action} className="space-y-4">
-      <button type="button" onClick={onBack} className="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground">
+      <button type="button" onClick={onBack} className="inline-flex items-center gap-1.5 text-sm font-semibold text-muted-foreground hover:text-roast">
         <ArrowLeft className="size-4 rtl:rotate-180" />
         {t('wizard.back')}
       </button>
 
-      <div className="rounded-[var(--radius)] border bg-card p-4">
-        <h3 className="mb-1 text-sm font-semibold">{t(`wizard.options.${option.key}.label`)}</h3>
+      <div className="rounded-[var(--radius)] border border-border/80 bg-card p-4 shadow-[0_1px_0_rgba(83,45,31,0.05)]">
+        <h3 className="mb-1 text-sm font-semibold text-roast">{t(`wizard.options.${option.key}.label`)}</h3>
         <p className="mb-4 text-xs text-muted-foreground">{t(`wizard.options.${option.key}.hint`)}</p>
 
         <input type="hidden" name="locale" value={locale} />
@@ -197,12 +197,16 @@ function RecordForm({
         <div className="grid gap-3 sm:grid-cols-2">{option.fields.map((k) => <div key={k}>{field(k)}</div>)}</div>
 
         {option.note === 'settle' ? <p className="mt-3 text-xs text-muted-foreground">{t('wizard.settleNote')}</p> : null}
-        {state?.error ? <p className="mt-3 text-sm font-medium text-danger">{t('wizard.error')}</p> : null}
+        {state?.error ? (
+          <p className="mt-3 rounded-lg border border-danger/20 bg-danger-soft px-3 py-2 text-sm font-semibold text-danger">
+            {t('wizard.error')}
+          </p>
+        ) : null}
 
         <button
           type="submit"
           disabled={pending}
-          className="mt-4 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-95 disabled:opacity-60"
+          className="mt-4 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-amber/90 disabled:opacity-60"
         >
           {pending ? <Loader2 className="size-4 animate-spin" /> : null}
           {t('wizard.save')}
@@ -214,7 +218,7 @@ function RecordForm({
   function wrap(key: string, label: string, control: React.ReactNode) {
     return (
       <label className="flex flex-col gap-1">
-        <span className="text-xs font-medium text-muted-foreground">{label}</span>
+        <span className="text-xs font-semibold text-muted-foreground">{label}</span>
         {control}
         {key in FIELD_HELP ? <span className="text-xs text-muted-foreground">{t(FIELD_HELP[key as FieldKey])}</span> : null}
       </label>

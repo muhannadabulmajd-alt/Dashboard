@@ -1,28 +1,34 @@
 @import "tailwindcss";
 
 @theme {
-  --color-background: #faf8f4;
-  --color-card: #ffffff;
-  --color-foreground: #1c1917;
-  --color-muted: #f1ece4;
-  --color-muted-foreground: #6b625a;
-  --color-border: #e7e0d6;
-  --color-input: #e7e0d6;
-  --color-primary: #6f4e37;
-  --color-primary-foreground: #ffffff;
-  --color-accent: #a9743f;
-  --color-accent-foreground: #ffffff;
-  --color-success: #15803d;
-  --color-success-soft: #dcfce7;
-  --color-danger: #b91c1c;
-  --color-danger-soft: #fee2e2;
-  --color-warning: #b45309;
-  --color-warning-soft: #fef3c7;
+  --color-background: #f8f5ed;
+  --color-card: #fffdf7;
+  --color-foreground: #532d1f;
+  --color-muted: #eee8d8;
+  --color-muted-foreground: #766b5f;
+  --color-border: #e3dacb;
+  --color-input: #d9cdbc;
+  --color-primary: #ad6933;
+  --color-primary-foreground: #fff9ef;
+  --color-accent: #7f8b57;
+  --color-accent-foreground: #fff9ef;
+  --color-success: #60713d;
+  --color-success-soft: #e5efd8;
+  --color-danger: #963520;
+  --color-danger-soft: #f6ddd7;
+  --color-warning: #b46f31;
+  --color-warning-soft: #faeac7;
+  --color-linen: #ece8cf;
+  --color-sage: #7f8b57;
+  --color-grove: #3d421f;
+  --color-amber: #ad6933;
+  --color-cherry: #963520;
+  --color-roast: #532d1f;
 
   --font-sans: ui-sans-serif, system-ui, "Segoe UI", Tahoma, "Noto Sans Arabic",
     "Cairo", "Helvetica Neue", Arial, sans-serif;
 
-  --radius: 0.75rem;
+  --radius: 0.65rem;
 }
 
 *,
@@ -64,10 +70,16 @@ summary:focus-visible {
 }
 
 ::selection {
-  background: color-mix(in srgb, var(--color-primary) 18%, white);
+  background: color-mix(in srgb, var(--color-amber) 20%, white);
 }
 
 /* Tabular figures for KPI numbers regardless of locale digits. */
 .tabular {
   font-variant-numeric: tabular-nums;
+}
+
+.app-surface {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-linen) 35%, white) 0%, var(--color-background) 22rem),
+    var(--color-background);
 }

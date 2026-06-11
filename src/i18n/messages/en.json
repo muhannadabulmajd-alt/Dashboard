@@ -38,6 +38,9 @@
     "subtitle": "Money in and out, balances, dues, and capital — all in one place.",
     "allInIqd": "All in IQD",
     "commandCenter": "Command center",
+    "cashBreakdown": "Cash breakdown",
+    "accountBalances": "Account balances",
+    "overdueRisk": "Overdue risk",
     "rate": "Conversion rate",
     "cashOnHand": "Cash on hand",
     "bankBalance": "Bank balance",
@@ -84,6 +87,7 @@
     "statementParties": "Parties with activity",
     "financialAlerts": "Financial alerts",
     "alertsClear": "No finance alerts for the current data.",
+    "alertsClearShort": "Clear",
     "alerts": {
       "overduePayables": { "title": "Overdue payables", "body": "Supplier or expense dues past their due date total {amount}." },
       "overdueReceivables": { "title": "Overdue receivables", "body": "Customer amounts past their due date total {amount}." },

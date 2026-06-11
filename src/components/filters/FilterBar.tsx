@@ -114,11 +114,11 @@ export function FilterBar({
   return (
     <div
       className={cn(
-        'flex flex-wrap items-center gap-2 border-b bg-card px-4 py-2.5 transition-opacity',
+        'flex flex-wrap items-center gap-2 border-b border-border/80 bg-card/85 px-4 py-2.5 shadow-[0_1px_0_rgba(83,45,31,0.03)] backdrop-blur transition-opacity',
         pending && 'opacity-60',
       )}
     >
-      <span className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+      <span className="flex items-center gap-1.5 text-sm font-semibold text-roast">
         <SlidersHorizontal className="size-4" />
         {t('title')}
       </span>
@@ -136,7 +136,7 @@ export function FilterBar({
             }
           })
         }
-        className="rounded-lg border bg-card px-2.5 py-1.5 text-sm"
+        className="rounded-lg border border-border/80 bg-background px-2.5 py-1.5 text-sm text-roast outline-none focus:border-primary"
       >
         {RANGE_PRESETS.map((p) => (
           <option key={p} value={p}>
@@ -155,7 +155,7 @@ export function FilterBar({
             onChange={(e) =>
               apply((sp) => (e.target.value ? sp.set('from', e.target.value) : sp.delete('from')))
             }
-            className="rounded-lg border bg-card px-2 py-1.5 text-sm"
+            className="rounded-lg border border-border/80 bg-background px-2 py-1.5 text-sm outline-none focus:border-primary"
           />
           <span className="text-xs text-muted-foreground">→</span>
           <input
@@ -166,7 +166,7 @@ export function FilterBar({
             onChange={(e) =>
               apply((sp) => (e.target.value ? sp.set('to', e.target.value) : sp.delete('to')))
             }
-            className="rounded-lg border bg-card px-2 py-1.5 text-sm"
+            className="rounded-lg border border-border/80 bg-background px-2 py-1.5 text-sm outline-none focus:border-primary"
           />
         </span>
       ) : null}
@@ -184,7 +184,7 @@ export function FilterBar({
       {anyActive ? (
         <button
           onClick={() => startTransition(() => router.replace(pathname))}
-          className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-muted-foreground hover:text-danger"
+          className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-muted-foreground hover:bg-danger-soft hover:text-danger"
         >
           <X className="size-3.5" />
           {tc('reset')}
@@ -207,20 +207,20 @@ function MultiSelect({
 }) {
   return (
     <details className="group relative">
-      <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-lg border bg-card px-2.5 py-1.5 text-sm [&::-webkit-details-marker]:hidden">
+      <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-lg border border-border/80 bg-background px-2.5 py-1.5 text-sm font-medium text-roast hover:bg-linen/35 [&::-webkit-details-marker]:hidden">
         {label}
         {selected.length > 0 ? (
-          <span className="rounded-full bg-primary/10 px-1.5 text-xs font-medium text-primary">
+          <span className="rounded-full bg-amber/15 px-1.5 text-xs font-bold text-primary">
             {selected.length}
           </span>
         ) : null}
         <ChevronDown className="size-3.5 text-muted-foreground transition-transform group-open:rotate-180" />
       </summary>
-      <div className="absolute z-20 mt-1 max-h-64 w-52 overflow-auto rounded-lg border bg-card p-1 shadow-lg">
+      <div className="absolute z-20 mt-1 max-h-64 w-52 overflow-auto rounded-lg border border-border/80 bg-card p-1 shadow-lg shadow-roast/10">
         {options.map((o) => (
           <label
             key={o.value}
-            className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted"
+            className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-linen/45"
           >
             <input
               type="checkbox"

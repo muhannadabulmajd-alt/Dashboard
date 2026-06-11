@@ -38,6 +38,9 @@
     "subtitle": "الأموال الواردة والصادرة والأرصدة والذمم ورأس المال — في مكان واحد.",
     "allInIqd": "الكل بالدينار",
     "commandCenter": "مركز القيادة",
+    "cashBreakdown": "تفصيل النقد",
+    "accountBalances": "أرصدة الحسابات",
+    "overdueRisk": "مخاطر التأخير",
     "rate": "سعر الصرف",
     "cashOnHand": "النقد المتوفر",
     "bankBalance": "رصيد البنك",
@@ -84,6 +87,7 @@
     "statementParties": "أطراف لديها حركة",
     "financialAlerts": "تنبيهات مالية",
     "alertsClear": "لا توجد تنبيهات مالية حسب البيانات الحالية.",
+    "alertsClearShort": "سليم",
     "alerts": {
       "overduePayables": { "title": "ذمم دائنة متأخرة", "body": "إجمالي ذمم الموردين أو المصاريف المتأخرة هو {amount}." },
       "overdueReceivables": { "title": "ذمم مدينة متأخرة", "body": "إجمالي مبالغ العملاء المتأخرة هو {amount}." },

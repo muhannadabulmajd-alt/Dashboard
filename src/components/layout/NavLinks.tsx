@@ -68,10 +68,12 @@ function NavLinksInner({
   groups,
   pathname,
   onNavigate,
+  tone = 'light',
 }: {
   groups: NavGroup[];
   pathname: string;
   onNavigate?: () => void;
+  tone?: 'light' | 'dark';
 }) {
   // A group starts open when it's a default-open group or holds the active page.
   const [open, setOpen] = useState<Record<string, boolean>>(() => {
@@ -90,7 +92,12 @@ function NavLinksInner({
               type="button"
               onClick={() => setOpen((prev) => ({ ...prev, [group.key]: !expanded }))}
               aria-expanded={expanded}
-              className="flex items-center justify-between gap-2 rounded-md px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground transition-colors hover:text-foreground"
+              className={cn(
+                'flex items-center justify-between gap-2 rounded-md px-3 py-1 text-[11px] font-bold uppercase tracking-[0.14em] transition-colors',
+                tone === 'dark'
+                  ? 'text-primary-foreground/55 hover:text-primary-foreground'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
             >
               <span className="truncate">{group.label}</span>
               <ChevronDown className={cn('size-3.5 shrink-0 transition-transform', expanded ? '' : '-rotate-90 rtl:rotate-90')} />
@@ -106,10 +113,14 @@ function NavLinksInner({
                       href={item.href}
                       onClick={onNavigate}
                       className={cn(
-                        'flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                        'flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-semibold transition-colors',
                         active
-                          ? 'bg-primary text-primary-foreground'
-                          : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                          ? tone === 'dark'
+                            ? 'bg-linen text-roast shadow-[0_1px_0_rgba(255,255,255,0.10)]'
+                            : 'bg-grove text-primary-foreground'
+                          : tone === 'dark'
+                            ? 'text-primary-foreground/70 hover:bg-white/8 hover:text-primary-foreground'
+                            : 'text-muted-foreground hover:bg-linen/45 hover:text-foreground',
                       )}
                     >
                       <Icon className="size-4 shrink-0" />
@@ -126,7 +137,15 @@ function NavLinksInner({
   );
 }
 
-export function NavLinks({ groups, onNavigate }: { groups: NavGroup[]; onNavigate?: () => void }) {
+export function NavLinks({
+  groups,
+  onNavigate,
+  tone = 'light',
+}: {
+  groups: NavGroup[];
+  onNavigate?: () => void;
+  tone?: 'light' | 'dark';
+}) {
   const pathname = usePathname(); // locale-stripped path
-  return <NavLinksInner key={pathname} groups={groups} pathname={pathname} onNavigate={onNavigate} />;
+  return <NavLinksInner key={pathname} groups={groups} pathname={pathname} onNavigate={onNavigate} tone={tone} />;
 }

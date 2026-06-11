@@ -44,7 +44,7 @@ export default async function DashboardLayout({
   const listOptions = { channel, governorate, productLine, grind };
 
   return (
-    <div className="flex min-h-screen">
+    <div className="app-surface flex min-h-screen">
       <Sidebar groups={navGroups} />
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar user={{ name: user.name, role: user.role }} locale={locale} navGroups={navGroups} />

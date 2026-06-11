@@ -12,12 +12,12 @@ export function LoginForm() {
   const [state, formAction, pending] = useActionState<LoginState, FormData>(authenticate, undefined);
 
   return (
-    <div className="w-full max-w-sm rounded-[var(--radius)] border bg-card p-6 shadow-sm">
+    <div className="w-full max-w-sm rounded-[var(--radius)] border border-border/80 bg-card p-6 shadow-xl shadow-roast/10">
       <div className="mb-5 flex flex-col items-center gap-2 text-center">
-        <div className="flex size-12 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+        <div className="flex size-12 items-center justify-center rounded-xl bg-grove text-primary-foreground">
           <Coffee className="size-6" />
         </div>
-        <h1 className="text-lg font-bold">{tApp('name')}</h1>
+        <h1 className="text-lg font-bold text-roast">{tApp('name')}</h1>
         <p className="text-xs text-muted-foreground">{t('subtitle')}</p>
       </div>
 
@@ -31,7 +31,7 @@ export function LoginForm() {
             required
             autoComplete="email"
             defaultValue="owner@laheeb.coffee"
-            className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+            className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-roast outline-none focus:border-primary"
           />
         </div>
         <div>
@@ -42,7 +42,7 @@ export function LoginForm() {
             required
             autoComplete="current-password"
             defaultValue="laheeb1234"
-            className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+            className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-roast outline-none focus:border-primary"
           />
         </div>
 
@@ -51,7 +51,7 @@ export function LoginForm() {
         <button
           type="submit"
           disabled={pending}
-          className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:opacity-95 disabled:opacity-60"
+          className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:bg-amber/90 disabled:opacity-60"
         >
           {pending ? <Loader2 className="size-4 animate-spin" /> : null}
           {t('submit')}

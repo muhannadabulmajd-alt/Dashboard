@@ -29,12 +29,12 @@ export function DataTable({
   caption?: string;
 }) {
   return (
-    <div className="overflow-hidden rounded-[var(--radius)] border bg-card shadow-sm">
+    <div className="overflow-hidden rounded-[var(--radius)] border border-border/80 bg-card shadow-[0_1px_0_rgba(83,45,31,0.05)]">
       {exportHref ? (
-        <div className="flex justify-end border-b bg-muted/30 p-2">
+        <div className="flex justify-end border-b bg-linen/30 p-2">
           <a
             href={exportHref}
-            className="inline-flex min-h-8 items-center gap-1.5 rounded-md border bg-card px-2.5 py-1 text-xs font-semibold text-foreground hover:bg-muted"
+            className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-amber/25 bg-card px-2.5 py-1 text-xs font-semibold text-roast hover:bg-linen/45"
           >
             <Download className="size-3.5" />
             {exportLabel ?? 'Export CSV'}
@@ -45,12 +45,12 @@ export function DataTable({
         <table className="w-full text-sm">
           {caption ? <caption className="sr-only">{caption}</caption> : null}
           <thead>
-            <tr className="border-b bg-muted/30 text-muted-foreground">
+            <tr className="border-b bg-linen/40 text-muted-foreground">
               {columns.map((c, i) => (
                 <th
                   key={i}
                   className={cn(
-                    'sticky top-0 z-10 whitespace-nowrap bg-muted/30 px-3 py-2.5 text-xs font-semibold',
+                    'sticky top-0 z-10 whitespace-nowrap bg-linen/70 px-3 py-2.5 text-xs font-bold uppercase tracking-[0.08em]',
                     c.align === 'end' ? 'text-end' : 'text-start',
                   )}
                   scope="col"
@@ -74,7 +74,7 @@ export function DataTable({
               </tr>
             ) : (
               rows.map((row, ri) => (
-                <tr key={ri} className="border-b last:border-0 hover:bg-muted/20">
+                <tr key={ri} className="border-b border-border/70 last:border-0 hover:bg-linen/20">
                   {row.map((cell, ci) => (
                     <td
                       key={ci}

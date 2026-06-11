@@ -28,7 +28,7 @@ function fmt(v: number, kind: ValueKind, locale: AppLocale, compact = false): st
 }
 
 const axisProps = {
-  tick: { fontSize: 11, fill: '#6b625a' },
+  tick: { fontSize: 11, fill: '#766b5f' },
   tickLine: false,
   axisLine: false,
 } as const;
@@ -66,7 +66,7 @@ export function LineChartCard({
     <ChartFrame title={title}>
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#eee5d9" vertical={false} />
+          <CartesianGrid strokeDasharray="3 3" stroke="#e6dccb" vertical={false} />
           <XAxis dataKey="label" {...axisProps} minTickGap={24} />
           <YAxis {...axisProps} width={56} tickFormatter={(v) => fmt(Number(v), valueKind, locale, true)} />
           <Tooltip formatter={(v) => fmt(Number(v), valueKind, locale)} />
@@ -102,7 +102,7 @@ export function BarChartCard({
       <ResponsiveContainer width="100%" height="100%">
         {horizontal ? (
           <BarChart data={data} layout="vertical" margin={{ top: 4, right: 16, left: 8, bottom: 4 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#eee5d9" horizontal={false} />
+            <CartesianGrid strokeDasharray="3 3" stroke="#e6dccb" horizontal={false} />
             <XAxis type="number" {...axisProps} tickFormatter={(v) => fmt(Number(v), valueKind, locale, true)} />
             <YAxis type="category" dataKey="label" {...axisProps} width={110} />
             <Tooltip formatter={(v) => fmt(Number(v), valueKind, locale)} />
@@ -114,7 +114,7 @@ export function BarChartCard({
           </BarChart>
         ) : (
           <BarChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#eee5d9" vertical={false} />
+            <CartesianGrid strokeDasharray="3 3" stroke="#e6dccb" vertical={false} />
             <XAxis dataKey="label" {...axisProps} minTickGap={8} />
             <YAxis {...axisProps} width={56} tickFormatter={(v) => fmt(Number(v), valueKind, locale, true)} />
             <Tooltip formatter={(v) => fmt(Number(v), valueKind, locale)} />
@@ -207,7 +207,7 @@ export function WaterfallChart({
     <ChartFrame title={title}>
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#eee5d9" vertical={false} />
+          <CartesianGrid strokeDasharray="3 3" stroke="#e6dccb" vertical={false} />
           <XAxis dataKey="label" {...axisProps} interval={0} angle={-15} textAnchor="end" height={50} />
           <YAxis {...axisProps} width={56} tickFormatter={(v) => formatMoneyCompact(Number(v), 'IQD', locale)} />
           <Tooltip formatter={(v) => formatMoney(Number(v), 'IQD', locale)} />

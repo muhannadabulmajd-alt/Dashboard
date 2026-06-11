@@ -15,8 +15,8 @@ export type FieldDef =
   | { name: string; label: string; type: 'checkbox'; hint?: string; showWhen?: ShowWhen; disabled?: boolean };
 
 const input =
-  'min-h-10 w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:border-primary';
-const disabledInput = 'cursor-not-allowed bg-muted text-muted-foreground';
+  'min-h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-roast outline-none focus:border-primary focus:bg-card';
+const disabledInput = 'cursor-not-allowed bg-muted/70 text-muted-foreground';
 
 type Action = (prev: ActionState, fd: FormData) => Promise<ActionState>;
 
@@ -67,10 +67,10 @@ export function RecordForm({
   });
 
   return (
-    <form action={formAction} className="grid gap-3 rounded-[var(--radius)] border bg-card p-4 shadow-sm sm:grid-cols-2">
+    <form action={formAction} className="grid gap-4 rounded-[var(--radius)] border border-border/80 bg-card p-4 shadow-[0_1px_0_rgba(83,45,31,0.05)] sm:grid-cols-2">
       <input type="hidden" name="locale" value={locale} />
       {note ? (
-        <p className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs leading-5 text-muted-foreground sm:col-span-2">{note}</p>
+        <p className="rounded-lg border border-amber/25 bg-amber/10 px-3 py-2 text-xs leading-5 text-roast sm:col-span-2">{note}</p>
       ) : null}
       {fields.map((f) => {
         if (f.showWhen && !f.showWhen.in.includes(values[f.showWhen.field] ?? '')) return null;
@@ -83,7 +83,7 @@ export function RecordForm({
           const checked = v === true || v === 'true' || v === 'on' || v === 1;
           const hintId = `${f.name}-hint`;
           return (
-            <label key={f.name} className="flex cursor-pointer items-start gap-2.5 rounded-lg border p-3 hover:bg-muted/40 sm:col-span-2">
+            <label key={f.name} className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-border/80 bg-background/60 p-3 hover:bg-linen/35 sm:col-span-2">
               <input
                 type="checkbox"
                 name={f.name}
@@ -103,7 +103,7 @@ export function RecordForm({
         const hintId = `${f.name}-hint`;
         return (
           <div key={f.name} className="flex flex-col gap-1">
-            <label htmlFor={fieldId} className="text-xs font-medium text-muted-foreground">
+            <label htmlFor={fieldId} className="text-xs font-semibold text-muted-foreground">
               {f.label}
               {f.required ? <span className="text-danger"> *</span> : null}
             </label>
@@ -150,21 +150,21 @@ export function RecordForm({
       })}
 
       {state?.error ? (
-        <p role="alert" className="rounded-lg border border-danger/20 bg-danger-soft px-3 py-2 text-sm font-medium text-danger sm:col-span-2">
+        <p role="alert" className="rounded-lg border border-danger/20 bg-danger-soft px-3 py-2 text-sm font-semibold text-danger sm:col-span-2">
           {errors[state.error] ?? state.error}
         </p>
       ) : null}
 
-      <div className="flex flex-wrap items-center gap-3 border-t pt-3 sm:col-span-2">
+      <div className="flex flex-wrap items-center gap-3 border-t border-border/80 pt-3 sm:col-span-2">
         <button
           type="submit"
           disabled={pending}
-          className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-95 disabled:opacity-60"
+          className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-[0_1px_0_rgba(83,45,31,0.16)] hover:bg-amber/90 disabled:opacity-60"
         >
           {pending ? <Loader2 className="size-4 animate-spin" /> : null}
           {submitLabel}
         </button>
-        <Link href={cancelHref} className="inline-flex min-h-10 items-center rounded-lg border px-4 py-2 text-sm font-medium hover:bg-muted">
+        <Link href={cancelHref} className="inline-flex min-h-10 items-center rounded-lg border border-border/80 bg-card px-4 py-2 text-sm font-semibold text-roast hover:bg-linen/45">
           {cancelLabel}
         </Link>
       </div>
