@@ -121,15 +121,17 @@ export const CURRENCIES = ['IQD', 'USD'] as const;
 
 export const SHIPMENT_STATUSES = ['DISPATCHED', 'IN_TRANSIT', 'DELIVERED', 'FAILED', 'RETURNED'] as const;
 
-export const ACCOUNT_TYPES = ['CASH', 'BANK'] as const;
+export const ACCOUNT_TYPES = ['CASH', 'BANK', 'DIGITAL_WALLET', 'PAYMENT_GATEWAY', 'OTHER'] as const;
 
 export const PARTY_TYPES = [
   'SUPPLIER',
   'RETAILER',
+  'DISTRIBUTOR',
   'PARTNER',
   'CUSTOMER',
   'SHAREHOLDER',
   'EMPLOYEE',
+  'SERVICE_PROVIDER',
   'OTHER',
 ] as const;
 
@@ -247,13 +249,17 @@ export const ENUM_LABELS: Record<string, Label> = {
   // Finance — account types
   CASH: { en: 'Cash', ar: 'نقد' },
   BANK: { en: 'Bank', ar: 'بنك' },
+  DIGITAL_WALLET: { en: 'Digital wallet', ar: 'محفظة إلكترونية' },
+  PAYMENT_GATEWAY: { en: 'Payment gateway', ar: 'بوابة دفع' },
   // Finance — party types
   SUPPLIER: { en: 'Supplier', ar: 'مورّد' },
   RETAILER: { en: 'Retailer', ar: 'بائع تجزئة' },
+  DISTRIBUTOR: { en: 'Distributor', ar: 'موزّع' },
   PARTNER: { en: 'Partner', ar: 'شريك' },
   CUSTOMER: { en: 'Customer', ar: 'عميل' },
   SHAREHOLDER: { en: 'Shareholder', ar: 'مساهم' },
   EMPLOYEE: { en: 'Employee', ar: 'موظف' },
+  SERVICE_PROVIDER: { en: 'Service provider', ar: 'مزود خدمة' },
   // Finance — entry types
   EXPENSE: { en: 'Expense', ar: 'مصروف' },
   PURCHASE: { en: 'Purchase', ar: 'شراء' },

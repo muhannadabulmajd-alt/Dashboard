@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   LayoutDashboard,
   ShoppingBag,
@@ -62,22 +62,21 @@ function isActive(href: string, pathname: string): boolean {
   return href === '/' ? pathname === '/' : pathname.startsWith(href);
 }
 
-export function NavLinks({ groups }: { groups: NavGroup[] }) {
-  const pathname = usePathname(); // locale-stripped path
-
+function NavLinksInner({
+  groups,
+  pathname,
+  onNavigate,
+}: {
+  groups: NavGroup[];
+  pathname: string;
+  onNavigate?: () => void;
+}) {
   // A group starts open when it's a default-open group or holds the active page.
   const [open, setOpen] = useState<Record<string, boolean>>(() => {
     const o: Record<string, boolean> = {};
     for (const g of groups) o[g.key] = g.defaultOpen || g.items.some((it) => isActive(it.href, pathname));
     return o;
   });
-
-  // Navigating into a collapsed group reveals it (without fighting manual toggles).
-  useEffect(() => {
-    const active = groups.find((g) => g.items.some((it) => isActive(it.href, pathname)));
-    if (active) setOpen((prev) => (prev[active.key] ? prev : { ...prev, [active.key]: true }));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname]);
 
   return (
     <nav className="flex flex-col gap-2">
@@ -103,6 +102,7 @@ export function NavLinks({ groups }: { groups: NavGroup[] }) {
                     <Link
                       key={item.href}
                       href={item.href}
+                      onClick={onNavigate}
                       className={cn(
                         'flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
                         active
@@ -122,4 +122,9 @@ export function NavLinks({ groups }: { groups: NavGroup[] }) {
       })}
     </nav>
   );
+}
+
+export function NavLinks({ groups, onNavigate }: { groups: NavGroup[]; onNavigate?: () => void }) {
+  const pathname = usePathname(); // locale-stripped path
+  return <NavLinksInner key={pathname} groups={groups} pathname={pathname} onNavigate={onNavigate} />;
 }

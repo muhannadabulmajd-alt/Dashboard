@@ -17,9 +17,10 @@ export default async function RecordEntryPage({
 }) {
   const { locale } = await getPageContext(params, searchParams, 'manage:finance');
   const t = await getTranslations('finance');
-  const [accounts, parties] = await Promise.all([
+  const [accounts, parties, branches] = await Promise.all([
     prisma.financeAccount.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true } }),
     prisma.party.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true } }),
+    prisma.branch.findMany({ where: { isActive: true }, orderBy: { nameEn: 'asc' }, select: { id: true, nameEn: true, nameAr: true } }),
   ]);
 
   return (
@@ -32,6 +33,7 @@ export default async function RecordEntryPage({
         accounts={accounts.map((a) => ({ value: a.id, label: a.name }))}
         parties={parties.map((p) => ({ value: p.id, label: p.name }))}
         categories={EXPENSE_CATEGORY_TYPES.map((c) => ({ value: c, label: enumLabel(c, locale) }))}
+        branches={branches.map((b) => ({ value: b.id, label: locale === 'ar' ? b.nameAr : b.nameEn }))}
         today={dateInputValue()}
       />
     </>

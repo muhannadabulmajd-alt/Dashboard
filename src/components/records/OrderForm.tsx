@@ -62,6 +62,7 @@ export function OrderForm({
   governorateOptions,
   fulfillmentOptions,
   statusOptions,
+  accountOptions,
   labels,
   errors,
   cancelHref,
@@ -76,6 +77,7 @@ export function OrderForm({
   governorateOptions: Opt[];
   fulfillmentOptions: Opt[];
   statusOptions: Opt[];
+  accountOptions: Opt[];
   labels: Record<string, string>;
   errors: Record<string, string>;
   cancelHref: string;
@@ -112,6 +114,7 @@ export function OrderForm({
     orderDiscount: initial?.header?.orderDiscount ?? '0',
     extraCharges: initial?.header?.extraCharges ?? '0',
   });
+  const [financeMode, setFinanceMode] = useState(initial?.header?.financeMode ?? 'CREDIT');
 
   const setLine = (i: number, k: keyof OrderLineInput, v: string) =>
     setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, [k]: v } : l)));
@@ -142,6 +145,38 @@ export function OrderForm({
         <HeaderField name="deliveryFee" label={labels.deliveryFee} type="number" defaultValue={h.deliveryFee} />
         <HeaderField name="deliveryCost" label={labels.deliveryCost} type="number" defaultValue={h.deliveryCost} />
         <HeaderField name="notes" label={labels.notes} defaultValue={h.notes} />
+      </div>
+
+      <div className="grid gap-3 rounded-[var(--radius)] border bg-card p-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-muted-foreground">{labels.financeMode}</label>
+          <select
+            name="financeMode"
+            value={financeMode}
+            onChange={(e) => setFinanceMode(e.target.value)}
+            className={input}
+          >
+            <option value="CREDIT">{labels.financeCredit}</option>
+            <option value="PAID">{labels.financePaid}</option>
+            <option value="NONE">{labels.financeNone}</option>
+          </select>
+        </div>
+        {financeMode === 'PAID' ? (
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-medium text-muted-foreground">{labels.paymentAccount}</label>
+            <select name="financeAccountId" required className={input} defaultValue={h.financeAccountId}>
+              <option value="">—</option>
+              {accountOptions.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
+        {financeMode === 'CREDIT' ? (
+          <HeaderField name="financeDueDate" label={labels.paymentDueDate} type="date" defaultValue={h.financeDueDate || h.placedAt} />
+        ) : null}
       </div>
 
       <div className="rounded-[var(--radius)] border bg-card p-4">

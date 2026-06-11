@@ -24,8 +24,8 @@ export default async function DuesPage({
   const tc = await getTranslations('common');
 
   const obligations = await prisma.financeEntry.findMany({
-    where: { obligation: true },
-    include: { party: { select: { name: true } }, settlements: { select: { amount: true } } },
+    where: { obligation: true, reversedAt: null, reversalOfId: null },
+    include: { party: { select: { name: true } }, settlements: { where: { reversedAt: null, reversalOfId: null }, select: { amount: true } } },
     orderBy: { dueDate: 'asc' },
   });
   const now = new Date();

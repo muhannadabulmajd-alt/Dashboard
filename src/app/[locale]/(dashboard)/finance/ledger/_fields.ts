@@ -10,6 +10,7 @@ export function entryFields(
   locale: AppLocale,
   accountOptions: Opt[],
   partyOptions: Opt[],
+  branchOptions: Opt[],
 ): FieldDef[] {
   const opts = (vals: readonly string[]) => vals.map((v) => ({ value: v, label: enumLabel(v, locale) }));
   return [
@@ -33,8 +34,10 @@ export function entryFields(
     { name: 'accountId', label: t('f.account'), type: 'select', options: accountOptions },
     { name: 'toAccountId', label: t('f.toAccount'), type: 'select', options: accountOptions },
     { name: 'partyId', label: t('f.party'), type: 'select', options: partyOptions },
+    { name: 'branchId', label: t('f.branch'), type: 'select', options: branchOptions },
     { name: 'categoryType', label: t('f.category'), type: 'select', options: opts(EXPENSE_CATEGORY_TYPES) },
     { name: 'description', label: t('f.description'), type: 'text' },
     { name: 'reference', label: t('f.reference'), type: 'text' },
+    { name: 'attachmentUrl', label: t('f.attachmentUrl'), type: 'text' },
   ];
 }

@@ -139,12 +139,14 @@ export function monthProgress(now: Date = new Date()): { dayOfMonth: number; day
 
 // Displayed dates use DD/MM/YYYY everywhere (CR-1). Storage stays UTC/ISO;
 // `<input type="date">` values are formatted separately as yyyy-MM-dd.
-export function formatDate(date: Date, locale: 'ar' | 'en' = 'en'): string {
+export function formatDate(date: Date, _locale: 'ar' | 'en' = 'en'): string {
+  void _locale;
   return formatInTimeZone(date, TZ, 'dd/MM/yyyy');
 }
 
 /** Date + time (Baghdad), DD/MM/YYYY HH:mm — e.g. for the audit log. */
-export function formatDateTime(date: Date, locale: 'ar' | 'en' = 'en'): string {
+export function formatDateTime(date: Date, _locale: 'ar' | 'en' = 'en'): string {
+  void _locale;
   return formatInTimeZone(date, TZ, 'dd/MM/yyyy HH:mm');
 }
 

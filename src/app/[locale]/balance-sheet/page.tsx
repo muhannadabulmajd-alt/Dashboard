@@ -8,18 +8,34 @@ import { accountBalance, netCash, unassignedCash, financeTotals, type FinanceEnt
 import { getUsdToIqd } from '@/server/settings';
 import { PrintButton } from '@/components/PrintButton';
 
+function BalanceRow({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
+  return (
+    <div className={`flex justify-between gap-6 py-1 ${strong ? 'border-t font-bold' : 'text-sm'}`}>
+      <span className={strong ? '' : 'text-muted-foreground'}>{label}</span>
+      <span className="tabular-nums">{value}</span>
+    </div>
+  );
+}
+
 export default async function BalanceSheetPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
   await requireCapability(locale, 'view:finance');
   const t = await getTranslations('finance');
   const loc = locale as AppLocale;
 
-  const [accounts, entriesRaw] = await Promise.all([
+  const [accounts, entriesRaw, inventoryItems] = await Promise.all([
     prisma.financeAccount.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }),
     prisma.financeEntry.findMany({
+      where: { reversedAt: null, reversalOfId: null },
       select: {
         id: true, type: true, amount: true, currency: true, obligation: true,
         obligationKind: true, accountId: true, toAccountId: true, settlesId: true,
+      },
+    }),
+    prisma.inventoryItem.findMany({
+      select: {
+        unitCost: true,
+        movements: { select: { quantity: true } },
       },
     }),
   ]);
@@ -28,7 +44,11 @@ export default async function BalanceSheetPage({ params }: { params: Promise<{ l
   if (!currencies.length) currencies.push('IQD');
 
   const rate = await getUsdToIqd();
-  const comb = { cashBank: 0, receivables: 0, payables: 0, capital: 0 };
+  const inventoryValue = inventoryItems.reduce(
+    (s, item) => s + (item.unitCost ?? 0) * item.movements.reduce((sum, m) => sum + m.quantity, 0),
+    0,
+  );
+  const comb = { cashBank: 0, receivables: 0, payables: 0, capital: 0, inventory: inventoryValue };
   for (const cur of currencies) {
     const ce = entries.filter((e) => e.currency === cur);
     const ca = accounts.filter((a) => a.currency === cur);
@@ -39,17 +59,10 @@ export default async function BalanceSheetPage({ params }: { params: Promise<{ l
     comb.payables += convertToIqd(tot.outstandingPayable, cur, rate);
     comb.capital += convertToIqd(tot.capitalIn, cur, rate);
   }
-  const combAssets = comb.cashBank + comb.receivables;
+  const combAssets = comb.cashBank + comb.receivables + comb.inventory;
   const combRetained = combAssets - comb.payables - comb.capital;
   const showCombined = currencies.length > 1;
   const iqd = (n: number) => formatMoney(n, 'IQD', loc);
-
-  const Row = ({ label, value, strong }: { label: string; value: string; strong?: boolean }) => (
-    <div className={`flex justify-between gap-6 py-1 ${strong ? 'border-t font-bold' : 'text-sm'}`}>
-      <span className={strong ? '' : 'text-muted-foreground'}>{label}</span>
-      <span className="tabular-nums">{value}</span>
-    </div>
-  );
 
   return (
     <div className="min-h-screen bg-muted/30">
@@ -87,17 +100,18 @@ export default async function BalanceSheetPage({ params }: { params: Promise<{ l
             <div className="grid gap-6 sm:grid-cols-2">
               <div>
                 <div className="mb-1 text-sm font-semibold text-primary">{t('assets')}</div>
-                <Row label={t('cashBank')} value={iqd(comb.cashBank)} />
-                <Row label={t('receivables')} value={iqd(comb.receivables)} />
-                <Row label={t('totalAssets')} value={iqd(combAssets)} strong />
+                <BalanceRow label={t('cashBank')} value={iqd(comb.cashBank)} />
+                <BalanceRow label={t('receivables')} value={iqd(comb.receivables)} />
+                <BalanceRow label={t('inventoryValue')} value={iqd(comb.inventory)} />
+                <BalanceRow label={t('totalAssets')} value={iqd(combAssets)} strong />
               </div>
               <div>
                 <div className="mb-1 text-sm font-semibold text-primary">{t('liabilities')}</div>
-                <Row label={t('payables')} value={iqd(comb.payables)} />
+                <BalanceRow label={t('payables')} value={iqd(comb.payables)} />
                 <div className="mb-1 mt-4 text-sm font-semibold text-primary">{t('equity')}</div>
-                <Row label={t('capital')} value={iqd(comb.capital)} />
-                <Row label={t('retained')} value={iqd(combRetained)} />
-                <Row label={t('totalEquity')} value={iqd(comb.capital + combRetained)} strong />
+                <BalanceRow label={t('capital')} value={iqd(comb.capital)} />
+                <BalanceRow label={t('retained')} value={iqd(combRetained)} />
+                <BalanceRow label={t('totalEquity')} value={iqd(comb.capital + combRetained)} strong />
               </div>
             </div>
           </div>
@@ -109,7 +123,7 @@ export default async function BalanceSheetPage({ params }: { params: Promise<{ l
           const tot = financeTotals(ce);
           const cashBank = netCash(ca, ce);
           const unassigned = unassignedCash(ce);
-          const totalAssets = cashBank + tot.outstandingReceivable;
+          const totalAssets = cashBank + tot.outstandingReceivable + (cur === 'IQD' ? inventoryValue : 0);
           const retained = totalAssets - tot.outstandingPayable - tot.capitalIn;
           const m = (n: number) => formatMoney(n, cur, loc);
           return (
@@ -118,9 +132,10 @@ export default async function BalanceSheetPage({ params }: { params: Promise<{ l
               <div className="grid gap-6 sm:grid-cols-2">
                 <div>
                   <div className="mb-1 text-sm font-semibold text-primary">{t('assets')}</div>
-                  <Row label={t('cashBank')} value={m(cashBank)} />
-                  <Row label={t('receivables')} value={m(tot.outstandingReceivable)} />
-                  <Row label={t('totalAssets')} value={m(totalAssets)} strong />
+                  <BalanceRow label={t('cashBank')} value={m(cashBank)} />
+                  <BalanceRow label={t('receivables')} value={m(tot.outstandingReceivable)} />
+                  {cur === 'IQD' ? <BalanceRow label={t('inventoryValue')} value={m(inventoryValue)} /> : null}
+                  <BalanceRow label={t('totalAssets')} value={m(totalAssets)} strong />
                   {ca.length || unassigned ? (
                     <div className="mt-3 space-y-0.5 text-xs text-muted-foreground">
                       {ca.map((a) => (
@@ -140,12 +155,12 @@ export default async function BalanceSheetPage({ params }: { params: Promise<{ l
                 </div>
                 <div>
                   <div className="mb-1 text-sm font-semibold text-primary">{t('liabilities')}</div>
-                  <Row label={t('payables')} value={m(tot.outstandingPayable)} />
-                  <Row label={t('totalLiabilities')} value={m(tot.outstandingPayable)} strong />
+                  <BalanceRow label={t('payables')} value={m(tot.outstandingPayable)} />
+                  <BalanceRow label={t('totalLiabilities')} value={m(tot.outstandingPayable)} strong />
                   <div className="mb-1 mt-4 text-sm font-semibold text-primary">{t('equity')}</div>
-                  <Row label={t('capital')} value={m(tot.capitalIn)} />
-                  <Row label={t('retained')} value={m(retained)} />
-                  <Row label={t('totalEquity')} value={m(tot.capitalIn + retained)} strong />
+                  <BalanceRow label={t('capital')} value={m(tot.capitalIn)} />
+                  <BalanceRow label={t('retained')} value={m(retained)} />
+                  <BalanceRow label={t('totalEquity')} value={m(tot.capitalIn + retained)} strong />
                 </div>
               </div>
             </div>

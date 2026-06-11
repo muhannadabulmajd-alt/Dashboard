@@ -4,7 +4,6 @@ import { getBatchRows } from '@/server/db/repositories/roastery.repo';
 import * as M from '@/lib/metrics';
 import { enumLabel } from '@/lib/enums';
 import { formatNumber, formatPercent } from '@/lib/money';
-import { formatDate } from '@/lib/dates';
 import { KpiCard } from '@/components/kpi/KpiCard';
 import { DonutChartCard, BarChartCard } from '@/components/charts/Charts';
 import { DataTable } from '@/components/data-table/DataTable';

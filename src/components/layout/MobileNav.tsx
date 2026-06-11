@@ -2,16 +2,13 @@
 
 import { useEffect, useState } from 'react';
 import { Menu, X, Coffee } from 'lucide-react';
-import { usePathname } from '@/i18n/navigation';
 import { NavLinks, type NavGroup } from './NavLinks';
 
 /** Hamburger + slide-in drawer that mirrors the desktop sidebar on small screens. */
 export function MobileNav({ groups, title }: { groups: NavGroup[]; title: string }) {
   const [open, setOpen] = useState(false);
-  const pathname = usePathname();
 
-  // Close on navigation (a link tap changes the path) and on Escape.
-  useEffect(() => setOpen(false), [pathname]);
+  // Close on Escape.
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
@@ -55,7 +52,7 @@ export function MobileNav({ groups, title }: { groups: NavGroup[]; title: string
               </button>
             </div>
             <div className="flex-1 overflow-y-auto p-3">
-              <NavLinks groups={groups} />
+              <NavLinks groups={groups} onNavigate={() => setOpen(false)} />
             </div>
           </div>
         </div>

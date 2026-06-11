@@ -17,7 +17,7 @@ export function RecordActions({
   deleteAction,
   labels,
 }: {
-  editHref: string;
+  editHref?: string;
   isActive?: boolean;
   archiveAction?: () => Promise<void>;
   deleteAction?: () => Promise<void>;
@@ -25,10 +25,12 @@ export function RecordActions({
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <Link href={editHref} className={btn}>
-        <Pencil className="size-3.5" />
-        {labels.edit}
-      </Link>
+      {editHref ? (
+        <Link href={editHref} className={btn}>
+          <Pencil className="size-3.5" />
+          {labels.edit}
+        </Link>
+      ) : null}
 
       {archiveAction && isActive !== undefined ? (
         <form action={archiveAction}>

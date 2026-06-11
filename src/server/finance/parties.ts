@@ -15,6 +15,10 @@ const schema = z.object({
   type: z.enum(PARTY_TYPES),
   phone: z.string().optional(),
   email: z.string().optional(),
+  address: z.string().optional(),
+  branchId: z.string().optional(),
+  openingPayable: z.coerce.number().int().default(0),
+  openingReceivable: z.coerce.number().int().default(0),
   notes: z.string().optional(),
   equityShare: z.coerce.number().optional(),
 });
@@ -25,6 +29,10 @@ function parse(fd: FormData) {
     type: reqField(fd, 'type'),
     phone: optField(fd, 'phone'),
     email: optField(fd, 'email'),
+    address: optField(fd, 'address'),
+    branchId: optField(fd, 'branchId'),
+    openingPayable: optField(fd, 'openingPayable'),
+    openingReceivable: optField(fd, 'openingReceivable'),
     notes: optField(fd, 'notes'),
     equityShare: optField(fd, 'equityShare'),
   });
@@ -36,7 +44,7 @@ export async function createParty(_prev: ActionState, fd: FormData): Promise<Act
   const r = parse(fd);
   if (!r.success) return { error: 'invalid' };
   const locale = reqField(fd, 'locale') || 'ar';
-  const row = await prisma.party.create({ data: r.data });
+  const row = await prisma.party.create({ data: { ...r.data, branchId: r.data.branchId ?? null } });
   await audit(user.id, 'CREATE', 'Party', { id: row.id, name: row.name });
   revalidatePath(LIST, 'page');
   redirect(`/${locale}/finance/parties/${row.id}`);
@@ -52,7 +60,7 @@ export async function updateParty(
   const r = parse(fd);
   if (!r.success) return { error: 'invalid' };
   const locale = reqField(fd, 'locale') || 'ar';
-  await prisma.party.update({ where: { id }, data: r.data });
+  await prisma.party.update({ where: { id }, data: { ...r.data, branchId: r.data.branchId ?? null } });
   await audit(user.id, 'UPDATE', 'Party', { id, name: r.data.name });
   revalidatePath(LIST, 'page');
   redirect(`/${locale}/finance/parties/${id}`);

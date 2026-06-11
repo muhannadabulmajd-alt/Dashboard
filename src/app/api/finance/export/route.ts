@@ -3,11 +3,51 @@ import { getCurrentUser } from '@/server/auth/session';
 import { can } from '@/lib/rbac';
 import { prisma } from '@/server/db/client';
 import { toCsv } from '@/server/export/csv';
-import { enumLabel } from '@/lib/enums';
+import { enumLabel, FINANCE_TYPES } from '@/lib/enums';
 import { formatDate } from '@/lib/dates';
 import { toMajor, type AppLocale } from '@/lib/money';
-import { accountBalance, netCash, unassignedCash, financeTotals, type FinanceEntryLike } from '@/lib/metrics/finance';
-import type { ObligationKind, Currency } from '@prisma/client';
+import { accountBalance, netCash, unassignedCash, financeTotals, signedEffect, type FinanceEntryLike } from '@/lib/metrics/finance';
+import type { ObligationKind, Currency, FinanceType, Prisma } from '@prisma/client';
+
+function ledgerWhere(p: URLSearchParams): Prisma.FinanceEntryWhereInput {
+  const q = (p.get('q') ?? '').trim();
+  const type = p.get('type') ?? '';
+  const status = p.get('status') ?? '';
+  const accountId = p.get('accountId') ?? '';
+  const partyId = p.get('partyId') ?? '';
+  const branchId = p.get('branchId') ?? '';
+  const and: Prisma.FinanceEntryWhereInput[] = [];
+  if (q) {
+    and.push({
+      OR: [
+        { id: { contains: q } },
+        { reference: { contains: q } },
+        { description: { contains: q } },
+        { importKey: { contains: q } },
+        { orderId: { contains: q } },
+        { party: { name: { contains: q } } },
+      ],
+    });
+  }
+  if (FINANCE_TYPES.includes(type as FinanceType)) and.push({ type: type as FinanceType });
+  if (accountId) and.push({ OR: [{ accountId }, { toAccountId: accountId }] });
+  if (partyId) and.push({ partyId });
+  if (branchId) and.push({ branchId });
+  if (status === 'paid') and.push({ obligation: false, reversedAt: null, reversalOfId: null });
+  if (status === 'due') and.push({ obligation: true, reversedAt: null, reversalOfId: null });
+  if (status === 'reversed') and.push({ reversedAt: { not: null } });
+  if (status === 'reversal') and.push({ reversalOfId: { not: null } });
+  return and.length ? { AND: and } : {};
+}
+
+function ledgerOrderBy(p: URLSearchParams): Prisma.FinanceEntryOrderByWithRelationInput {
+  const sort = p.get('sort') ?? 'date_desc';
+  if (sort === 'date_asc') return { date: 'asc' };
+  if (sort === 'amount_desc') return { amount: 'desc' };
+  if (sort === 'amount_asc') return { amount: 'asc' };
+  if (sort === 'type') return { type: 'asc' };
+  return { date: 'desc' };
+}
 
 export async function GET(req: NextRequest) {
   const user = await getCurrentUser();
@@ -25,8 +65,8 @@ export async function GET(req: NextRequest) {
   if (type === 'dues') {
     const kind = p.get('kind') as ObligationKind | null;
     const obligations = await prisma.financeEntry.findMany({
-      where: { obligation: true, ...(kind ? { obligationKind: kind } : {}) },
-      include: { party: { select: { name: true } }, settlements: { select: { amount: true } } },
+      where: { obligation: true, reversedAt: null, reversalOfId: null, ...(kind ? { obligationKind: kind } : {}) },
+      include: { party: { select: { name: true } }, settlements: { where: { reversedAt: null, reversalOfId: null }, select: { amount: true } } },
       orderBy: { dueDate: 'asc' },
     });
     headers = ['Kind', 'Party', 'Description', 'Amount', 'Paid', 'Outstanding', 'Currency', 'DueDate'];
@@ -54,6 +94,7 @@ export async function GET(req: NextRequest) {
         select: {
           id: true, type: true, amount: true, currency: true, obligation: true,
           obligationKind: true, accountId: true, toAccountId: true, settlesId: true,
+          reversedAt: true, reversalOfId: true,
         },
       }),
     ]);
@@ -80,20 +121,41 @@ export async function GET(req: NextRequest) {
     }
     filename = 'balance-sheet';
   } else {
-    const entries = await prisma.financeEntry.findMany({
-      orderBy: { date: 'desc' },
-      include: { party: { select: { name: true } }, account: { select: { name: true } } },
-    });
-    headers = ['Date', 'Type', 'Status', 'Amount', 'Currency', 'Account', 'Party', 'Category', 'Reference', 'Description'];
+    const [entries, branches, users] = await Promise.all([
+      prisma.financeEntry.findMany({
+        where: ledgerWhere(p),
+        orderBy: ledgerOrderBy(p),
+        include: {
+          party: { select: { name: true } },
+          account: { select: { name: true } },
+          toAccount: { select: { name: true } },
+        },
+      }),
+      prisma.branch.findMany({ select: { id: true, nameEn: true, nameAr: true } }),
+      prisma.user.findMany({ select: { id: true, name: true, email: true } }),
+    ]);
+    const branchName = new Map(branches.map((b) => [b.id, locale === 'ar' ? b.nameAr : b.nameEn]));
+    const userName = new Map(users.map((u) => [u.id, u.name || u.email]));
+    headers = [
+      'Transaction ID', 'Date', 'Type', 'Money in', 'Money out', 'Currency',
+      'Account', 'Party', 'Category', 'Branch', 'Related', 'Created by',
+      'Status', 'Attachment', 'Reference', 'Description',
+    ];
     rows = entries.map((e) => [
+      e.id,
       formatDate(e.date, locale),
       enumLabel(e.type, locale),
-      e.obligation ? 'Due' : 'Paid',
-      toMajor(e.amount, e.currency),
+      !e.reversedAt && !e.reversalOfId && !e.obligation && (signedEffect(e) > 0 || e.type === 'TRANSFER') ? toMajor(e.amount, e.currency) : '',
+      !e.reversedAt && !e.reversalOfId && !e.obligation && (signedEffect(e) < 0 || e.type === 'TRANSFER') ? toMajor(e.amount, e.currency) : '',
       e.currency,
-      e.account?.name ?? '',
+      e.type === 'TRANSFER' ? `${e.account?.name ?? ''} -> ${e.toAccount?.name ?? ''}` : e.account?.name ?? '',
       e.party?.name ?? '',
       e.categoryType ? enumLabel(e.categoryType, locale) : '',
+      e.branchId ? branchName.get(e.branchId) ?? '' : '',
+      e.orderId ?? e.importKey ?? e.reference ?? '',
+      e.createdById ? userName.get(e.createdById) ?? e.createdById : '',
+      e.reversalOfId ? 'Reversal marker' : e.reversedAt ? 'Reversed' : e.obligation ? 'Due' : 'Paid',
+      e.attachmentUrl ?? '',
       e.reference ?? '',
       e.description ?? '',
     ]);

@@ -22,6 +22,7 @@ export async function getBatchRows(
   scope: Scope,
   _range: ResolvedRange,
 ): Promise<BatchRow[]> {
+  void _range;
   // Return every batch (branch-scoped), including green-only logged ones with no
   // roast results yet. The page computes roast metrics from the roasted subset.
   const rows = await prisma.roastBatch.findMany({

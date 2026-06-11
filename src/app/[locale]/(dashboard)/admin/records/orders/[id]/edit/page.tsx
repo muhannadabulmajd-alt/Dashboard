@@ -19,12 +19,17 @@ export default async function EditOrderPage({
   const { locale } = await getPageContext(params, searchParams, 'manage:orders');
   const { id } = await params;
   const t = await getTranslations('records');
-  const [catalog, channels, governorates, fulfillment, statuses] = await Promise.all([
+  const [catalog, channels, governorates, fulfillment, statuses, accounts, financeEntry] = await Promise.all([
     getOrderCatalog(locale, t('ungrouped')),
     getListOptions('channel', locale),
     getListOptions('governorate', locale),
     getListOptions('fulfillment', locale),
     getListOptions('orderStatus', locale),
+    prisma.financeAccount.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true, currency: true } }),
+    prisma.financeEntry.findFirst({
+      where: { orderId: id, importKey: { startsWith: `ORD:${id}:` }, reversedAt: null, reversalOfId: null },
+      select: { obligation: true, accountId: true, dueDate: true },
+    }),
   ]);
 
   const o = await prisma.order.findUnique({
@@ -47,6 +52,9 @@ export default async function EditOrderPage({
       orderDiscount: String(o.orderDiscount),
       extraCharges: String(o.extraCharges),
       notes: o.notes ?? '',
+      financeMode: financeEntry ? (financeEntry.obligation ? 'CREDIT' : 'PAID') : 'CREDIT',
+      financeAccountId: financeEntry?.accountId ?? '',
+      financeDueDate: financeEntry?.dueDate ? financeEntry.dueDate.toISOString().slice(0, 10) : o.placedAt.toISOString().slice(0, 10),
     },
     lines: o.lines.map(
       (l): OrderLineInput => ({
@@ -79,6 +87,12 @@ export default async function EditOrderPage({
     orderDiscount: t('f.orderDiscount'),
     extraCharges: t('f.extraCharges'),
     notes: t('f.notes'),
+    financeMode: t('f.financeMode'),
+    financeCredit: t('f.financeCredit'),
+    financePaid: t('f.financePaid'),
+    financeNone: t('f.financeNone'),
+    paymentAccount: t('f.paymentAccount'),
+    paymentDueDate: t('f.paymentDueDate'),
     addLine: t('addLine'),
     removeLine: t('removeLine'),
     cancel: t('cancel'),
@@ -103,6 +117,7 @@ export default async function EditOrderPage({
         governorateOptions={governorates}
         fulfillmentOptions={fulfillment}
         statusOptions={statuses}
+        accountOptions={accounts.map((a) => ({ value: a.id, label: `${a.name} (${a.currency})` }))}
         labels={labels}
         errors={errors}
         cancelHref={`/admin/records/orders/${id}`}

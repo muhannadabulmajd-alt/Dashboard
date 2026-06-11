@@ -17,6 +17,7 @@ const schema = z.object({
   bankName: z.string().optional(),
   branchId: z.string().optional(),
   openingBalance: z.coerce.number().int().default(0),
+  notes: z.string().optional(),
 });
 
 function parse(fd: FormData) {
@@ -27,6 +28,7 @@ function parse(fd: FormData) {
     bankName: optField(fd, 'bankName'),
     branchId: optField(fd, 'branchId'),
     openingBalance: optField(fd, 'openingBalance'),
+    notes: optField(fd, 'notes'),
   });
 }
 

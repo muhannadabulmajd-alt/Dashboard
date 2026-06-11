@@ -4,10 +4,12 @@ import { getPageContext } from '@/server/page-context';
 import { prisma } from '@/server/db/client';
 import { enumLabel } from '@/lib/enums';
 import { formatMoney } from '@/lib/money';
+import { formatDate } from '@/lib/dates';
 import { accountBalance, type FinanceEntryLike } from '@/lib/metrics/finance';
 import { Badge, PageHeader } from '@/components/ui/primitives';
 import { BackLink, DetailGrid, type DetailField } from '@/components/records/parts';
 import { RecordActions } from '@/components/records/RecordActions';
+import { DataTable, type Column } from '@/components/data-table/DataTable';
 import { archiveAccount, deleteAccount } from '@/server/finance/accounts';
 
 export default async function FinanceAccountDetailPage({
@@ -31,7 +33,10 @@ export default async function FinanceAccountDetailPage({
       select: {
         id: true, type: true, amount: true, currency: true, obligation: true,
         obligationKind: true, accountId: true, toAccountId: true, settlesId: true,
+        reversedAt: true, reversalOfId: true,
+        date: true, description: true, reference: true, party: { select: { name: true } },
       },
+      orderBy: { date: 'desc' },
     }),
     a.branchId ? prisma.branch.findUnique({ where: { id: a.branchId }, select: { nameEn: true, nameAr: true } }) : null,
   ]);
@@ -46,6 +51,7 @@ export default async function FinanceAccountDetailPage({
     { label: t('f.branch'), value: branchName },
     { label: t('f.opening'), value: formatMoney(a.openingBalance, a.currency, locale) },
     { label: t('f.balance'), value: formatMoney(balance, a.currency, locale) },
+    { label: t('f.notes'), value: a.notes ?? '—' },
     {
       label: t('f.status'),
       value: (
@@ -53,6 +59,20 @@ export default async function FinanceAccountDetailPage({
       ),
     },
   ];
+  const cols: Column[] = [
+    { label: t('f.date') },
+    { label: t('f.type') },
+    { label: t('f.party') },
+    { label: t('f.description') },
+    { label: t('f.amount'), align: 'end' },
+  ];
+  const rows = entries.map((e) => [
+    formatDate(e.date, locale),
+    enumLabel(e.type, locale),
+    e.party?.name ?? '—',
+    e.reversalOfId ? t('reversalMarker') : e.reversedAt ? t('reversed') : e.description ?? e.reference ?? '—',
+    formatMoney(e.amount, e.currency, locale),
+  ]);
 
   return (
     <>
@@ -72,6 +92,10 @@ export default async function FinanceAccountDetailPage({
         }}
       />
       <DetailGrid items={items} />
+      <div className="mt-4 space-y-2">
+        <h3 className="text-sm font-semibold">{t('statement')}</h3>
+        <DataTable columns={cols} rows={rows} emptyLabel={tr('none')} />
+      </div>
     </>
   );
 }

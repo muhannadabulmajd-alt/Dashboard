@@ -58,7 +58,8 @@ export async function updateBatch(
   if (!r.success) return { error: 'invalid' };
   const locale = reqField(fd, 'locale') || 'ar';
   // Batch number is the permanent key — immutable after creation (CR-5).
-  const { batchNumber: _immutable, ...data } = r.data;
+  const { batchNumber, ...data } = r.data;
+  void batchNumber;
   await prisma.roastBatch.update({ where: { id }, data });
   await audit(user.id, 'UPDATE', 'RoastBatch', { id });
   revalidatePath(LIST, 'page');

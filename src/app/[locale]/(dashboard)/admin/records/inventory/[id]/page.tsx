@@ -27,13 +27,21 @@ export default async function InventoryDetailPage({
   const { locale } = await getPageContext(params, searchParams, 'manage:inventory');
   const { id } = await params;
   const t = await getTranslations('records');
-  const item = await prisma.inventoryItem.findUnique({
-    where: { id },
-    include: {
-      movements: { orderBy: { occurredAt: 'desc' } },
-      costLayers: { orderBy: { receivedAt: 'asc' } },
-    },
-  });
+  const [item, accounts, parties] = await Promise.all([
+    prisma.inventoryItem.findUnique({
+      where: { id },
+      include: {
+        movements: { orderBy: { occurredAt: 'desc' } },
+        costLayers: { orderBy: { receivedAt: 'asc' } },
+      },
+    }),
+    prisma.financeAccount.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true, currency: true } }),
+    prisma.party.findMany({
+      where: { isActive: true, type: { in: ['SUPPLIER', 'OTHER'] } },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true, type: true },
+    }),
+  ]);
   if (!item) notFound();
 
   const name = locale === 'ar' ? item.nameAr : item.nameEn;
@@ -98,6 +106,35 @@ export default async function InventoryDetailPage({
     { name: 'receivedAt', label: t('f.receivedAt'), type: 'date', required: true },
     { name: 'expiryDate', label: t('f.expiryDate'), type: 'date' },
     { name: 'reference', label: t('f.reference'), type: 'text' },
+    {
+      name: 'paymentMode',
+      label: t('f.paymentMode'),
+      type: 'select',
+      required: true,
+      options: [
+        { value: 'CREDIT', label: t('f.purchaseCredit') },
+        { value: 'PAID', label: t('f.purchasePaid') },
+      ],
+    },
+    {
+      name: 'accountId',
+      label: t('f.paymentAccount'),
+      type: 'select',
+      options: accounts.map((a) => ({ value: a.id, label: `${a.name} (${a.currency})` })),
+      showWhen: { field: 'paymentMode', in: ['PAID'] },
+    },
+    {
+      name: 'partyId',
+      label: t('f.supplier'),
+      type: 'select',
+      options: parties.map((p) => ({ value: p.id, label: p.name })),
+    },
+    {
+      name: 'dueDate',
+      label: t('f.dueDate'),
+      type: 'date',
+      showWhen: { field: 'paymentMode', in: ['CREDIT'] },
+    },
   ];
   const receiveErrors = { invalid: t('err.invalid'), forbidden: t('err.forbidden') };
 
@@ -183,7 +220,7 @@ export default async function InventoryDetailPage({
         <RecordForm
           action={receiveStock.bind(null, item.id)}
           fields={receiveFields}
-          initial={{ receivedAt: dateInputValue() }}
+          initial={{ receivedAt: dateInputValue(), paymentMode: 'CREDIT', dueDate: dateInputValue() }}
           locale={locale}
           submitLabel={t('receiveSubmit')}
           cancelHref={`/admin/records/inventory/${item.id}`}

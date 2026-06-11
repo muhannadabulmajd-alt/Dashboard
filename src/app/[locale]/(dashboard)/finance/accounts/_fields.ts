@@ -22,5 +22,6 @@ export function accountFields(
     { name: 'bankName', label: t('f.bank'), type: 'text' },
     { name: 'branchId', label: t('f.branch'), type: 'select', options: branchOptions },
     { name: 'openingBalance', label: t('f.opening'), type: 'number' },
+    { name: 'notes', label: t('f.notes'), type: 'text' },
   ];
 }

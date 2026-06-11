@@ -6,9 +6,13 @@ import { z } from 'zod';
 import { prisma } from '@/server/db/client';
 import { INVENTORY_CATEGORIES } from '@/lib/enums';
 import { syncActiveCost, recomputeProductsForItem } from '@/server/inventory/fifo';
+import { syncInventoryReceiptFinance } from '@/server/finance/sync';
 import { requireCap, audit, reqField, optField, type ActionState } from './shared';
 
 const LIST = '/[locale]/(dashboard)/admin/records/inventory';
+const FINANCE = '/[locale]/(dashboard)/finance';
+const LEDGER = '/[locale]/(dashboard)/finance/ledger';
+const DUES = '/[locale]/(dashboard)/finance/dues';
 const CAP = 'manage:inventory' as const;
 
 const schema = z.object({
@@ -78,6 +82,10 @@ const receiveSchema = z.object({
   receivedAt: z.coerce.date(),
   expiryDate: z.coerce.date().optional(),
   reference: z.string().optional(),
+  paymentMode: z.enum(['CREDIT', 'PAID']).default('CREDIT'),
+  accountId: z.string().optional(),
+  partyId: z.string().optional(),
+  dueDate: z.coerce.date().optional(),
 });
 
 /**
@@ -95,8 +103,13 @@ export async function receiveStock(itemId: string, _prev: ActionState, fd: FormD
     receivedAt: reqField(fd, 'receivedAt'),
     expiryDate: optField(fd, 'expiryDate'),
     reference: optField(fd, 'reference'),
+    paymentMode: optField(fd, 'paymentMode') || 'CREDIT',
+    accountId: optField(fd, 'accountId'),
+    partyId: optField(fd, 'partyId'),
+    dueDate: optField(fd, 'dueDate'),
   });
   if (!r.success) return { error: 'invalid' };
+  if (r.data.paymentMode === 'PAID' && !r.data.accountId) return { error: 'invalid' };
   const locale = reqField(fd, 'locale') || 'ar';
   await prisma.$transaction(async (tx) => {
     await tx.inventoryCostLayer.create({
@@ -107,7 +120,7 @@ export async function receiveStock(itemId: string, _prev: ActionState, fd: FormD
         receivedAt: r.data.receivedAt,
       },
     });
-    await tx.stockMovement.create({
+    const movement = await tx.stockMovement.create({
       data: {
         inventoryItemId: itemId,
         occurredAt: r.data.receivedAt,
@@ -117,10 +130,26 @@ export async function receiveStock(itemId: string, _prev: ActionState, fd: FormD
         reference: r.data.reference ?? null,
       },
     });
+    await syncInventoryReceiptFinance(tx, {
+      movementId: movement.id,
+      inventoryItemId: itemId,
+      quantity: r.data.qtyReceived,
+      unitCost: r.data.unitCost,
+      receivedAt: r.data.receivedAt,
+      paymentMode: r.data.paymentMode,
+      accountId: r.data.accountId,
+      partyId: r.data.partyId,
+      dueDate: r.data.dueDate,
+      reference: r.data.reference,
+      createdById: user.id,
+    });
   });
   await syncActiveCost(itemId);
   await audit(user.id, 'RECEIVE', 'InventoryItem', { id: itemId, qty: r.data.qtyReceived, unitCost: r.data.unitCost });
   revalidatePath(LIST, 'page');
+  revalidatePath(FINANCE, 'page');
+  revalidatePath(LEDGER, 'page');
+  revalidatePath(DUES, 'page');
   redirect(`/${locale}/admin/records/inventory/${itemId}`);
 }
 

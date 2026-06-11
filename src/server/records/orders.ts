@@ -7,9 +7,13 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/server/db/client';
 import { FULFILLMENT_METHODS } from '@/lib/enums';
 import { syncActiveCostForProducts } from '@/server/inventory/fifo';
+import { closeOrderFinance, syncOrderFinance, type FinanceSyncMode } from '@/server/finance/sync';
 import { requireCap, audit, reqField, optField, type ActionState } from './shared';
 
 const LIST = '/[locale]/(dashboard)/admin/records/orders';
+const FINANCE = '/[locale]/(dashboard)/finance';
+const LEDGER = '/[locale]/(dashboard)/finance/ledger';
+const DUES = '/[locale]/(dashboard)/finance/dues';
 const CAP = 'manage:orders' as const;
 
 type LineData = {
@@ -66,6 +70,9 @@ const headerSchema = z.object({
   orderDiscount: z.coerce.number().int().nonnegative().default(0),
   extraCharges: z.coerce.number().int().nonnegative().default(0),
   notes: z.string().optional(),
+  financeMode: z.enum(['NONE', 'CREDIT', 'PAID']).default('CREDIT'),
+  financeAccountId: z.string().optional(),
+  financeDueDate: z.coerce.date().optional(),
 });
 
 const lineSchema = z.array(
@@ -91,6 +98,9 @@ function parseHeader(fd: FormData) {
     orderDiscount: optField(fd, 'orderDiscount'),
     extraCharges: optField(fd, 'extraCharges'),
     notes: optField(fd, 'notes'),
+    financeMode: optField(fd, 'financeMode') || 'CREDIT',
+    financeAccountId: optField(fd, 'financeAccountId'),
+    financeDueDate: optField(fd, 'financeDueDate'),
   });
 }
 
@@ -115,6 +125,7 @@ export async function createOrder(_prev: ActionState, fd: FormData): Promise<Act
   const locale = reqField(fd, 'locale') || 'ar';
   if (await prisma.order.findUnique({ where: { orderNumber: h.data.orderNumber }, select: { id: true } }))
     return { error: 'exists' };
+  if (h.data.financeMode === 'PAID' && !h.data.financeAccountId) return { error: 'invalid' };
 
   // Resolve products by SKU and build line rows (mirrors the CSV importer).
   const lineData: LineData[] = [];
@@ -170,12 +181,21 @@ export async function createOrder(_prev: ActionState, fd: FormData): Promise<Act
     // Only completed orders consume stock (§11.3). Pending/cancelled/returned
     // don't deduct — and editing to one of those (updateOrder) reverses them.
     if (h.data.status === 'COMPLETED') await applySoldMovements(tx, o.id, h.data.placedAt, lineData);
+    await syncOrderFinance(tx, o.id, {
+      mode: h.data.financeMode as FinanceSyncMode,
+      accountId: h.data.financeAccountId,
+      dueDate: h.data.financeDueDate,
+      createdById: user.id,
+    });
     return o;
   });
   // Stock consumption changed → roll each linked item's active FIFO cost (§8).
   await syncActiveCostForProducts(lineData.map((l) => l.productId));
   await audit(user.id, 'CREATE', 'Order', { orderNumber: h.data.orderNumber, lines: lineData.length });
   revalidatePath(LIST, 'page');
+  revalidatePath(FINANCE, 'page');
+  revalidatePath(LEDGER, 'page');
+  revalidatePath(DUES, 'page');
   redirect(`/${locale}/admin/records/orders/${order.id}`);
 }
 
@@ -185,6 +205,7 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
   const h = parseHeader(fd);
   if (!h.success) return { error: 'invalid' };
   const locale = reqField(fd, 'locale') || 'ar';
+  if (h.data.financeMode === 'PAID' && !h.data.financeAccountId) return { error: 'invalid' };
 
   // Full edit (CR-2): the submitted line items replace the existing ones and
   // every total is recomputed, so reports/invoice stay in sync automatically.
@@ -251,20 +272,35 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
     });
     // Prior deductions were cleared above; re-apply only if still completed.
     if (h.data.status === 'COMPLETED') await applySoldMovements(tx, id, h.data.placedAt, lineData);
+    await syncOrderFinance(tx, id, {
+      mode: h.data.financeMode as FinanceSyncMode,
+      accountId: h.data.financeAccountId,
+      dueDate: h.data.financeDueDate,
+      createdById: user.id,
+    });
   });
   // Re-derive FIFO cost for items touched before or after the edit (a removed
   // line reverses its consumption; an added line consumes), §8.
   await syncActiveCostForProducts([...oldProductIds, ...lineData.map((l) => l.productId)]);
   await audit(user.id, 'UPDATE', 'Order', { id, lines: lineData.length, gross, discount });
   revalidatePath(LIST, 'page');
+  revalidatePath(FINANCE, 'page');
+  revalidatePath(LEDGER, 'page');
+  revalidatePath(DUES, 'page');
   redirect(`/${locale}/admin/records/orders/${id}`);
 }
 
 export async function deleteOrder(id: string, locale: string): Promise<void> {
   const user = await requireCap(CAP);
   if (!user) return;
-  await prisma.order.delete({ where: { id } }); // lines cascade
+  await prisma.$transaction(async (tx) => {
+    await closeOrderFinance(tx, id);
+    await tx.order.delete({ where: { id } }); // lines cascade
+  });
   await audit(user.id, 'DELETE', 'Order', { id });
   revalidatePath(LIST, 'page');
+  revalidatePath(FINANCE, 'page');
+  revalidatePath(LEDGER, 'page');
+  revalidatePath(DUES, 'page');
   redirect(`/${locale}/admin/records/orders`);
 }

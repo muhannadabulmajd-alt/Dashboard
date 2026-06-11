@@ -1,5 +1,6 @@
 import { getTranslations } from 'next-intl/server';
 import { getPageContext } from '@/server/page-context';
+import { prisma } from '@/server/db/client';
 import { PageHeader } from '@/components/ui/primitives';
 import { BackLink } from '@/components/records/parts';
 import { OrderForm } from '@/components/records/OrderForm';
@@ -18,12 +19,13 @@ export default async function NewOrderPage({
   const t = await getTranslations('records');
   // Dropdowns come from the managed system lists (§9) — relabels, reordering
   // and user-added values all apply here.
-  const [catalog, channels, governorates, fulfillment, statuses] = await Promise.all([
+  const [catalog, channels, governorates, fulfillment, statuses, accounts] = await Promise.all([
     getOrderCatalog(locale, t('ungrouped')),
     getListOptions('channel', locale),
     getListOptions('governorate', locale),
     getListOptions('fulfillment', locale),
     getListOptions('orderStatus', locale),
+    prisma.financeAccount.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true, currency: true } }),
   ]);
 
   const labels = {
@@ -47,6 +49,12 @@ export default async function NewOrderPage({
     orderDiscount: t('f.orderDiscount'),
     extraCharges: t('f.extraCharges'),
     notes: t('f.notes'),
+    financeMode: t('f.financeMode'),
+    financeCredit: t('f.financeCredit'),
+    financePaid: t('f.financePaid'),
+    financeNone: t('f.financeNone'),
+    paymentAccount: t('f.paymentAccount'),
+    paymentDueDate: t('f.paymentDueDate'),
     addLine: t('addLine'),
     removeLine: t('removeLine'),
     cancel: t('cancel'),
@@ -70,6 +78,7 @@ export default async function NewOrderPage({
         governorateOptions={governorates}
         fulfillmentOptions={fulfillment}
         statusOptions={statuses}
+        accountOptions={accounts.map((a) => ({ value: a.id, label: `${a.name} (${a.currency})` }))}
         labels={labels}
         errors={errors}
         cancelHref="/admin/records/orders"

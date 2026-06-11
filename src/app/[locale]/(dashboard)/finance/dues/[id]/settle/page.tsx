@@ -22,9 +22,9 @@ export default async function SettlePage({
 
   const ob = await prisma.financeEntry.findUnique({
     where: { id },
-    include: { party: true, settlements: { select: { amount: true } } },
+    include: { party: true, settlements: { where: { reversedAt: null, reversalOfId: null }, select: { amount: true } } },
   });
-  if (!ob || !ob.obligation) notFound();
+  if (!ob || ob.reversedAt || ob.reversalOfId || !ob.obligation) notFound();
 
   const paid = ob.settlements.reduce((s, x) => s + x.amount, 0);
   const outstanding = Math.max(0, ob.amount - paid);

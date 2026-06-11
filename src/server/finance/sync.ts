@@ -1,0 +1,239 @@
+import 'server-only';
+import type { Prisma } from '@prisma/client';
+
+type Tx = Prisma.TransactionClient;
+
+export type FinanceSyncMode = 'NONE' | 'CREDIT' | 'PAID';
+
+const ORDER_KEY = (orderId: string, kind: 'AR' | 'PAY') => `ORD:${orderId}:${kind}`;
+const RECEIPT_KEY = (movementId: string) => `INV:${movementId}:PUR`;
+
+async function closeOrDeleteAutoEntry(tx: Tx, importKey: string, description: string) {
+  const row = await tx.financeEntry.findUnique({
+    where: { importKey },
+    include: { settlements: { select: { amount: true } } },
+  });
+  if (!row) return;
+  const settled = row.settlements.reduce((sum, s) => sum + s.amount, 0);
+  if (settled > 0) {
+    await tx.financeEntry.update({
+      where: { id: row.id },
+      data: {
+        amount: settled,
+        description,
+      },
+    });
+    return;
+  }
+  await tx.financeEntry.delete({ where: { id: row.id } });
+}
+
+async function resolveOrderParty(tx: Tx, orderId: string) {
+  const order = await tx.order.findUnique({
+    where: { id: orderId },
+    select: {
+      customer: {
+        select: {
+          externalId: true,
+          phone: true,
+          email: true,
+          nameEn: true,
+          nameAr: true,
+        },
+      },
+    },
+  });
+  const customer = order?.customer;
+  if (!customer) return null;
+
+  const name = customer.nameEn || customer.nameAr || customer.phone || customer.email || customer.externalId;
+  if (!name) return null;
+  const partyMatches: Prisma.PartyWhereInput[] = [{ name }];
+  if (customer.phone) partyMatches.push({ phone: customer.phone });
+  if (customer.email) partyMatches.push({ email: customer.email });
+  const existing = await tx.party.findFirst({
+    where: {
+      type: 'CUSTOMER',
+      OR: partyMatches,
+    },
+    select: { id: true },
+  });
+  if (existing) return existing.id;
+
+  const party = await tx.party.create({
+    data: {
+      name,
+      type: 'CUSTOMER',
+      phone: customer.phone ?? null,
+      email: customer.email ?? null,
+      notes: customer.externalId ? `Synced from customer ${customer.externalId}` : 'Synced from order',
+    },
+    select: { id: true },
+  });
+  return party.id;
+}
+
+export async function syncOrderFinance(
+  tx: Tx,
+  orderId: string,
+  input: {
+    mode: FinanceSyncMode;
+    accountId?: string | null;
+    dueDate?: Date | null;
+    createdById?: string | null;
+  },
+) {
+  const order = await tx.order.findUnique({
+    where: { id: orderId },
+    select: {
+      id: true,
+      orderNumber: true,
+      placedAt: true,
+      status: true,
+      grossAmount: true,
+      discountAmount: true,
+      refundAmount: true,
+      deliveryFee: true,
+      extraCharges: true,
+      branchId: true,
+    },
+  });
+  if (!order) return;
+
+  const amount = Math.max(
+    0,
+    order.grossAmount - order.discountAmount - order.refundAmount + order.deliveryFee + order.extraCharges,
+  );
+  const canSync = amount > 0 && order.status !== 'CANCELLED' && order.status !== 'RETURNED' && order.status !== 'REFUNDED';
+  const arKey = ORDER_KEY(order.id, 'AR');
+  const paidKey = ORDER_KEY(order.id, 'PAY');
+
+  if (!canSync || input.mode === 'NONE') {
+    await closeOrDeleteAutoEntry(tx, arKey, `Closed finance sync for order ${order.orderNumber}`);
+    await closeOrDeleteAutoEntry(tx, paidKey, `Closed finance sync for order ${order.orderNumber}`);
+    return;
+  }
+
+  const isPaid = input.mode === 'PAID';
+  if (isPaid && !input.accountId) return;
+
+  await closeOrDeleteAutoEntry(
+    tx,
+    isPaid ? arKey : paidKey,
+    `Replaced by ${isPaid ? 'paid income' : 'receivable'} sync for order ${order.orderNumber}`,
+  );
+
+  const partyId = await resolveOrderParty(tx, order.id);
+  const importKey = isPaid ? paidKey : arKey;
+  await tx.financeEntry.upsert({
+    where: { importKey },
+    create: {
+      importKey,
+      date: order.placedAt,
+      type: 'INCOME',
+      amount,
+      currency: 'IQD',
+      obligation: !isPaid,
+      obligationKind: isPaid ? null : 'RECEIVABLE',
+      dueDate: isPaid ? null : input.dueDate ?? order.placedAt,
+      accountId: isPaid ? input.accountId ?? null : null,
+      partyId,
+      branchId: order.branchId,
+      orderId: order.id,
+      reference: order.orderNumber,
+      description: isPaid ? `Order paid: ${order.orderNumber}` : `Order receivable: ${order.orderNumber}`,
+      createdById: input.createdById ?? null,
+    },
+    update: {
+      date: order.placedAt,
+      type: 'INCOME',
+      amount,
+      currency: 'IQD',
+      obligation: !isPaid,
+      obligationKind: isPaid ? null : 'RECEIVABLE',
+      dueDate: isPaid ? null : input.dueDate ?? order.placedAt,
+      accountId: isPaid ? input.accountId ?? null : null,
+      partyId,
+      branchId: order.branchId,
+      orderId: order.id,
+      reference: order.orderNumber,
+      description: isPaid ? `Order paid: ${order.orderNumber}` : `Order receivable: ${order.orderNumber}`,
+    },
+  });
+}
+
+export async function closeOrderFinance(tx: Tx, orderId: string) {
+  await closeOrDeleteAutoEntry(tx, ORDER_KEY(orderId, 'AR'), `Closed finance sync for deleted order ${orderId}`);
+  await closeOrDeleteAutoEntry(tx, ORDER_KEY(orderId, 'PAY'), `Closed finance sync for deleted order ${orderId}`);
+}
+
+function categoryForInventory(category: string) {
+  if (category === 'GREEN_COFFEE') return 'GREEN_COFFEE' as const;
+  if (category === 'PACKAGING') return 'PACKAGING' as const;
+  return null;
+}
+
+export async function syncInventoryReceiptFinance(
+  tx: Tx,
+  input: {
+    movementId: string;
+    inventoryItemId: string;
+    quantity: number;
+    unitCost: number;
+    receivedAt: Date;
+    paymentMode: Exclude<FinanceSyncMode, 'NONE'>;
+    accountId?: string | null;
+    partyId?: string | null;
+    dueDate?: Date | null;
+    reference?: string | null;
+    createdById?: string | null;
+  },
+) {
+  const amount = input.quantity * input.unitCost;
+  if (amount <= 0) return;
+  if (input.paymentMode === 'PAID' && !input.accountId) return;
+
+  const item = await tx.inventoryItem.findUnique({
+    where: { id: input.inventoryItemId },
+    select: { nameEn: true, nameAr: true, category: true, branchId: true },
+  });
+  if (!item) return;
+
+  const isPaid = input.paymentMode === 'PAID';
+  const importKey = RECEIPT_KEY(input.movementId);
+  await tx.financeEntry.upsert({
+    where: { importKey },
+    create: {
+      importKey,
+      date: input.receivedAt,
+      type: 'PURCHASE',
+      amount,
+      currency: 'IQD',
+      obligation: !isPaid,
+      obligationKind: isPaid ? null : 'PAYABLE',
+      dueDate: isPaid ? null : input.dueDate ?? input.receivedAt,
+      accountId: isPaid ? input.accountId ?? null : null,
+      partyId: input.partyId ?? null,
+      categoryType: categoryForInventory(item.category),
+      branchId: item.branchId,
+      reference: input.reference ?? null,
+      description: `Inventory purchase: ${item.nameEn || item.nameAr}`,
+      createdById: input.createdById ?? null,
+    },
+    update: {
+      date: input.receivedAt,
+      type: 'PURCHASE',
+      amount,
+      currency: 'IQD',
+      obligation: !isPaid,
+      obligationKind: isPaid ? null : 'PAYABLE',
+      dueDate: isPaid ? null : input.dueDate ?? input.receivedAt,
+      accountId: isPaid ? input.accountId ?? null : null,
+      partyId: input.partyId ?? null,
+      categoryType: categoryForInventory(item.category),
+      branchId: item.branchId,
+      reference: input.reference ?? null,
+      description: `Inventory purchase: ${item.nameEn || item.nameAr}`,
+    },
+  });
+}

@@ -2,10 +2,12 @@ import { getTranslations } from 'next-intl/server';
 import {
   Wallet,
   Landmark,
+  Banknote,
   TrendingDown,
   TrendingUp,
   Clock,
   HandCoins,
+  Package,
   Users,
   BookOpen,
   PieChart,
@@ -17,11 +19,13 @@ import {
 import { getPageContext } from '@/server/page-context';
 import { prisma } from '@/server/db/client';
 import { enumLabel } from '@/lib/enums';
-import { formatMoney, convertToIqd } from '@/lib/money';
+import { formatMoney, convertToIqd, type AppLocale } from '@/lib/money';
 import { can } from '@/lib/rbac';
 import { cn } from '@/lib/utils';
 import { accountBalance, netCash, unassignedCash, financeTotals, type FinanceEntryLike } from '@/lib/metrics/finance';
+import { cogs, grossMargin, netSales } from '@/lib/metrics';
 import { getUsdToIqd } from '@/server/settings';
+import { getOrders, getOrderLines } from '@/server/db/repositories/sales.repo';
 import { setUsdToIqd } from '@/server/finance/settings';
 import { RateEditor } from '@/components/finance/RateEditor';
 import { PageHeader } from '@/components/ui/primitives';
@@ -30,9 +34,19 @@ import { BarChartCard, DonutChartCard } from '@/components/charts/Charts';
 import { Link } from '@/i18n/navigation';
 import type { Currency, ExpenseCategoryType } from '@prisma/client';
 
-type Vals = { cash: number; capitalIn: number; expenses: number; received: number; payable: number; receivable: number };
+type Vals = {
+  cash: number;
+  capitalIn: number;
+  expenses: number;
+  received: number;
+  cashIn: number;
+  cashOut: number;
+  payable: number;
+  receivable: number;
+};
 type ChartEntry = FinanceEntryLike & {
   date: Date;
+  dueDate: Date | null;
   categoryType: ExpenseCategoryType | null;
   party: { name: string } | null;
 };
@@ -44,6 +58,7 @@ const TONES: Record<Tone, string> = {
   neutral: 'bg-primary/10 text-primary',
   warn: 'bg-warning-soft text-warning',
 };
+type Tile = { label: string; value: number; Icon: LucideIcon; tone: Tone; href?: string };
 
 function Kpi({
   label,
@@ -80,6 +95,23 @@ function Kpi({
   );
 }
 
+function KpiGrid({ tiles, currency, locale }: { tiles: Tile[]; currency: Currency; locale: AppLocale }) {
+  return (
+    <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+      {tiles.map((tile) => (
+        <Kpi
+          key={tile.label}
+          label={tile.label}
+          value={formatMoney(tile.value, currency, locale)}
+          Icon={tile.Icon}
+          tone={tile.tone}
+          href={tile.href}
+        />
+      ))}
+    </div>
+  );
+}
+
 export default async function FinancePage({
   params,
   searchParams,
@@ -87,17 +119,27 @@ export default async function FinancePage({
   params: Promise<{ locale: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { locale, user } = await getPageContext(params, searchParams, 'view:finance');
+  const { locale, user, filters, scope, range } = await getPageContext(params, searchParams, 'view:finance');
   const t = await getTranslations('finance');
   const canManage = can(user.role, 'manage:finance');
 
-  const [accounts, entriesRaw] = await Promise.all([
+  const [accounts, entriesRaw, orders, lines, inventoryItems] = await Promise.all([
     prisma.financeAccount.findMany({ where: { isActive: true }, orderBy: { createdAt: 'asc' } }),
     prisma.financeEntry.findMany({
+      where: { reversedAt: null, reversalOfId: null },
       select: {
         id: true, type: true, amount: true, currency: true, obligation: true,
         obligationKind: true, accountId: true, toAccountId: true, settlesId: true,
-        date: true, categoryType: true, party: { select: { name: true } },
+        date: true, dueDate: true, categoryType: true, party: { select: { name: true } },
+      },
+    }),
+    getOrders(filters, scope, range),
+    getOrderLines(filters, scope, range),
+    prisma.inventoryItem.findMany({
+      where: scope.branchId ? { branchId: scope.branchId } : {},
+      select: {
+        unitCost: true,
+        movements: { select: { quantity: true } },
       },
     }),
   ]);
@@ -117,6 +159,8 @@ export default async function FinancePage({
       capitalIn: tot.capitalIn,
       expenses: tot.expenses,
       received: tot.received,
+      cashIn: tot.cashIn,
+      cashOut: tot.cashOut,
       payable: tot.outstandingPayable,
       receivable: tot.outstandingReceivable,
     };
@@ -129,12 +173,49 @@ export default async function FinancePage({
       });
       return acc;
     },
-    { cash: 0, capitalIn: 0, expenses: 0, received: 0, payable: 0, receivable: 0 },
+    { cash: 0, capitalIn: 0, expenses: 0, received: 0, cashIn: 0, cashOut: 0, payable: 0, receivable: 0 },
   );
   const showCombined = currencies.length > 1;
 
-  // Charts (all converted to IQD at the rate).
   const iqd = (e: ChartEntry) => convertToIqd(e.amount, e.currency, rate);
+  const accountBalanceIqd = (account: (typeof accounts)[number]) =>
+    convertToIqd(
+      accountBalance(account, entries.filter((e) => e.currency === account.currency)),
+      account.currency,
+      rate,
+    );
+  const cashAccounts = accounts.filter((a) => a.type === 'CASH').reduce((s, a) => s + accountBalanceIqd(a), 0);
+  const bankAccounts = accounts.filter((a) => a.type !== 'CASH').reduce((s, a) => s + accountBalanceIqd(a), 0);
+  const totalAvailable = combined.cash;
+  const revenue = netSales(orders);
+  const costOfGoods = cogs(lines);
+  const gross = grossMargin(revenue, costOfGoods);
+  const operatingExpenses = entries
+    .filter((e) => e.type === 'EXPENSE')
+    .reduce((s, e) => s + iqd(e), 0);
+  const netProfit = gross.amount - operatingExpenses;
+  const inventoryValue = inventoryItems.reduce(
+    (s, item) => s + (item.unitCost ?? 0) * item.movements.reduce((sum, m) => sum + m.quantity, 0),
+    0,
+  );
+  const netCashMovement = combined.cashIn - combined.cashOut;
+  const now = new Date();
+  const paidByObligation = new Map<string, number>();
+  for (const e of entries) {
+    if (e.settlesId) paidByObligation.set(e.settlesId, (paidByObligation.get(e.settlesId) ?? 0) + iqd(e));
+  }
+  const overdue = entries.reduce(
+    (acc, e) => {
+      if (!e.obligation || !e.obligationKind || !e.dueDate || e.dueDate >= now) return acc;
+      const outstanding = Math.max(0, iqd(e) - (paidByObligation.get(e.id) ?? 0));
+      if (e.obligationKind === 'PAYABLE') acc.payables += outstanding;
+      else acc.receivables += outstanding;
+      return acc;
+    },
+    { payables: 0, receivables: 0 },
+  );
+
+  // Charts (all converted to IQD at the rate).
   const isSpend = (e: ChartEntry) => e.type === 'EXPENSE' || e.type === 'PURCHASE';
   const spendByMonth = (() => {
     const map = new Map<string, number>();
@@ -161,7 +242,7 @@ export default async function FinancePage({
     return [...map.entries()].map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value).slice(0, 8);
   })();
 
-  const tiles = (v: Vals): { label: string; value: number; Icon: LucideIcon; tone: Tone; href: string }[] => [
+  const tiles = (v: Vals): Tile[] => [
     { label: t('cashOnHand'), value: v.cash, Icon: Wallet, tone: 'neutral', href: '/finance/accounts' },
     { label: t('capital'), value: v.capitalIn, Icon: Landmark, tone: 'in', href: '/finance/shareholders' },
     { label: t('spent'), value: v.expenses, Icon: TrendingDown, tone: 'out', href: '/finance/ledger' },
@@ -169,13 +250,23 @@ export default async function FinancePage({
     { label: t('payables'), value: v.payable, Icon: Clock, tone: 'warn', href: '/finance/dues' },
     { label: t('receivables'), value: v.receivable, Icon: HandCoins, tone: 'in', href: '/finance/dues' },
   ];
-  const KpiRow = ({ v, cur }: { v: Vals; cur: string }) => (
-    <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-      {tiles(v).map((tile) => (
-        <Kpi key={tile.label} label={tile.label} value={formatMoney(tile.value, cur as Currency, locale)} Icon={tile.Icon} tone={tile.tone} href={tile.href} />
-      ))}
-    </div>
-  );
+  const commandCards: Tile[] = [
+    { label: t('cashOnHand'), value: cashAccounts, Icon: Wallet, tone: 'neutral', href: '/finance/accounts' },
+    { label: t('bankBalance'), value: bankAccounts, Icon: Banknote, tone: 'neutral', href: '/finance/accounts' },
+    { label: t('totalAvailable'), value: totalAvailable, Icon: Wallet, tone: 'in', href: '/finance/accounts' },
+    { label: t('totalRevenue'), value: revenue, Icon: TrendingUp, tone: 'in', href: '/sales' },
+    { label: t('totalExpenses'), value: operatingExpenses, Icon: TrendingDown, tone: 'out', href: '/finance/ledger' },
+    { label: t('netProfit'), value: netProfit, Icon: PieChart, tone: netProfit >= 0 ? 'in' : 'out', href: '/pnl' },
+    { label: t('grossProfit'), value: gross.amount, Icon: PieChart, tone: gross.amount >= 0 ? 'in' : 'out', href: '/pnl' },
+    { label: t('cogs'), value: costOfGoods, Icon: Package, tone: 'out', href: '/pnl' },
+    { label: t('payables'), value: combined.payable, Icon: Clock, tone: 'warn', href: '/finance/dues' },
+    { label: t('receivables'), value: combined.receivable, Icon: HandCoins, tone: 'in', href: '/finance/dues' },
+    { label: t('capital'), value: combined.capitalIn, Icon: Landmark, tone: 'in', href: '/finance/shareholders' },
+    { label: t('inventoryValue'), value: inventoryValue, Icon: Package, tone: 'neutral', href: '/inventory' },
+    { label: t('netCashMovement'), value: netCashMovement, Icon: netCashMovement >= 0 ? TrendingUp : TrendingDown, tone: netCashMovement >= 0 ? 'in' : 'out' },
+    { label: t('overdueReceivables'), value: overdue.receivables, Icon: HandCoins, tone: overdue.receivables > 0 ? 'warn' : 'in', href: '/finance/dues' },
+    { label: t('overduePayables'), value: overdue.payables, Icon: Clock, tone: overdue.payables > 0 ? 'warn' : 'neutral', href: '/finance/dues' },
+  ];
 
   const accCols: Column[] = [
     { label: t('f.name') },
@@ -211,6 +302,27 @@ export default async function FinancePage({
         <RateEditor action={setUsdToIqd} locale={locale} rate={rate} label={t('rate')} apply={t('apply')} />
       ) : null}
 
+      <section className="space-y-3">
+        <div className="flex items-center gap-2">
+          <span className="rounded-md bg-primary/10 px-2 py-0.5 text-xs font-bold tracking-wide text-primary">
+            {t('commandCenter')}
+          </span>
+          <div className="h-px flex-1 bg-border" />
+        </div>
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+          {commandCards.map((card) => (
+            <Kpi
+              key={card.label}
+              label={card.label}
+              value={formatMoney(card.value, 'IQD', locale)}
+              Icon={card.Icon}
+              tone={card.tone}
+              href={card.href}
+            />
+          ))}
+        </div>
+      </section>
+
       {showCombined ? (
         <section className="space-y-3">
           <div className="flex items-center gap-2">
@@ -219,7 +331,7 @@ export default async function FinancePage({
             </span>
             <div className="h-px flex-1 bg-border" />
           </div>
-          <KpiRow v={combined} cur="IQD" />
+          <KpiGrid tiles={tiles(combined)} currency="IQD" locale={locale} />
         </section>
       ) : null}
 
@@ -231,7 +343,7 @@ export default async function FinancePage({
             </span>
             <div className="h-px flex-1 bg-border" />
           </div>
-          <KpiRow v={vals} cur={cur} />
+          <KpiGrid tiles={tiles(vals)} currency={cur as Currency} locale={locale} />
           {ca.length || unassignedCash(ce) ? (
             <div className="space-y-1.5">
               <div className="text-xs font-medium text-muted-foreground">{t('byAccount')}</div>

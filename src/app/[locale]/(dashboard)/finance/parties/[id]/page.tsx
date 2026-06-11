@@ -3,10 +3,15 @@ import { getTranslations } from 'next-intl/server';
 import { getPageContext } from '@/server/page-context';
 import { prisma } from '@/server/db/client';
 import { enumLabel } from '@/lib/enums';
+import { formatMoney, convertToIqd } from '@/lib/money';
+import { formatDate } from '@/lib/dates';
+import { getUsdToIqd } from '@/server/settings';
 import { Badge, PageHeader } from '@/components/ui/primitives';
 import { BackLink, DetailGrid, type DetailField } from '@/components/records/parts';
 import { RecordActions } from '@/components/records/RecordActions';
+import { DataTable, type Column } from '@/components/data-table/DataTable';
 import { archiveParty, deleteParty } from '@/server/finance/parties';
+import type { Currency } from '@prisma/client';
 
 export default async function FinancePartyDetailPage({
   params,
@@ -20,14 +25,64 @@ export default async function FinancePartyDetailPage({
   const t = await getTranslations('finance');
   const tr = await getTranslations('records');
   const trf = await getTranslations('records.f');
-  const p = await prisma.party.findUnique({ where: { id } });
+  const [p, entries, rate] = await Promise.all([
+    prisma.party.findUnique({ where: { id } }),
+    prisma.financeEntry.findMany({
+      where: { partyId: id },
+      select: {
+        id: true,
+        date: true,
+        type: true,
+        amount: true,
+        currency: true,
+        obligation: true,
+        obligationKind: true,
+        settlesId: true,
+        reversedAt: true,
+        reversalOfId: true,
+        dueDate: true,
+        description: true,
+        reference: true,
+      },
+      orderBy: { date: 'desc' },
+    }),
+    getUsdToIqd(),
+  ]);
   if (!p) notFound();
+  const branch = p.branchId
+    ? await prisma.branch.findUnique({ where: { id: p.branchId }, select: { nameEn: true, nameAr: true } })
+    : null;
+  const branchName = branch ? (locale === 'ar' ? branch.nameAr : branch.nameEn) : '—';
+
+  const iqd = (amount: number, currency: Currency) => convertToIqd(amount, currency, rate);
+  const paidByObligation = new Map<string, number>();
+  for (const e of entries) {
+    if (e.reversedAt || e.reversalOfId) continue;
+    if (e.settlesId) paidByObligation.set(e.settlesId, (paidByObligation.get(e.settlesId) ?? 0) + iqd(e.amount, e.currency));
+  }
+  const balances = entries.reduce(
+    (acc, e) => {
+      if (e.reversedAt || e.reversalOfId) return acc;
+      if (!e.obligation || !e.obligationKind) return acc;
+      const outstanding = Math.max(0, iqd(e.amount, e.currency) - (paidByObligation.get(e.id) ?? 0));
+      if (e.obligationKind === 'PAYABLE') acc.payables += outstanding;
+      else acc.receivables += outstanding;
+      return acc;
+    },
+    { payables: p.openingPayable, receivables: p.openingReceivable },
+  );
 
   const items: DetailField[] = [
     { label: t('f.name'), value: p.name },
     { label: t('f.type'), value: enumLabel(p.type, locale) },
     { label: t('f.phone'), value: p.phone },
     { label: t('f.email'), value: p.email },
+    { label: t('f.address'), value: p.address },
+    { label: t('f.branch'), value: branchName },
+    { label: t('f.openingPayable'), value: formatMoney(p.openingPayable, 'IQD', locale) },
+    { label: t('f.openingReceivable'), value: formatMoney(p.openingReceivable, 'IQD', locale) },
+    { label: t('payables'), value: formatMoney(balances.payables, 'IQD', locale) },
+    { label: t('receivables'), value: formatMoney(balances.receivables, 'IQD', locale) },
     { label: t('f.equityShare'), value: p.equityShare != null ? `${p.equityShare}%` : '—' },
     { label: t('f.notes'), value: p.notes },
     {
@@ -37,6 +92,20 @@ export default async function FinancePartyDetailPage({
       ),
     },
   ];
+  const cols: Column[] = [
+    { label: t('f.date') },
+    { label: t('f.type') },
+    { label: t('f.description') },
+    { label: t('f.amount'), align: 'end' },
+    { label: t('f.dueDate') },
+  ];
+  const rows = entries.map((e) => [
+    formatDate(e.date, locale),
+    enumLabel(e.type, locale),
+    e.reversalOfId ? t('reversalMarker') : e.reversedAt ? t('reversed') : e.description ?? e.reference ?? '—',
+    formatMoney(e.amount, e.currency, locale),
+    e.dueDate ? formatDate(e.dueDate, locale) : '—',
+  ]);
 
   return (
     <>
@@ -56,6 +125,10 @@ export default async function FinancePartyDetailPage({
         }}
       />
       <DetailGrid items={items} />
+      <div className="mt-4 space-y-2">
+        <h3 className="text-sm font-semibold">{t('statement')}</h3>
+        <DataTable columns={cols} rows={rows} emptyLabel={tr('none')} />
+      </div>
     </>
   );
 }

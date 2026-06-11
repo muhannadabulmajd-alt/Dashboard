@@ -751,15 +751,20 @@ model SyncRun {
 enum AccountType {
   CASH
   BANK
+  DIGITAL_WALLET
+  PAYMENT_GATEWAY
+  OTHER
 }
 
 enum PartyType {
   SUPPLIER
   RETAILER
+  DISTRIBUTOR
   PARTNER
   CUSTOMER
   SHAREHOLDER
   EMPLOYEE
+  SERVICE_PROVIDER
   OTHER
 }
 
@@ -787,6 +792,7 @@ model FinanceAccount {
   branchId       String? // for CASH accounts: which branch holds the cash
   currency       Currency    @default(IQD)
   openingBalance Int         @default(0) // minor units
+  notes          String?
   isActive       Boolean     @default(true)
   createdAt      DateTime    @default(now())
 
@@ -802,6 +808,10 @@ model Party {
   type        PartyType @default(OTHER)
   phone       String?
   email       String?
+  address     String?
+  branchId    String?
+  openingPayable Int   @default(0)
+  openingReceivable Int @default(0)
   notes       String?
   equityShare Float? // ownership % (shareholders)
   isActive    Boolean   @default(true)
@@ -810,6 +820,7 @@ model Party {
   entries FinanceEntry[]
 
   @@index([type])
+  @@index([branchId])
 }
 
 model FinanceEntry {
@@ -837,9 +848,14 @@ model FinanceEntry {
   importKey     String? @unique // idempotent bulk import (re-uploads upsert)
   description   String?
   reference     String?
+  attachmentUrl String?
   branchId      String?
   orderId       String?
   createdById   String?
+  reversalOfId  String?
+  reversedAt    DateTime?
+  reversedById  String?
+  reversalReason String?
   createdAt     DateTime             @default(now())
 
   account     FinanceAccount? @relation("AccountEntries", fields: [accountId], references: [id])
@@ -854,6 +870,10 @@ model FinanceEntry {
   @@index([accountId])
   @@index([partyId])
   @@index([settlesId])
+  @@index([branchId])
+  @@index([orderId])
+  @@index([createdById])
+  @@index([reversalOfId])
 }
 
 // Key/value app settings (e.g. usd_to_iqd conversion rate).

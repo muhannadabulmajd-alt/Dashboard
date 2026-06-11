@@ -65,7 +65,8 @@ export async function createCustomer(_prev: ActionState, fd: FormData): Promise<
   const provided = r.data.externalId?.trim();
   if (provided && (await prisma.customer.findUnique({ where: { externalId: provided }, select: { id: true } })))
     return { error: 'exists' };
-  const { externalId: _omit, ...rest } = r.data;
+  const { externalId, ...rest } = r.data;
+  void externalId;
   let created;
   for (let attempt = 0; ; attempt++) {
     const externalId = provided || (await nextCustomerCode());
@@ -93,7 +94,8 @@ export async function updateCustomer(
   if (!r.success) return { error: 'invalid' };
   const locale = reqField(fd, 'locale') || 'ar';
   // externalId is immutable after creation (CR-4) — never update it.
-  const { externalId: _immutable, ...data } = r.data;
+  const { externalId, ...data } = r.data;
+  void externalId;
   await prisma.customer.update({ where: { id }, data });
   await audit(user.id, 'UPDATE', 'Customer', { id });
   revalidatePath(LIST, 'page');

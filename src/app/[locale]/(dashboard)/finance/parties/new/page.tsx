@@ -1,5 +1,6 @@
 import { getTranslations } from 'next-intl/server';
 import { getPageContext } from '@/server/page-context';
+import { prisma } from '@/server/db/client';
 import { PageHeader } from '@/components/ui/primitives';
 import { RecordForm } from '@/components/records/form';
 import { BackLink } from '@/components/records/parts';
@@ -18,6 +19,8 @@ export default async function NewPartyPage({
   const tr = await getTranslations('records');
   const tk = (k: string) => t(k);
   const errors = { invalid: tr('err.invalid'), exists: tr('err.exists'), forbidden: tr('err.forbidden') };
+  const branches = await prisma.branch.findMany({ where: { isActive: true }, orderBy: { nameEn: 'asc' }, select: { id: true, nameEn: true, nameAr: true } });
+  const branchOptions = branches.map((b) => ({ value: b.id, label: locale === 'ar' ? b.nameAr : b.nameEn }));
 
   return (
     <>
@@ -25,7 +28,7 @@ export default async function NewPartyPage({
       <PageHeader title={tr('newTitle', { entity: t('parties') })} />
       <RecordForm
         action={createParty}
-        fields={partyFields(tk, locale)}
+        fields={partyFields(tk, locale, branchOptions)}
         locale={locale}
         submitLabel={tr('create')}
         cancelHref="/finance/parties"

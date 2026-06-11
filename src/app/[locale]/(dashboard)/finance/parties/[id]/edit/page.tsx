@@ -20,14 +20,22 @@ export default async function EditPartyPage({
   const t = await getTranslations('finance');
   const tr = await getTranslations('records');
   const tk = (k: string) => t(k);
-  const p = await prisma.party.findUnique({ where: { id } });
+  const [p, branches] = await Promise.all([
+    prisma.party.findUnique({ where: { id } }),
+    prisma.branch.findMany({ where: { isActive: true }, orderBy: { nameEn: 'asc' }, select: { id: true, nameEn: true, nameAr: true } }),
+  ]);
   if (!p) notFound();
+  const branchOptions = branches.map((b) => ({ value: b.id, label: locale === 'ar' ? b.nameAr : b.nameEn }));
 
   const initial = {
     name: p.name,
     type: p.type,
     phone: p.phone ?? '',
     email: p.email ?? '',
+    address: p.address ?? '',
+    branchId: p.branchId ?? '',
+    openingPayable: p.openingPayable,
+    openingReceivable: p.openingReceivable,
     equityShare: p.equityShare ?? '',
     notes: p.notes ?? '',
   };
@@ -39,7 +47,7 @@ export default async function EditPartyPage({
       <PageHeader title={tr('editTitle', { entity: t('parties') })} subtitle={p.name} />
       <RecordForm
         action={updateParty.bind(null, id)}
-        fields={partyFields(tk, locale)}
+        fields={partyFields(tk, locale, branchOptions)}
         initial={initial}
         locale={locale}
         submitLabel={tr('save')}

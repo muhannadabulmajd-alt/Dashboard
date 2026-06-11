@@ -35,6 +35,7 @@ export default async function EditAccountPage({
     bankName: a.bankName ?? '',
     branchId: a.branchId ?? '',
     openingBalance: a.openingBalance,
+    notes: a.notes ?? '',
   };
   const errors = { invalid: tr('err.invalid'), exists: tr('err.exists'), forbidden: tr('err.forbidden') };
 

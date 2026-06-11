@@ -181,25 +181,27 @@ export function WaterfallChart({
   steps: WaterfallStep[];
   locale: AppLocale;
 }) {
-  let running = 0;
-  const data = steps.map((s) => {
-    let base: number;
-    let fill: string;
-    if (s.kind === 'total') {
-      base = 0;
-      running = s.value;
-      fill = CHART_COLORS[0];
-    } else if (s.kind === 'inc') {
-      base = running;
-      running += s.value;
-      fill = POSITIVE;
-    } else {
-      running -= s.value;
-      base = running;
-      fill = NEGATIVE;
-    }
-    return { label: s.label, base, bar: s.value, fill };
-  });
+  const data = steps.reduce<{ running: number; rows: { label: string; base: number; bar: number; fill: string }[] }>(
+    (acc, s) => {
+      if (s.kind === 'total') {
+        return {
+          running: s.value,
+          rows: [...acc.rows, { label: s.label, base: 0, bar: s.value, fill: CHART_COLORS[0] }],
+        };
+      }
+      if (s.kind === 'inc') {
+        return {
+          running: acc.running + s.value,
+          rows: [...acc.rows, { label: s.label, base: acc.running, bar: s.value, fill: POSITIVE }],
+        };
+      }
+      return {
+        running: acc.running - s.value,
+        rows: [...acc.rows, { label: s.label, base: acc.running - s.value, bar: s.value, fill: NEGATIVE }],
+      };
+    },
+    { running: 0, rows: [] },
+  ).rows;
 
   return (
     <ChartFrame title={title}>

@@ -11,14 +11,20 @@ export interface FinanceEntryLike {
   accountId: string | null;
   toAccountId: string | null;
   settlesId: string | null;
+  reversedAt?: Date | null;
+  reversalOfId?: string | null;
 }
 
 const IN_TYPES: FinanceType[] = ['INCOME', 'PAYMENT_IN', 'CAPITAL_IN'];
 const OUT_TYPES: FinanceType[] = ['EXPENSE', 'PURCHASE', 'PAYMENT_OUT', 'DRAWING'];
 
+export function isActiveEntry(e: FinanceEntryLike): boolean {
+  return !e.reversedAt && !e.reversalOfId;
+}
+
 /** A non-obligation entry tied to an account actually moves cash. */
 export function isCashMovement(e: FinanceEntryLike): boolean {
-  return !e.obligation && e.accountId != null;
+  return isActiveEntry(e) && !e.obligation && e.accountId != null;
 }
 
 /** Signed cash effect on `accountId` for a non-transfer entry. */
@@ -38,6 +44,7 @@ export interface AccountLike {
 export function accountBalance(account: AccountLike, entries: FinanceEntryLike[]): number {
   let balance = account.openingBalance;
   for (const e of entries) {
+    if (!isActiveEntry(e)) continue;
     if (e.obligation) continue; // obligations don't move cash
     if (e.type === 'TRANSFER') {
       if (e.accountId === account.id) balance -= e.amount;
@@ -66,6 +73,7 @@ export interface FinanceTotals {
 export function financeTotals(entries: FinanceEntryLike[]): FinanceTotals {
   const paidByObligation = new Map<string, number>();
   for (const e of entries) {
+    if (!isActiveEntry(e)) continue;
     if (e.settlesId) paidByObligation.set(e.settlesId, (paidByObligation.get(e.settlesId) ?? 0) + e.amount);
   }
 
@@ -80,6 +88,7 @@ export function financeTotals(entries: FinanceEntryLike[]): FinanceTotals {
   };
 
   for (const e of entries) {
+    if (!isActiveEntry(e)) continue;
     if (e.type === 'EXPENSE' || e.type === 'PURCHASE') t.expenses += e.amount;
     if (e.type === 'CAPITAL_IN') t.capitalIn += e.amount; // capital counts even if the cash account is unknown (e.g. imports)
     if ((e.type === 'PAYMENT_IN' || e.type === 'INCOME') && isCashMovement(e)) t.received += e.amount;
@@ -139,6 +148,7 @@ export function totalCash(accounts: AccountLike[], entries: FinanceEntryLike[]):
 export function unassignedCash(entries: FinanceEntryLike[]): number {
   let cash = 0;
   for (const e of entries) {
+    if (!isActiveEntry(e)) continue;
     if (e.obligation || e.accountId != null) continue; // dues + account-tied handled elsewhere
     if (e.type === 'TRANSFER') continue; // transfers always name accounts; nets out
     cash += signedEffect(e);

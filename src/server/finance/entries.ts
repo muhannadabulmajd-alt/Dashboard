@@ -25,8 +25,10 @@ const schema = z.object({
   categoryType: z.enum(EXPENSE_CATEGORY_TYPES).optional(),
   obligationKind: z.enum(OBLIGATION_KINDS).optional(),
   dueDate: z.coerce.date().optional(),
+  branchId: z.string().optional(),
   description: z.string().optional(),
   reference: z.string().optional(),
+  attachmentUrl: z.string().optional(),
   settlesId: z.string().optional(),
 });
 
@@ -46,8 +48,10 @@ function parse(fd: FormData) {
     categoryType: optField(fd, 'categoryType'),
     obligationKind: optField(fd, 'obligationKind'),
     dueDate: optField(fd, 'dueDate'),
+    branchId: optField(fd, 'branchId'),
     description: optField(fd, 'description'),
     reference: optField(fd, 'reference'),
+    attachmentUrl: optField(fd, 'attachmentUrl'),
     settlesId: optField(fd, 'settlesId'),
   });
   return { obligation, res };
@@ -83,8 +87,10 @@ function toData(p: Parsed, obligation: boolean, fallbackRate: number) {
     partyId: p.partyId ?? null,
     categoryType: p.type === 'EXPENSE' || p.type === 'PURCHASE' ? (p.categoryType ?? null) : null,
     settlesId: p.settlesId ?? null,
+    branchId: p.branchId ?? null,
     description: p.description ?? null,
     reference: p.reference ?? null,
+    attachmentUrl: p.attachmentUrl ?? null,
   };
 }
 
@@ -118,19 +124,63 @@ export async function updateEntry(id: string, _prev: ActionState, fd: FormData):
   redirect(`/${locale}/finance/ledger/${id}`);
 }
 
-export async function deleteEntry(id: string, locale: string): Promise<void> {
+export async function reverseEntry(id: string, locale: string): Promise<void> {
   const user = await requireCap(CAP);
   if (!user) return;
-  try {
-    await prisma.financeEntry.delete({ where: { id } });
-    await audit(user.id, 'DELETE', 'FinanceEntry', { id });
-    revalidatePath(HUB, 'page');
-    revalidatePath(LIST, 'page');
-  } catch {
-    // Has linked settlements — leave it; user removes payments first.
+  const entry = await prisma.financeEntry.findUnique({
+    where: { id },
+    include: { settlements: { where: { reversedAt: null, reversalOfId: null }, select: { id: true } } },
+  });
+  if (!entry || entry.importKey || entry.reversedAt || entry.reversalOfId) redirect(`/${locale}/finance/ledger/${id}`);
+  if (entry.obligation && entry.settlements.length > 0) {
     redirect(`/${locale}/finance/ledger/${id}`);
   }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.financeEntry.update({
+      where: { id },
+      data: {
+        reversedAt: new Date(),
+        reversedById: user.id,
+        reversalReason: 'Manual reversal',
+      },
+    });
+    await tx.financeEntry.create({
+      data: {
+        date: new Date(),
+        type: entry.type,
+        amount: entry.amount,
+        currency: entry.currency,
+        origCurrency: entry.origCurrency,
+        origAmount: entry.origAmount,
+        fxRate: entry.fxRate,
+        obligation: entry.obligation,
+        obligationKind: entry.obligationKind,
+        dueDate: entry.dueDate,
+        accountId: entry.accountId,
+        toAccountId: entry.toAccountId,
+        partyId: entry.partyId,
+        categoryType: entry.categoryType,
+        settlesId: entry.settlesId,
+        branchId: entry.branchId,
+        orderId: entry.orderId,
+        reference: entry.reference,
+        attachmentUrl: entry.attachmentUrl,
+        description: `Reversal marker for ${entry.reference ?? entry.id}`,
+        reversalOfId: entry.id,
+        createdById: user.id,
+      },
+    });
+  });
+  await audit(user.id, 'REVERSE', 'FinanceEntry', { id });
+  revalidatePath(HUB, 'page');
+  revalidatePath(LIST, 'page');
+  revalidatePath('/[locale]/(dashboard)/finance/dues', 'page');
   redirect(`/${locale}/finance/ledger`);
+}
+
+export async function deleteEntry(id: string, locale: string): Promise<void> {
+  await reverseEntry(id, locale);
 }
 
 const settleSchema = z.object({
@@ -157,9 +207,9 @@ export async function settleEntry(
 
   const ob = await prisma.financeEntry.findUnique({
     where: { id: obligationId },
-    include: { settlements: { select: { amount: true } } },
+    include: { settlements: { where: { reversedAt: null, reversalOfId: null }, select: { amount: true } } },
   });
-  if (!ob || !ob.obligation || !ob.obligationKind) return { error: 'invalid' };
+  if (!ob || ob.reversedAt || ob.reversalOfId || !ob.obligation || !ob.obligationKind) return { error: 'invalid' };
   const paid = ob.settlements.reduce((s, x) => s + x.amount, 0);
   const outstanding = Math.max(0, ob.amount - paid);
   if (outstanding <= 0) return { error: 'invalid' };
@@ -175,6 +225,7 @@ export async function settleEntry(
       accountId: r.data.accountId,
       partyId: ob.partyId,
       settlesId: ob.id,
+      branchId: ob.branchId,
       description: 'Settlement',
       createdById: user.id,
     },
@@ -199,7 +250,14 @@ export async function assignImportedAccount(_prev: ActionState, fd: FormData): P
   const account = await prisma.financeAccount.findUnique({ where: { id: accountId }, select: { currency: true } });
   if (!account) return { error: 'invalid' };
   await prisma.financeEntry.updateMany({
-    where: { importKey: { startsWith: 'PUR:' }, currency: account.currency, accountId: null, obligation: false },
+    where: {
+      importKey: { startsWith: 'PUR:' },
+      currency: account.currency,
+      accountId: null,
+      obligation: false,
+      reversedAt: null,
+      reversalOfId: null,
+    },
     data: { accountId },
   });
   await audit(user.id, 'ASSIGN_ACCOUNT', 'FinanceEntry', { accountId, currency: account.currency });

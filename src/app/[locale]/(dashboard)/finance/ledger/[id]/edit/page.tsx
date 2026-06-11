@@ -20,12 +20,13 @@ export default async function EditEntryPage({
   const { id } = await params;
   const t = await getTranslations('finance');
   const tr = await getTranslations('records');
-  const [entry, accounts, parties] = await Promise.all([
+  const [entry, accounts, parties, branches] = await Promise.all([
     prisma.financeEntry.findUnique({ where: { id } }),
     prisma.financeAccount.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true } }),
     prisma.party.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true } }),
+    prisma.branch.findMany({ where: { isActive: true }, orderBy: { nameEn: 'asc' }, select: { id: true, nameEn: true, nameAr: true } }),
   ]);
-  if (!entry) notFound();
+  if (!entry || entry.reversedAt || entry.reversalOfId || entry.importKey) notFound();
 
   // Entries are stored in IQD; if one was paid in a foreign currency, edit it
   // back in that currency + rate so saving re-applies the same conversion.
@@ -42,12 +43,15 @@ export default async function EditEntryPage({
     accountId: entry.accountId ?? '',
     toAccountId: entry.toAccountId ?? '',
     partyId: entry.partyId ?? '',
+    branchId: entry.branchId ?? '',
     categoryType: entry.categoryType ?? '',
     description: entry.description ?? '',
     reference: entry.reference ?? '',
+    attachmentUrl: entry.attachmentUrl ?? '',
   };
   const accountOptions = accounts.map((a) => ({ value: a.id, label: a.name }));
   const partyOptions = parties.map((p) => ({ value: p.id, label: p.name }));
+  const branchOptions = branches.map((b) => ({ value: b.id, label: locale === 'ar' ? b.nameAr : b.nameEn }));
   const errors = { invalid: tr('err.invalid'), forbidden: tr('err.forbidden') };
 
   return (
@@ -56,7 +60,7 @@ export default async function EditEntryPage({
       <PageHeader title={tr('editTitle', { entity: t('recordEntry') })} />
       <RecordForm
         action={updateEntry.bind(null, id)}
-        fields={entryFields((k) => t(k), locale, accountOptions, partyOptions)}
+        fields={entryFields((k) => t(k), locale, accountOptions, partyOptions, branchOptions)}
         initial={initial}
         locale={locale}
         submitLabel={tr('save')}

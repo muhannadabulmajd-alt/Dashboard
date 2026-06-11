@@ -17,12 +17,14 @@ export default async function NewEntryPage({
   const { locale } = await getPageContext(params, searchParams, 'manage:finance');
   const t = await getTranslations('finance');
   const tr = await getTranslations('records');
-  const [accounts, parties] = await Promise.all([
+  const [accounts, parties, branches] = await Promise.all([
     prisma.financeAccount.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true } }),
     prisma.party.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true } }),
+    prisma.branch.findMany({ where: { isActive: true }, orderBy: { nameEn: 'asc' }, select: { id: true, nameEn: true, nameAr: true } }),
   ]);
   const accountOptions = accounts.map((a) => ({ value: a.id, label: a.name }));
   const partyOptions = parties.map((p) => ({ value: p.id, label: p.name }));
+  const branchOptions = branches.map((b) => ({ value: b.id, label: locale === 'ar' ? b.nameAr : b.nameEn }));
   const errors = { invalid: tr('err.invalid'), forbidden: tr('err.forbidden') };
 
   return (
@@ -31,7 +33,7 @@ export default async function NewEntryPage({
       <PageHeader title={t('recordEntry')} subtitle={t('subtitle')} />
       <RecordForm
         action={createEntry}
-        fields={entryFields((k) => t(k), locale, accountOptions, partyOptions)}
+        fields={entryFields((k) => t(k), locale, accountOptions, partyOptions, branchOptions)}
         initial={{ obligation: 'no', currency: 'IQD' }}
         locale={locale}
         submitLabel={tr('create')}

@@ -8,7 +8,7 @@ import { formatDate } from '@/lib/dates';
 import { Badge, PageHeader } from '@/components/ui/primitives';
 import { BackLink, DetailGrid, type DetailField } from '@/components/records/parts';
 import { RecordActions } from '@/components/records/RecordActions';
-import { deleteEntry } from '@/server/finance/entries';
+import { reverseEntry } from '@/server/finance/entries';
 
 export default async function EntryDetailPage({
   params,
@@ -27,8 +27,18 @@ export default async function EntryDetailPage({
     include: { party: true, account: true, toAccount: true },
   });
   if (!e) notFound();
+  const [branch, createdBy, reversedBy] = await Promise.all([
+    e.branchId ? prisma.branch.findUnique({ where: { id: e.branchId }, select: { nameEn: true, nameAr: true } }) : null,
+    e.createdById ? prisma.user.findUnique({ where: { id: e.createdById }, select: { name: true, email: true } }) : null,
+    e.reversedById ? prisma.user.findUnique({ where: { id: e.reversedById }, select: { name: true, email: true } }) : null,
+  ]);
+  const branchName = branch ? (locale === 'ar' ? branch.nameAr : branch.nameEn) : '—';
+  const isReversed = Boolean(e.reversedAt);
+  const isReversalMarker = Boolean(e.reversalOfId);
+  const managedBySync = Boolean(e.importKey);
 
   const items: DetailField[] = [
+    { label: t('f.transactionId'), value: e.id },
     { label: t('f.type'), value: enumLabel(e.type, locale) },
     { label: t('f.amount'), value: formatMoney(e.amount, e.currency, locale) },
     ...(e.origCurrency === 'USD' && e.origAmount != null
@@ -38,7 +48,9 @@ export default async function EntryDetailPage({
     {
       label: t('f.status'),
       value: (
-        <Badge variant={e.obligation ? 'warning' : 'success'}>{e.obligation ? t('f.due') : t('f.paid')}</Badge>
+        <Badge variant={isReversalMarker ? 'muted' : isReversed ? 'danger' : e.obligation ? 'warning' : 'success'}>
+          {isReversalMarker ? t('reversalMarker') : isReversed ? t('reversed') : e.obligation ? t('f.due') : t('f.paid')}
+        </Badge>
       ),
     },
     { label: t('f.kind'), value: e.obligationKind ? enumLabel(e.obligationKind, locale) : '—' },
@@ -47,8 +59,23 @@ export default async function EntryDetailPage({
     { label: t('f.toAccount'), value: e.toAccount?.name ?? '—' },
     { label: t('f.party'), value: e.party?.name ?? '—' },
     { label: t('f.category'), value: e.categoryType ? enumLabel(e.categoryType, locale) : '—' },
+    { label: t('f.branch'), value: branchName },
+    { label: t('f.related'), value: e.orderId ?? e.importKey ?? '—' },
+    { label: t('f.createdBy'), value: createdBy ? createdBy.name || createdBy.email : '—' },
     { label: t('f.description'), value: e.description ?? '—' },
     { label: t('f.reference'), value: e.reference ?? '—' },
+    {
+      label: t('f.attachmentUrl'),
+      value: e.attachmentUrl ? (
+        <a href={e.attachmentUrl} className="font-medium text-primary hover:underline" target="_blank" rel="noreferrer">
+          {t('viewAttachment')}
+        </a>
+      ) : '—',
+    },
+    { label: t('reversalOf'), value: e.reversalOfId ?? '—' },
+    { label: t('reversedAt'), value: e.reversedAt ? formatDate(e.reversedAt, locale) : '—' },
+    { label: t('reversedBy'), value: reversedBy ? reversedBy.name || reversedBy.email : '—' },
+    { label: t('reversalReason'), value: e.reversalReason ?? '—' },
   ];
 
   return (
@@ -56,14 +83,14 @@ export default async function EntryDetailPage({
       <BackLink href="/finance/ledger" label={tr('back')} />
       <PageHeader title={enumLabel(e.type, locale)} subtitle={formatMoney(e.amount, e.currency, locale)} />
       <RecordActions
-        editHref={`/finance/ledger/${e.id}/edit`}
-        deleteAction={deleteEntry.bind(null, e.id, locale)}
+        editHref={!isReversed && !isReversalMarker && !managedBySync ? `/finance/ledger/${e.id}/edit` : undefined}
+        deleteAction={!isReversed && !isReversalMarker && !managedBySync ? reverseEntry.bind(null, e.id, locale) : undefined}
         labels={{
           edit: tr('edit'),
           archive: tr('archive'),
           restore: tr('restore'),
-          delete: tr('delete'),
-          confirm: tr('confirmDelete'),
+          delete: t('reverse'),
+          confirm: t('confirmReverse'),
         }}
       />
       <DetailGrid items={items} />

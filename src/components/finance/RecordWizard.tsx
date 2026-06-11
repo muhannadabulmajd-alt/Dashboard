@@ -8,7 +8,7 @@ import { Link } from '@/i18n/navigation';
 import type { ActionState } from '@/server/records/shared';
 
 type Opt = { value: string; label: string };
-type FieldKey = 'amount' | 'currency' | 'date' | 'account' | 'toAccount' | 'party' | 'category' | 'dueDate' | 'description' | 'reference';
+type FieldKey = 'amount' | 'currency' | 'date' | 'account' | 'toAccount' | 'party' | 'category' | 'dueDate' | 'branch' | 'description' | 'reference' | 'attachmentUrl';
 type Group = 'in' | 'out' | 'due' | 'transfer';
 
 interface RecordOption {
@@ -25,14 +25,18 @@ interface RecordOption {
 const OPTIONS: RecordOption[] = [
   { key: 'salesIncome', group: 'in', type: 'INCOME', fields: ['amount', 'currency', 'date', 'account', 'party', 'description'] },
   { key: 'paymentReceived', group: 'in', type: 'PAYMENT_IN', fields: ['amount', 'currency', 'date', 'account', 'party', 'reference', 'description'], note: 'settle' },
+  { key: 'orderPayment', group: 'in', type: 'PAYMENT_IN', fields: ['amount', 'currency', 'date', 'account', 'party', 'reference', 'branch', 'description'], note: 'settle' },
   { key: 'capital', group: 'in', type: 'CAPITAL_IN', fields: ['amount', 'currency', 'date', 'account', 'party', 'description'] },
+  { key: 'cashAdjustmentUp', group: 'in', type: 'INCOME', fields: ['amount', 'currency', 'date', 'account', 'branch', 'reference', 'description'] },
   { key: 'otherIn', group: 'in', type: 'INCOME', fields: ['amount', 'currency', 'date', 'account', 'description'] },
 
   { key: 'expensePaid', group: 'out', type: 'EXPENSE', fields: ['amount', 'currency', 'date', 'account', 'category', 'party', 'description'] },
   { key: 'purchasePaid', group: 'out', type: 'PURCHASE', fields: ['amount', 'currency', 'date', 'account', 'party', 'category', 'description'] },
+  { key: 'inventoryPurchase', group: 'out', type: 'PURCHASE', fields: ['amount', 'currency', 'date', 'account', 'party', 'category', 'branch', 'reference', 'attachmentUrl', 'description'] },
   { key: 'supplierPayment', group: 'out', type: 'PAYMENT_OUT', fields: ['amount', 'currency', 'date', 'account', 'party', 'reference', 'description'], note: 'settle' },
   { key: 'withdrawal', group: 'out', type: 'DRAWING', fields: ['amount', 'currency', 'date', 'account', 'party', 'description'] },
   { key: 'refund', group: 'out', type: 'PAYMENT_OUT', fields: ['amount', 'currency', 'date', 'account', 'party', 'reference', 'description'] },
+  { key: 'cashAdjustmentDown', group: 'out', type: 'EXPENSE', fields: ['amount', 'currency', 'date', 'account', 'branch', 'reference', 'description'] },
   { key: 'otherOut', group: 'out', type: 'EXPENSE', fields: ['amount', 'currency', 'date', 'account', 'category', 'description'] },
 
   { key: 'expenseLater', group: 'due', type: 'EXPENSE', obligation: true, obligationKind: 'PAYABLE', fields: ['amount', 'currency', 'date', 'party', 'category', 'dueDate', 'description'] },
@@ -50,12 +54,14 @@ export function RecordWizard({
   accounts,
   parties,
   categories,
+  branches,
   today,
 }: {
   locale: string;
   accounts: Opt[];
   parties: Opt[];
   categories: Opt[];
+  branches: Opt[];
   today: string;
 }) {
   const t = useTranslations('finance');
@@ -92,7 +98,7 @@ export function RecordWizard({
     );
   }
 
-  return <RecordForm option={picked} onBack={() => setPicked(null)} locale={locale} accounts={accounts} parties={parties} categories={categories} today={today} />;
+  return <RecordForm option={picked} onBack={() => setPicked(null)} locale={locale} accounts={accounts} parties={parties} categories={categories} branches={branches} today={today} />;
 }
 
 function RecordForm({
@@ -102,6 +108,7 @@ function RecordForm({
   accounts,
   parties,
   categories,
+  branches,
   today,
 }: {
   option: RecordOption;
@@ -110,6 +117,7 @@ function RecordForm({
   accounts: Opt[];
   parties: Opt[];
   categories: Opt[];
+  branches: Opt[];
   today: string;
 }) {
   const t = useTranslations('finance');
@@ -144,8 +152,12 @@ function RecordForm({
         return wrap('party', t('f.party'), select('partyId', parties, false));
       case 'category':
         return wrap('category', t('f.category'), select('categoryType', categories, false));
+      case 'branch':
+        return wrap('branch', t('f.branch'), select('branchId', branches, false));
       case 'reference':
         return wrap('reference', t('f.reference'), <input name="reference" type="text" className={inputCls} />);
+      case 'attachmentUrl':
+        return wrap('attachmentUrl', t('f.attachmentUrl'), <input name="attachmentUrl" type="text" className={inputCls} />);
       case 'description':
         return wrap('description', t('f.description'), <input name="description" type="text" className={inputCls} />);
     }
