@@ -27,7 +27,7 @@ function summarize(meta: unknown): string {
     return `${k}: ${value}`;
   });
   const s = parts.join(' · ');
-  return s.length > 180 ? `${s.slice(0, 180)}...` : s || '—';
+  return s.length > 320 ? `${s.slice(0, 320)}...` : s || '—';
 }
 
 export default async function AuditPage({
@@ -51,6 +51,7 @@ export default async function AuditPage({
     { label: t('user') },
     { label: t('action') },
     { label: t('entity') },
+    { label: 'ID' },
     { label: t('details') },
   ];
   const rows = logs.map((l) => [
@@ -60,6 +61,7 @@ export default async function AuditPage({
       {l.action}
     </Badge>,
     l.entity ?? '—',
+    l.entityId ? <span key="id" className="font-mono text-xs">{l.entityId.slice(-10)}</span> : '—',
     <span key="d" className="text-xs text-muted-foreground">
       {summarize(l.metadata)}
     </span>,

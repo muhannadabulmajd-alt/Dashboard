@@ -3,7 +3,7 @@ import { getTranslations } from 'next-intl/server';
 import { getPageContext } from '@/server/page-context';
 import { prisma } from '@/server/db/client';
 import { enumLabel } from '@/lib/enums';
-import { formatMoney } from '@/lib/money';
+import { formatMoney, formatQuantity } from '@/lib/money';
 import { formatDate } from '@/lib/dates';
 import { can } from '@/lib/rbac';
 import { Badge, PageHeader } from '@/components/ui/primitives';
@@ -12,7 +12,9 @@ import { RecordActions } from '@/components/records/RecordActions';
 import { SectionGuide } from '@/components/records/SectionGuide';
 import { ReverseEntryForm } from '@/components/finance/ReverseEntryForm';
 import { reverseEntryWithReason } from '@/server/finance/entries';
+import { archiveFinanceEntry, permanentlyDeleteFinanceEntry } from '@/server/finance/central-records';
 import { Link } from '@/i18n/navigation';
+import { DataTable } from '@/components/data-table/DataTable';
 
 export default async function EntryDetailPage({
   params,
@@ -26,6 +28,7 @@ export default async function EntryDetailPage({
   const t = await getTranslations('finance');
   const tr = await getTranslations('records');
   const canManage = can(user.role, 'manage:finance');
+  const ownerAdmin = user.role === 'OWNER' || user.role === 'ADMIN';
 
   const e = await prisma.financeEntry.findUnique({
     where: { id },
@@ -34,20 +37,31 @@ export default async function EntryDetailPage({
       account: true,
       toAccount: true,
       settlements: { where: { reversedAt: null, reversalOfId: null }, select: { id: true } },
+      stockMovements: {
+        include: { inventoryItem: { select: { nameEn: true, nameAr: true, unit: true } } },
+        orderBy: { occurredAt: 'desc' },
+      },
+      costLayers: {
+        include: { inventoryItem: { select: { nameEn: true, nameAr: true, unit: true } } },
+        orderBy: { receivedAt: 'desc' },
+      },
+      fixedAsset: true,
     },
   });
   if (!e) notFound();
-  const [branch, createdBy, reversedBy] = await Promise.all([
+  const [branch, createdBy, reversedBy, archivedBy] = await Promise.all([
     e.branchId ? prisma.branch.findUnique({ where: { id: e.branchId }, select: { nameEn: true, nameAr: true } }) : null,
     e.createdById ? prisma.user.findUnique({ where: { id: e.createdById }, select: { name: true, email: true } }) : null,
     e.reversedById ? prisma.user.findUnique({ where: { id: e.reversedById }, select: { name: true, email: true } }) : null,
+    e.archivedById ? prisma.user.findUnique({ where: { id: e.archivedById }, select: { name: true, email: true } }) : null,
   ]);
   const branchName = branch ? (locale === 'ar' ? branch.nameAr : branch.nameEn) : '—';
   const isReversed = Boolean(e.reversedAt);
   const isReversalMarker = Boolean(e.reversalOfId);
+  const isArchived = Boolean(e.archivedAt);
   const managedBySync = Boolean(e.importKey);
   const hasSettlements = e.obligation && e.settlements.length > 0;
-  const canEdit = canManage && !isReversed && !isReversalMarker && !managedBySync;
+  const canEdit = ownerAdmin || (canManage && !isArchived && !isReversed && !isReversalMarker && !managedBySync);
   const canReverse = canEdit && !hasSettlements;
 
   const items: DetailField[] = [
@@ -61,8 +75,8 @@ export default async function EntryDetailPage({
     {
       label: t('f.status'),
       value: (
-        <Badge variant={isReversalMarker ? 'muted' : isReversed ? 'danger' : e.obligation ? 'warning' : 'success'}>
-          {isReversalMarker ? t('reversalMarker') : isReversed ? t('reversed') : e.obligation ? t('f.due') : t('f.paid')}
+        <Badge variant={isArchived ? 'warning' : isReversalMarker ? 'muted' : isReversed ? 'danger' : e.obligation ? 'warning' : 'success'}>
+          {isArchived ? t('archived') : isReversalMarker ? t('reversalMarker') : isReversed ? t('reversed') : e.obligation ? t('f.due') : t('f.paid')}
         </Badge>
       ),
     },
@@ -89,6 +103,9 @@ export default async function EntryDetailPage({
     { label: t('reversedAt'), value: e.reversedAt ? formatDate(e.reversedAt, locale) : '—' },
     { label: t('reversedBy'), value: reversedBy ? reversedBy.name || reversedBy.email : '—' },
     { label: t('reversalReason'), value: e.reversalReason ?? '—' },
+    { label: t('archivedAt'), value: e.archivedAt ? formatDate(e.archivedAt, locale) : '—' },
+    { label: t('archivedBy'), value: archivedBy ? archivedBy.name || archivedBy.email : '—' },
+    { label: t('archiveReason'), value: e.archiveReason ?? '—' },
   ];
 
   return (
@@ -103,16 +120,52 @@ export default async function EntryDetailPage({
       {canManage ? (
         <RecordActions
           editHref={canEdit ? `/finance/ledger/${e.id}/edit` : undefined}
+          isActive={!isArchived}
+          archiveAction={ownerAdmin ? archiveFinanceEntry.bind(null, e.id, locale, isArchived) : undefined}
+          deleteAction={ownerAdmin ? permanentlyDeleteFinanceEntry.bind(null, e.id, locale) : undefined}
           labels={{
             edit: tr('edit'),
             archive: tr('archive'),
             restore: tr('restore'),
-            delete: t('reverse'),
-            confirm: t('confirmReverse'),
+            delete: tr('delete'),
+            confirm: t('confirmPermanentDelete'),
           }}
         />
       ) : null}
       <DetailGrid items={items} />
+      {e.stockMovements.length || e.costLayers.length ? (
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold">{t('linkedStock')}</h3>
+          <DataTable
+            columns={[
+              { label: t('f.date') },
+              { label: t('f.item') },
+              { label: t('f.quantity'), align: 'end' },
+              { label: t('f.reference') },
+            ]}
+            rows={e.stockMovements.map((movement) => [
+              formatDate(movement.occurredAt, locale),
+              locale === 'ar' ? movement.inventoryItem.nameAr : movement.inventoryItem.nameEn,
+              `${formatQuantity(movement.quantity, locale)} ${movement.inventoryItem.unit}`,
+              movement.reference ?? '—',
+            ])}
+            emptyLabel={tr('none')}
+          />
+        </div>
+      ) : null}
+      {e.fixedAsset ? (
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold">{t('linkedAsset')}</h3>
+          <DetailGrid
+            items={[
+              { label: t('f.name'), value: e.fixedAsset.name },
+              { label: t('f.category'), value: e.fixedAsset.category },
+              { label: t('f.quantity'), value: `${formatQuantity(e.fixedAsset.quantity, locale)} ${e.fixedAsset.unit}` },
+              { label: t('f.value'), value: formatMoney(e.fixedAsset.totalCost, 'IQD', locale) },
+            ]}
+          />
+        </div>
+      ) : null}
       {canReverse ? (
         <div className="space-y-2">
           <ReverseEntryForm

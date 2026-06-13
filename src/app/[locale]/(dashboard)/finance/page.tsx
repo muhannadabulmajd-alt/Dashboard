@@ -21,6 +21,7 @@ import { getPageContext } from '@/server/page-context';
 import { prisma } from '@/server/db/client';
 import { enumLabel } from '@/lib/enums';
 import { formatMoney, convertToIqd } from '@/lib/money';
+import { decimalNumber } from '@/lib/decimal';
 import { can } from '@/lib/rbac';
 import { accountBalance, netCash, unassignedCash, financeTotals, type FinanceEntryLike } from '@/lib/metrics/finance';
 import { cogs, grossMargin, netSales } from '@/lib/metrics';
@@ -72,11 +73,11 @@ export default async function FinancePage({
   const [accounts, entriesRaw, orders, lines, inventoryItems] = await Promise.all([
     prisma.financeAccount.findMany({ where: { isActive: true }, orderBy: { createdAt: 'asc' } }),
     prisma.financeEntry.findMany({
-      where: { reversedAt: null, reversalOfId: null },
+      where: { archivedAt: null, reversedAt: null, reversalOfId: null },
       select: {
         id: true, type: true, amount: true, currency: true, obligation: true,
         obligationKind: true, accountId: true, toAccountId: true, settlesId: true,
-        date: true, dueDate: true, categoryType: true, party: { select: { name: true } },
+        archivedAt: true, date: true, dueDate: true, categoryType: true, party: { select: { name: true } },
       },
     }),
     getOrders(filters, scope, range),
@@ -139,7 +140,7 @@ export default async function FinancePage({
     .reduce((s, e) => s + iqd(e), 0);
   const netProfit = gross.amount - operatingExpenses;
   const inventoryValue = inventoryItems.reduce(
-    (s, item) => s + (item.unitCost ?? 0) * item.movements.reduce((sum, m) => sum + m.quantity, 0),
+    (s, item) => s + decimalNumber(item.unitCost) * item.movements.reduce((sum, m) => sum + decimalNumber(m.quantity), 0),
     0,
   );
   const netCashMovement = combined.cashIn - combined.cashOut;
@@ -319,7 +320,7 @@ export default async function FinancePage({
         <PageHeader title={t('title')} subtitle={t('subtitle')} eyebrow={t('commandCenter')} />
         {canManage ? (
           <Link
-            href="/finance/record"
+            href="/finance/ledger/new"
             className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:bg-amber/90"
           >
             <Plus className="size-4" />

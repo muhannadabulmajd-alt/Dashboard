@@ -4,6 +4,7 @@ import { buildMovementWhere } from '@/server/filters/where-builder';
 import type { DashboardFilters } from '@/lib/filters';
 import type { ResolvedRange } from '@/lib/dates';
 import type { InventoryItemLike } from '@/lib/metrics/types';
+import { decimalNumber } from '@/lib/decimal';
 
 type Scope = { branchId?: string };
 
@@ -12,7 +13,7 @@ export async function getInventoryItems(
   scope: Scope,
   range: ResolvedRange,
 ): Promise<InventoryItemLike[]> {
-  return prisma.inventoryItem.findMany({
+  const rows = await prisma.inventoryItem.findMany({
     where: scope.branchId ? { branchId: scope.branchId } : {},
     select: {
       id: true,
@@ -30,4 +31,13 @@ export async function getInventoryItems(
       },
     },
   });
+  return rows.map((item) => ({
+    ...item,
+    reorderPoint: item.reorderPoint == null ? null : decimalNumber(item.reorderPoint),
+    unitCost: item.unitCost == null ? null : decimalNumber(item.unitCost),
+    movements: item.movements.map((movement) => ({
+      ...movement,
+      quantity: decimalNumber(movement.quantity),
+    })),
+  }));
 }

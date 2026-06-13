@@ -27,6 +27,7 @@ export async function getExpenses(
       where: {
         type: { in: ['EXPENSE', 'PURCHASE'] },
         date: { gte: range.start, lte: range.end },
+        archivedAt: null,
         reversedAt: null,
         reversalOfId: null,
         ...(scope.branchId ? { branchId: scope.branchId } : {}),

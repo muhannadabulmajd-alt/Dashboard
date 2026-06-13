@@ -31,11 +31,11 @@ export default async function FinanceAccountDetailPage({
 
   const [entries, branch] = await Promise.all([
     prisma.financeEntry.findMany({
-      where: { OR: [{ accountId: id }, { toAccountId: id }] },
+      where: { archivedAt: null, OR: [{ accountId: id }, { toAccountId: id }] },
       select: {
         id: true, type: true, amount: true, currency: true, obligation: true,
         obligationKind: true, accountId: true, toAccountId: true, settlesId: true,
-        reversedAt: true, reversalOfId: true,
+        archivedAt: true, reversedAt: true, reversalOfId: true,
         date: true, description: true, reference: true, party: { select: { name: true } },
       },
       orderBy: { date: 'desc' },

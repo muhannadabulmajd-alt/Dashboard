@@ -11,6 +11,7 @@ export interface FinanceEntryLike {
   accountId: string | null;
   toAccountId: string | null;
   settlesId: string | null;
+  archivedAt?: Date | null;
   reversedAt?: Date | null;
   reversalOfId?: string | null;
 }
@@ -19,7 +20,7 @@ const IN_TYPES: FinanceType[] = ['INCOME', 'PAYMENT_IN', 'CAPITAL_IN'];
 const OUT_TYPES: FinanceType[] = ['EXPENSE', 'PURCHASE', 'PAYMENT_OUT', 'DRAWING'];
 
 export function isActiveEntry(e: FinanceEntryLike): boolean {
-  return !e.reversedAt && !e.reversalOfId;
+  return !e.archivedAt && !e.reversedAt && !e.reversalOfId;
 }
 
 /** A non-obligation entry tied to an account actually moves cash. */

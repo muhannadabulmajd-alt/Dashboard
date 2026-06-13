@@ -1,5 +1,6 @@
 import 'server-only';
 import type { Prisma } from '@prisma/client';
+import { roundMoney } from '@/lib/decimal';
 
 type Tx = Prisma.TransactionClient;
 
@@ -189,7 +190,7 @@ export async function syncInventoryReceiptFinance(
     createdById?: string | null;
   },
 ) {
-  const amount = input.quantity * input.unitCost;
+  const amount = roundMoney(input.quantity * input.unitCost);
   if (amount <= 0) return;
   if (input.paymentMode === 'PAID' && !input.accountId) return;
 

@@ -3,7 +3,8 @@ import { getTranslations } from 'next-intl/server';
 import { getPageContext } from '@/server/page-context';
 import { prisma } from '@/server/db/client';
 import { enumLabel } from '@/lib/enums';
-import { formatMoney, formatNumber, formatPercent } from '@/lib/money';
+import { formatMoney, formatNumber, formatPercent, formatQuantity } from '@/lib/money';
+import { decimalNumber } from '@/lib/decimal';
 import { formatDate, dateInputValue } from '@/lib/dates';
 import { gramsPerUnit, roastYieldFor } from '@/lib/roast';
 import { getListOptions } from '@/server/lists/resolver';
@@ -45,15 +46,27 @@ export default async function InventoryDetailPage({
   if (!item) notFound();
 
   const name = locale === 'ar' ? item.nameAr : item.nameEn;
-  const current = item.movements.reduce((s, m) => s + m.quantity, 0);
+  const current = item.movements.reduce((s, m) => s + decimalNumber(m.quantity), 0);
 
   // FIFO cost layers (§8): apply consumption since the first layer (oldest-first)
   // to derive each layer's remaining, the active cost, and the on-hand value.
   const since = item.costLayers[0]?.receivedAt;
   const consumed = since
-    ? item.movements.reduce((s, m) => (m.quantity < 0 && m.occurredAt >= since ? s - m.quantity : s), 0)
+    ? item.movements.reduce((s, m) => {
+      const quantity = decimalNumber(m.quantity);
+      return quantity < 0 && m.occurredAt >= since ? s - quantity : s;
+    }, 0)
     : 0;
-  const fifo = item.costLayers.length ? fifoStatus(item.costLayers, consumed) : null;
+  const fifo = item.costLayers.length
+    ? fifoStatus(
+      item.costLayers.map((layer) => ({
+        ...layer,
+        qtyReceived: decimalNumber(layer.qtyReceived),
+        unitCost: decimalNumber(layer.unitCost),
+      })),
+      consumed,
+    )
+    : null;
 
   // Green→roasted cost estimate (§5): for green coffee, project roasted cost
   // per roast level (managed list — added levels use the MEDIUM yield) from
@@ -61,7 +74,7 @@ export default async function InventoryDetailPage({
   let roast: { lvl: string; y: number; perKg: number; per250: number }[] | null = null;
   if (item.category === 'GREEN_COFFEE' && item.unitCost != null) {
     const [cfg, levels] = await Promise.all([getRoastConfig(), getListOptions('roastLevel', locale)]);
-    const greenPerKg = item.unitCost * (1000 / gramsPerUnit(item.unit));
+    const greenPerKg = decimalNumber(item.unitCost) * (1000 / gramsPerUnit(item.unit));
     roast = levels.map(({ value: lvl }) => {
       const y = roastYieldFor(cfg.yields, lvl);
       const perKg = roastedCostPerKg(greenPerKg, y, cfg.roastingCostPerKg);
@@ -73,10 +86,10 @@ export default async function InventoryDetailPage({
     { label: t('f.item'), value: `${item.nameEn} / ${item.nameAr}` },
     { label: t('f.category'), value: enumLabel(item.category, locale) },
     { label: t('f.unit'), value: item.unit },
-    { label: t('f.currentStock'), value: formatNumber(current, locale) },
+    { label: t('f.currentStock'), value: formatQuantity(current, locale) },
     {
       label: t('f.reorderPoint'),
-      value: item.reorderPoint != null ? formatNumber(item.reorderPoint, locale) : '—',
+      value: item.reorderPoint != null ? formatQuantity(item.reorderPoint, locale) : '—',
     },
     {
       label: t('f.avgDailyUsage'),
@@ -97,12 +110,12 @@ export default async function InventoryDetailPage({
   const mRows = item.movements.map((m) => [
     formatDate(m.occurredAt, locale),
     enumLabel(m.reason, locale),
-    formatNumber(m.quantity, locale),
+    formatQuantity(m.quantity, locale),
   ]);
 
   const receiveFields: FieldDef[] = [
-    { name: 'qtyReceived', label: t('f.qtyReceived'), type: 'number', required: true, placeholder: '0' },
-    { name: 'unitCost', label: t('f.unitCost'), type: 'number', required: true, placeholder: '0' },
+    { name: 'qtyReceived', label: t('f.qtyReceived'), type: 'number', required: true, placeholder: '0.000', step: '0.001' },
+    { name: 'unitCost', label: t('f.unitCost'), type: 'number', required: true, placeholder: '0.000', step: '0.001' },
     { name: 'receivedAt', label: t('f.receivedAt'), type: 'date', required: true },
     { name: 'expiryDate', label: t('f.expiryDate'), type: 'date' },
     { name: 'reference', label: t('f.reference'), type: 'text' },
@@ -203,9 +216,9 @@ export default async function InventoryDetailPage({
               ]}
               rows={fifo.layers.map((l) => [
                 formatDate(l.receivedAt, locale),
-                formatNumber(l.qtyReceived, locale),
+                formatQuantity(l.qtyReceived, locale),
                 formatMoney(l.unitCost, 'IQD', locale),
-                formatNumber(l.remaining, locale),
+                formatQuantity(l.remaining, locale),
                 formatMoney(l.remaining * l.unitCost, 'IQD', locale),
               ])}
               emptyLabel={t('none')}

@@ -1,5 +1,6 @@
 import 'server-only';
 import { prisma } from '@/server/db/client';
+import { decimalNumber, roundMoney } from '@/lib/decimal';
 import { fifoStatus } from '@/lib/metrics/inventory';
 
 /**
@@ -21,8 +22,8 @@ export async function recomputeProductsForItem(itemId: string, newCost: number):
       where: { productId },
       select: { quantity: true, unitCost: true },
     });
-    const cost = comps.reduce((s, c) => s + c.quantity * c.unitCost, 0);
-    await prisma.product.update({ where: { id: productId }, data: { cogsPerUnit: cost } });
+    const cost = comps.reduce((s, c) => s + decimalNumber(c.quantity) * decimalNumber(c.unitCost), 0);
+    await prisma.product.update({ where: { id: productId }, data: { cogsPerUnit: roundMoney(cost) } });
   }
 }
 
@@ -48,11 +49,18 @@ export async function syncActiveCost(itemId: string): Promise<number | null> {
     where: { inventoryItemId: itemId, quantity: { lt: 0 }, occurredAt: { gte: layers[0].receivedAt } },
     _sum: { quantity: true },
   });
-  const consumed = -(out._sum.quantity ?? 0);
-  const status = fifoStatus(layers, consumed);
+  const consumed = -decimalNumber(out._sum.quantity);
+  const status = fifoStatus(
+    layers.map((layer) => ({
+      ...layer,
+      qtyReceived: decimalNumber(layer.qtyReceived),
+      unitCost: decimalNumber(layer.unitCost),
+    })),
+    consumed,
+  );
   if (status.activeCost == null) return null; // depleted — keep the last cost
   const item = await prisma.inventoryItem.findUnique({ where: { id: itemId }, select: { unitCost: true } });
-  if (item && item.unitCost !== status.activeCost) {
+  if (item && decimalNumber(item.unitCost) !== status.activeCost) {
     await prisma.inventoryItem.update({ where: { id: itemId }, data: { unitCost: status.activeCost } });
     await recomputeProductsForItem(itemId, status.activeCost);
   }

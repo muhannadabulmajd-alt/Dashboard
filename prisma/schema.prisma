@@ -204,25 +204,25 @@ model User {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
-  branch         Branch?      @relation(fields: [branchId], references: [id])
-  createdBy      User?        @relation("UserCreatedBy", fields: [createdById], references: [id])
-  createdUsers   User[]       @relation("UserCreatedBy")
+  branch          Branch?      @relation(fields: [branchId], references: [id])
+  createdBy       User?        @relation("UserCreatedBy", fields: [createdById], references: [id])
+  createdUsers    User[]       @relation("UserCreatedBy")
   operatedBatches RoastBatch[] @relation("BatchOperator")
-  auditLogs      AuditLog[]
+  auditLogs       AuditLog[]
 
   @@index([role])
   @@index([branchId])
 }
 
 model Branch {
-  id          String      @id @default(cuid())
-  code        String      @unique
+  id          String  @id @default(cuid())
+  code        String  @unique
   nameEn      String
   nameAr      String
-  branchType  String      @default("COMPANY") // HQ | COMPANY | FRANCHISE (§12)
-  governorate String      @default("BAGHDAD") // list-managed code
-  isFranchise Boolean     @default(false) // kept in sync with branchType for data scoping
-  isActive    Boolean     @default(true)
+  branchType  String  @default("COMPANY") // HQ | COMPANY | FRANCHISE (§12)
+  governorate String  @default("BAGHDAD") // list-managed code
+  isFranchise Boolean @default(false) // kept in sync with branchType for data scoping
+  isActive    Boolean @default(true)
 
   // Location & contact
   city         String?
@@ -258,6 +258,7 @@ model Branch {
   expenses       Expense[]
   batches        RoastBatch[]
   inventoryItems InventoryItem[]
+  fixedAssets    FixedAsset[]
 }
 
 // ---------------------------------------------------------------------------
@@ -265,38 +266,38 @@ model Branch {
 // ---------------------------------------------------------------------------
 
 model Product {
-  id              String      @id @default(cuid())
-  sku             String      @unique
-  nameEn          String
-  nameAr          String
-  productLine     ProductLine
-  groupId         String? // CR/BRD: parent product group (variations module)
-  sizeGrams       Int?
-  sizeLabel       String
-  grind           String      @default("NONE") // list-managed code
-  roastLevel      String? // list-managed code
-  origin          String?
-  isBlend         Boolean     @default(false)
-  variationType   String? // what makes this variation differ: size / grind / roast / packaging / flavor
-  imageUrl        String?
-  sellingPrice    Int // minor units of sellingCurrency (current base price)
-  sellingCurrency Currency    @default(IQD)
-  minSellingPrice Int? // optional floor for manual price overrides
-  cogsPerUnit     Int // minor units of sellingCurrency
-  invoiceName     String? // display name on the invoice (defaults to name)
-  allowDiscount      Boolean  @default(true) // order usage (§6)
-  allowPriceOverride Boolean  @default(true)
-  trackInventory     Boolean  @default(true) // deduct finished stock on sale
-  isActive        Boolean     @default(true)
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
+  id                 String      @id @default(cuid())
+  sku                String      @unique
+  nameEn             String
+  nameAr             String
+  productLine        ProductLine
+  groupId            String? // CR/BRD: parent product group (variations module)
+  sizeGrams          Int?
+  sizeLabel          String
+  grind              String      @default("NONE") // list-managed code
+  roastLevel         String? // list-managed code
+  origin             String?
+  isBlend            Boolean     @default(false)
+  variationType      String? // what makes this variation differ: size / grind / roast / packaging / flavor
+  imageUrl           String?
+  sellingPrice       Int // minor units of sellingCurrency (current base price)
+  sellingCurrency    Currency    @default(IQD)
+  minSellingPrice    Int? // optional floor for manual price overrides
+  cogsPerUnit        Int // minor units of sellingCurrency
+  invoiceName        String? // display name on the invoice (defaults to name)
+  allowDiscount      Boolean     @default(true) // order usage (§6)
+  allowPriceOverride Boolean     @default(true)
+  trackInventory     Boolean     @default(true) // deduct finished stock on sale
+  isActive           Boolean     @default(true)
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
 
   orderLines     OrderLine[]
   batchLinks     BatchSkuLink[]
   inventoryItems InventoryItem[]
   components     ProductComponent[]
   prices         ProductPrice[]
-  group          ProductGroup?   @relation(fields: [groupId], references: [id])
+  group          ProductGroup?      @relation(fields: [groupId], references: [id])
 
   @@index([productLine])
   @@index([grind])
@@ -308,15 +309,15 @@ model Product {
 /// each effective from a date. The latest non-future BASE entry is the current
 /// selling price; future entries are scheduled. Immutable history.
 model ProductPrice {
-  id            String    @id @default(cuid())
+  id            String   @id @default(cuid())
   productId     String
-  kind          String    @default("BASE") // BASE | WHOLESALE | CHANNEL
+  kind          String   @default("BASE") // BASE | WHOLESALE | CHANNEL
   channel       String? // set when kind = CHANNEL; list-managed code
   price         Int // minor units
-  currency      Currency  @default(IQD)
+  currency      Currency @default(IQD)
   effectiveFrom DateTime
   note          String?
-  createdAt     DateTime  @default(now())
+  createdAt     DateTime @default(now())
   createdById   String?
 
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
@@ -332,8 +333,8 @@ model ProductComponent {
   productId       String
   inventoryItemId String? // linked stock item: cost is dynamic + drives capacity (§5-7)
   name            String // label, e.g. "Green beans", "Bag", "Label", "Cardamom", "Labor"
-  quantity        Int      @default(1)
-  unitCost        Int // minor units IQD per unit (live item cost when linked, else manual)
+  quantity        Decimal  @default(1) @db.Decimal(14, 3)
+  unitCost        Decimal  @db.Decimal(14, 3) // minor units IQD per unit (live item cost when linked, else manual)
   createdAt       DateTime @default(now())
 
   product       Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
@@ -458,8 +459,8 @@ model OrderLine {
 // ---------------------------------------------------------------------------
 
 model RoastBatch {
-  id                 String      @id @default(cuid())
-  batchNumber        String      @unique
+  id                 String    @id @default(cuid())
+  batchNumber        String    @unique
   roastDate          DateTime?
   packagingDate      DateTime?
   origin             String
@@ -472,8 +473,8 @@ model RoastBatch {
   operatorId         String?
   branchId           String?
   uploadBatchId      String?
-  isActive           Boolean    @default(true)
-  createdAt          DateTime   @default(now())
+  isActive           Boolean   @default(true)
+  createdAt          DateTime  @default(now())
 
   operator User?          @relation("BatchOperator", fields: [operatorId], references: [id])
   branch   Branch?        @relation(fields: [branchId], references: [id])
@@ -506,15 +507,15 @@ model InventoryItem {
   nameEn        String
   nameAr        String
   unit          String // "g", "unit", "sachet"
-  reorderPoint  Int?
+  reorderPoint  Decimal?          @db.Decimal(14, 3)
   avgDailyUsage Float?
-  unitCost      Int? // minor units IQD, for stock valuation
+  unitCost      Decimal?          @db.Decimal(14, 3) // minor units IQD, for stock valuation
   branchId      String?
   isActive      Boolean           @default(true)
   createdAt     DateTime          @default(now())
 
-  product    Product?           @relation(fields: [productId], references: [id])
-  branch     Branch?            @relation(fields: [branchId], references: [id])
+  product    Product?             @relation(fields: [productId], references: [id])
+  branch     Branch?              @relation(fields: [branchId], references: [id])
   movements  StockMovement[]
   recipeUses ProductComponent[]
   costLayers InventoryCostLayer[]
@@ -529,22 +530,26 @@ model InventoryItem {
 model InventoryCostLayer {
   id              String   @id @default(cuid())
   inventoryItemId String
-  qtyReceived     Int
-  unitCost        Int // minor units IQD per unit
+  financeEntryId  String?
+  qtyReceived     Decimal  @db.Decimal(14, 3)
+  unitCost        Decimal  @db.Decimal(14, 3) // minor units IQD per unit
   receivedAt      DateTime
   createdAt       DateTime @default(now())
 
   inventoryItem InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+  financeEntry  FinanceEntry? @relation(fields: [financeEntryId], references: [id], onDelete: SetNull)
 
   @@index([inventoryItemId, receivedAt])
+  @@index([financeEntryId])
 }
 
 model StockMovement {
   id              String         @id @default(cuid())
   inventoryItemId String
+  financeEntryId  String?
   occurredAt      DateTime
   reason          MovementReason
-  quantity        Int // signed: + in / - out, in the item's base unit
+  quantity        Decimal        @db.Decimal(14, 3) // signed: + in / - out, in the item's base unit
   reference       String?
   externalId      String?        @unique
   expiryDate      DateTime?
@@ -554,12 +559,45 @@ model StockMovement {
   createdAt       DateTime       @default(now())
 
   inventoryItem InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+  financeEntry  FinanceEntry? @relation(fields: [financeEntryId], references: [id], onDelete: SetNull)
   branch        Branch?       @relation(fields: [branchId], references: [id])
   order         Order?        @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@index([inventoryItemId, occurredAt])
+  @@index([financeEntryId])
   @@index([reason])
   @@index([orderId])
+}
+
+model FixedAsset {
+  id             String    @id @default(cuid())
+  name           String
+  category       String
+  quantity       Decimal   @default(1) @db.Decimal(14, 3)
+  unit           String
+  totalCost      Int
+  unitCost       Decimal   @db.Decimal(14, 3)
+  purchaseDate   DateTime
+  partyId        String?
+  branchId       String?
+  financeEntryId String?   @unique
+  notes          String?
+  isActive       Boolean   @default(true)
+  archivedAt     DateTime?
+  archivedById   String?
+  archiveReason  String?
+  createdById    String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  party        Party?        @relation(fields: [partyId], references: [id], onDelete: SetNull)
+  branch       Branch?       @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  financeEntry FinanceEntry? @relation(fields: [financeEntryId], references: [id], onDelete: SetNull)
+
+  @@index([category])
+  @@index([partyId])
+  @@index([branchId])
+  @@index([isActive])
 }
 
 // ---------------------------------------------------------------------------
@@ -803,66 +841,73 @@ model FinanceAccount {
 }
 
 model Party {
-  id          String    @id @default(cuid())
-  name        String
-  type        PartyType @default(OTHER)
-  phone       String?
-  email       String?
-  address     String?
-  branchId    String?
-  openingPayable Int   @default(0)
-  openingReceivable Int @default(0)
-  notes       String?
-  equityShare Float? // ownership % (shareholders)
-  isActive    Boolean   @default(true)
-  createdAt   DateTime  @default(now())
+  id                String    @id @default(cuid())
+  name              String
+  type              PartyType @default(OTHER)
+  phone             String?
+  email             String?
+  address           String?
+  branchId          String?
+  openingPayable    Int       @default(0)
+  openingReceivable Int       @default(0)
+  notes             String?
+  equityShare       Float? // ownership % (shareholders)
+  isActive          Boolean   @default(true)
+  createdAt         DateTime  @default(now())
 
-  entries FinanceEntry[]
+  entries     FinanceEntry[]
+  fixedAssets FixedAsset[]
 
   @@index([type])
   @@index([branchId])
 }
 
 model FinanceEntry {
-  id            String               @id @default(cuid())
-  date          DateTime
-  type          FinanceType
-  amount        Int // minor units, positive — ALWAYS the IQD value
-  currency      Currency             @default(IQD)
+  id             String               @id @default(cuid())
+  date           DateTime
+  type           FinanceType
+  amount         Int // minor units, positive — ALWAYS the IQD value
+  currency       Currency             @default(IQD)
   // Original payment when made in a foreign currency (e.g. paid in USD).
   // `amount`/`currency` stay IQD; these preserve "I paid origAmount origCurrency
   // at fxRate IQD per 1 unit" for the audit trail. Null for native-IQD entries.
-  origCurrency  Currency?
-  origAmount    Int? // minor units in origCurrency (USD cents)
-  fxRate        Int? // IQD per 1 unit of origCurrency on the entry date
+  origCurrency   Currency?
+  origAmount     Int? // minor units in origCurrency (USD cents)
+  fxRate         Int? // IQD per 1 unit of origCurrency on the entry date
   // When obligation=true this is a payable/receivable that has NOT moved cash.
   // When false it is an actual cash movement on `account` (and `toAccount` for transfers).
-  obligation    Boolean              @default(false)
+  obligation     Boolean              @default(false)
   obligationKind ObligationKind?
-  dueDate       DateTime?
-  accountId     String?
-  toAccountId   String?
-  partyId       String?
-  categoryType  ExpenseCategoryType?
-  settlesId     String? // payment that settles an obligation (partial allowed)
-  importKey     String? @unique // idempotent bulk import (re-uploads upsert)
-  description   String?
-  reference     String?
-  attachmentUrl String?
-  branchId      String?
-  orderId       String?
-  createdById   String?
-  reversalOfId  String?
-  reversedAt    DateTime?
-  reversedById  String?
+  dueDate        DateTime?
+  accountId      String?
+  toAccountId    String?
+  partyId        String?
+  categoryType   ExpenseCategoryType?
+  settlesId      String? // payment that settles an obligation (partial allowed)
+  importKey      String?              @unique // idempotent bulk import (re-uploads upsert)
+  description    String?
+  reference      String?
+  attachmentUrl  String?
+  branchId       String?
+  orderId        String?
+  createdById    String?
+  archivedAt     DateTime?
+  archivedById   String?
+  archiveReason  String?
+  reversalOfId   String?
+  reversedAt     DateTime?
+  reversedById   String?
   reversalReason String?
-  createdAt     DateTime             @default(now())
+  createdAt      DateTime             @default(now())
 
-  account     FinanceAccount? @relation("AccountEntries", fields: [accountId], references: [id])
-  toAccount   FinanceAccount? @relation("TransferTo", fields: [toAccountId], references: [id])
-  party       Party?          @relation(fields: [partyId], references: [id])
-  settles     FinanceEntry?   @relation("Settlements", fields: [settlesId], references: [id])
-  settlements FinanceEntry[]  @relation("Settlements")
+  account        FinanceAccount?      @relation("AccountEntries", fields: [accountId], references: [id])
+  toAccount      FinanceAccount?      @relation("TransferTo", fields: [toAccountId], references: [id])
+  party          Party?               @relation(fields: [partyId], references: [id])
+  settles        FinanceEntry?        @relation("Settlements", fields: [settlesId], references: [id])
+  settlements    FinanceEntry[]       @relation("Settlements")
+  stockMovements StockMovement[]
+  costLayers     InventoryCostLayer[]
+  fixedAsset     FixedAsset?
 
   @@index([date])
   @@index([type])
@@ -873,6 +918,7 @@ model FinanceEntry {
   @@index([branchId])
   @@index([orderId])
   @@index([createdById])
+  @@index([archivedAt])
   @@index([reversalOfId])
 }
 

@@ -2,7 +2,8 @@ import { getTranslations } from 'next-intl/server';
 import { getPageContext } from '@/server/page-context';
 import { prisma } from '@/server/db/client';
 import { enumLabel, INVENTORY_CATEGORIES } from '@/lib/enums';
-import { formatNumber, formatMoney } from '@/lib/money';
+import { formatNumber, formatMoney, formatQuantity } from '@/lib/money';
+import { decimalNumber } from '@/lib/decimal';
 import { PageHeader } from '@/components/ui/primitives';
 import { DataTable, type Column } from '@/components/data-table/DataTable';
 import { RecordsSummary, type SummaryStat } from '@/components/records/Summary';
@@ -26,9 +27,9 @@ export default async function InventoryRecordsPage({
     include: { movements: { select: { quantity: true } } },
   });
 
-  const currentStock = (it: (typeof items)[number]) => it.movements.reduce((s, m) => s + m.quantity, 0);
-  const stockValue = items.reduce((s, it) => s + currentStock(it) * (it.unitCost ?? 0), 0);
-  const reorderCount = items.filter((it) => it.reorderPoint != null && currentStock(it) < it.reorderPoint).length;
+  const currentStock = (it: (typeof items)[number]) => it.movements.reduce((s, m) => s + decimalNumber(m.quantity), 0);
+  const stockValue = items.reduce((s, it) => s + currentStock(it) * decimalNumber(it.unitCost), 0);
+  const reorderCount = items.filter((it) => it.reorderPoint != null && currentStock(it) < decimalNumber(it.reorderPoint)).length;
   const stats: SummaryStat[] = [
     { label: t('k.total'), value: formatNumber(items.length, locale) },
     { label: t('k.stockValue'), value: formatMoney(stockValue, 'IQD', locale) },
@@ -63,12 +64,12 @@ export default async function InventoryRecordsPage({
 
   const rows = visible.map((it) => {
     const name = locale === 'ar' ? it.nameAr : it.nameEn;
-    const current = it.movements.reduce((s, m) => s + m.quantity, 0);
+    const current = currentStock(it);
     return [
       name,
       enumLabel(it.category, locale),
       it.unit,
-      formatNumber(current, locale),
+      formatQuantity(current, locale),
       <Link key="o" href={`/admin/records/inventory/${it.id}`} className="font-medium text-primary hover:underline">
         {t('open')}
       </Link>,

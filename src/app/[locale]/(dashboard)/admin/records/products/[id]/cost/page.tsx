@@ -3,6 +3,7 @@ import { getTranslations } from 'next-intl/server';
 import { getPageContext } from '@/server/page-context';
 import { prisma } from '@/server/db/client';
 import { formatMoney } from '@/lib/money';
+import { decimalNumber, optionalDecimalString } from '@/lib/decimal';
 import { PageHeader } from '@/components/ui/primitives';
 import { BackLink } from '@/components/records/parts';
 import { ComponentEditor, type ComponentRow } from '@/components/records/ComponentEditor';
@@ -30,14 +31,14 @@ export default async function ProductCostPage({
   const items = itemRows.map((it) => ({
     value: it.id,
     label: `${locale === 'ar' ? it.nameAr : it.nameEn} (${it.unit})`,
-    cost: it.unitCost ?? 0,
+    cost: decimalNumber(it.unitCost),
   }));
 
   const initial: ComponentRow[] = p.components.map((c) => ({
     inventoryItemId: c.inventoryItemId ?? '',
     name: c.name,
-    quantity: String(c.quantity),
-    unitCost: String(c.unitCost),
+    quantity: optionalDecimalString(c.quantity),
+    unitCost: optionalDecimalString(c.unitCost),
   }));
   const labels = {
     components: t('costRecipe'),

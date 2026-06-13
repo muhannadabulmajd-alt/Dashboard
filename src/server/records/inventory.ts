@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { prisma } from '@/server/db/client';
 import { INVENTORY_CATEGORIES } from '@/lib/enums';
+import { decimalNumber } from '@/lib/decimal';
 import { syncActiveCost, recomputeProductsForItem } from '@/server/inventory/fifo';
 import { syncInventoryReceiptFinance } from '@/server/finance/sync';
 import { requireCap, audit, reqField, optField, type ActionState } from './shared';
@@ -14,6 +15,8 @@ const FINANCE = '/[locale]/(dashboard)/finance';
 const LEDGER = '/[locale]/(dashboard)/finance/ledger';
 const DUES = '/[locale]/(dashboard)/finance/dues';
 const CAP = 'manage:inventory' as const;
+const decimal3 = z.coerce.number().nonnegative().refine((v) => Number.isInteger(v * 1000));
+const positiveDecimal3 = z.coerce.number().positive().refine((v) => Number.isInteger(v * 1000));
 
 const schema = z.object({
   nameEn: z.string().min(1),
@@ -21,9 +24,9 @@ const schema = z.object({
   category: z.enum(INVENTORY_CATEGORIES),
   unit: z.string().min(1),
   productId: z.string().optional(), // linked variation: sales deduct this item (§18)
-  reorderPoint: z.coerce.number().int().nonnegative().optional(),
+  reorderPoint: decimal3.optional(),
   avgDailyUsage: z.coerce.number().nonnegative().optional(),
-  unitCost: z.coerce.number().int().nonnegative().optional(),
+  unitCost: decimal3.optional(),
 });
 
 function parse(fd: FormData) {
@@ -69,7 +72,7 @@ export async function updateInventory(
   await audit(user.id, 'UPDATE', 'InventoryItem', { id });
   // Dynamic recalculation (§4.3): a changed component cost recomputes the cost
   // of every product whose recipe links this item.
-  if (r.data.unitCost != null && before && r.data.unitCost !== before.unitCost) {
+  if (r.data.unitCost != null && before && r.data.unitCost !== decimalNumber(before.unitCost)) {
     await recomputeProductsForItem(id, r.data.unitCost);
   }
   revalidatePath(LIST, 'page');
@@ -77,8 +80,8 @@ export async function updateInventory(
 }
 
 const receiveSchema = z.object({
-  qtyReceived: z.coerce.number().int().positive(),
-  unitCost: z.coerce.number().int().nonnegative(),
+  qtyReceived: positiveDecimal3,
+  unitCost: decimal3,
   receivedAt: z.coerce.date(),
   expiryDate: z.coerce.date().optional(),
   reference: z.string().optional(),

@@ -16,7 +16,7 @@ export default async function EditEntryPage({
   params: Promise<{ locale: string; id: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { locale } = await getPageContext(params, searchParams, 'manage:finance');
+  const { locale, user } = await getPageContext(params, searchParams, 'manage:finance');
   const { id } = await params;
   const t = await getTranslations('finance');
   const tr = await getTranslations('records');
@@ -26,7 +26,8 @@ export default async function EditEntryPage({
     prisma.party.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true } }),
     prisma.branch.findMany({ where: { isActive: true }, orderBy: { nameEn: 'asc' }, select: { id: true, nameEn: true, nameAr: true } }),
   ]);
-  if (!entry || entry.reversedAt || entry.reversalOfId || entry.importKey) notFound();
+  const ownerAdmin = user.role === 'OWNER' || user.role === 'ADMIN';
+  if (!entry || (!ownerAdmin && (entry.reversedAt || entry.reversalOfId || entry.importKey || entry.archivedAt))) notFound();
 
   // Entries are stored in IQD; if one was paid in a foreign currency, edit it
   // back in that currency + rate so saving re-applies the same conversion.

@@ -1,4 +1,5 @@
 import type { Currency } from '@prisma/client';
+import { decimalNumber, type DecimalLike } from './decimal';
 
 export type AppLocale = 'ar' | 'en';
 
@@ -15,8 +16,8 @@ function intlLocale(locale: AppLocale): string {
 }
 
 /** Convert integer minor units to a major-unit number. */
-export function toMajor(amountMinor: number, currency: Currency): number {
-  return amountMinor / MINOR_PER_UNIT[currency];
+export function toMajor(amountMinor: DecimalLike, currency: Currency): number {
+  return decimalNumber(amountMinor) / MINOR_PER_UNIT[currency];
 }
 
 /** Convert a major-unit number to integer minor units. */
@@ -26,7 +27,7 @@ export function toMinor(amountMajor: number, currency: Currency): number {
 
 /** Format an integer minor-unit amount as a localized currency string. */
 export function formatMoney(
-  amountMinor: number,
+  amountMinor: DecimalLike,
   currency: Currency,
   locale: AppLocale = 'en',
 ): string {
@@ -41,7 +42,7 @@ export function formatMoney(
 
 /** Compact money format (e.g. "1.2M IQD") for dense KPI cards. */
 export function formatMoneyCompact(
-  amountMinor: number,
+  amountMinor: DecimalLike,
   currency: Currency,
   locale: AppLocale = 'en',
 ): string {
@@ -54,11 +55,20 @@ export function formatMoneyCompact(
 }
 
 export function formatNumber(
-  value: number,
+  value: DecimalLike,
   locale: AppLocale = 'en',
   maximumFractionDigits = 0,
 ): string {
-  return new Intl.NumberFormat(intlLocale(locale), { maximumFractionDigits }).format(value);
+  return new Intl.NumberFormat(intlLocale(locale), { maximumFractionDigits }).format(decimalNumber(value));
+}
+
+export function formatQuantity(value: DecimalLike, locale: AppLocale = 'en'): string {
+  const number = decimalNumber(value);
+  const hasFraction = Math.abs(number % 1) > 0.0001;
+  return new Intl.NumberFormat(intlLocale(locale), {
+    minimumFractionDigits: hasFraction ? 3 : 0,
+    maximumFractionDigits: 3,
+  }).format(number);
 }
 
 /** Format a 0..1 ratio as a percentage string. */

@@ -61,6 +61,8 @@ function ledgerWhere(p: URLSearchParams): Prisma.FinanceEntryWhereInput {
   if (status === 'due') and.push({ obligation: true, reversedAt: null, reversalOfId: null });
   if (status === 'reversed') and.push({ reversedAt: { not: null } });
   if (status === 'reversal') and.push({ reversalOfId: { not: null } });
+  if (status === 'archived') and.push({ archivedAt: { not: null } });
+  else and.push({ archivedAt: null });
   return and.length ? { AND: and } : {};
 }
 
@@ -92,7 +94,7 @@ export async function GET(req: NextRequest) {
   if (type === 'dues') {
     const kind = p.get('kind') as ObligationKind | null;
     const obligations = await prisma.financeEntry.findMany({
-      where: { obligation: true, reversedAt: null, reversalOfId: null, ...(kind ? { obligationKind: kind } : {}) },
+      where: { obligation: true, archivedAt: null, reversedAt: null, reversalOfId: null, ...(kind ? { obligationKind: kind } : {}) },
       include: { party: { select: { name: true } }, settlements: { where: { reversedAt: null, reversalOfId: null }, select: { amount: true } } },
       orderBy: { dueDate: 'asc' },
     });
@@ -121,7 +123,7 @@ export async function GET(req: NextRequest) {
         select: {
           id: true, type: true, amount: true, currency: true, obligation: true,
           obligationKind: true, accountId: true, toAccountId: true, settlesId: true,
-          reversedAt: true, reversalOfId: true,
+          archivedAt: true, reversedAt: true, reversalOfId: true,
         },
       }),
     ]);

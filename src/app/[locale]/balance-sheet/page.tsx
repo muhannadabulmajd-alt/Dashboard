@@ -5,6 +5,7 @@ import { prisma } from '@/server/db/client';
 import { formatMoney, convertToIqd, type AppLocale } from '@/lib/money';
 import { formatDate } from '@/lib/dates';
 import { accountBalance, netCash, unassignedCash, financeTotals, type FinanceEntryLike } from '@/lib/metrics/finance';
+import { decimalNumber } from '@/lib/decimal';
 import { can } from '@/lib/rbac';
 import { getUsdToIqd } from '@/server/settings';
 import { PrintButton } from '@/components/PrintButton';
@@ -29,10 +30,10 @@ export default async function BalanceSheetPage({ params }: { params: Promise<{ l
   const [accounts, entriesRaw, inventoryItems] = await Promise.all([
     prisma.financeAccount.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }),
     prisma.financeEntry.findMany({
-      where: { reversedAt: null, reversalOfId: null },
+      where: { archivedAt: null, reversedAt: null, reversalOfId: null },
       select: {
         id: true, type: true, amount: true, currency: true, obligation: true,
-        obligationKind: true, accountId: true, toAccountId: true, settlesId: true,
+        obligationKind: true, accountId: true, toAccountId: true, settlesId: true, archivedAt: true,
       },
     }),
     prisma.inventoryItem.findMany({
@@ -48,7 +49,7 @@ export default async function BalanceSheetPage({ params }: { params: Promise<{ l
 
   const rate = await getUsdToIqd();
   const inventoryValue = inventoryItems.reduce(
-    (s, item) => s + (item.unitCost ?? 0) * item.movements.reduce((sum, m) => sum + m.quantity, 0),
+    (s, item) => s + decimalNumber(item.unitCost) * item.movements.reduce((sum, m) => sum + decimalNumber(m.quantity), 0),
     0,
   );
   const comb = { cashBank: 0, receivables: 0, payables: 0, capital: 0, inventory: inventoryValue };

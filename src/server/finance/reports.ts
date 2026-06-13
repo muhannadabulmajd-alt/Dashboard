@@ -142,6 +142,7 @@ export async function getCashFlowReport(
       where: {
         date: { gte: range.start, lte: range.end },
         obligation: false,
+        archivedAt: null,
         reversedAt: null,
         reversalOfId: null,
         ...branchEntryWhere(filters, scope),
@@ -335,6 +336,7 @@ export async function getBranchProfitabilityReport(
       where: {
         type: { in: ['EXPENSE', 'PURCHASE'] },
         date: { gte: range.start, lte: range.end },
+        archivedAt: null,
         reversedAt: null,
         reversalOfId: null,
         ...branchEntryWhere(filters, scope),

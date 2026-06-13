@@ -78,6 +78,18 @@ describe('finance metrics', () => {
     expect(unassignedCash(entries)).toBe(-3_000_000); // only the real account-less purchase
   });
 
+  it('ignores archived entries in balances and totals', () => {
+    const entries = [
+      e({ id: 'live', type: 'INCOME', amount: 500_000, accountId: 'cash' }),
+      e({ id: 'archived', type: 'EXPENSE', amount: 200_000, accountId: 'cash', archivedAt: new Date('2026-06-01') }),
+      e({ id: 'due', type: 'PURCHASE', amount: 300_000, obligation: true, obligationKind: 'PAYABLE', accountId: null, archivedAt: new Date('2026-06-01') }),
+    ];
+    const t = financeTotals(entries);
+    expect(accountBalance({ id: 'cash', openingBalance: 0 }, entries)).toBe(500_000);
+    expect(t.expenses).toBe(0);
+    expect(t.outstandingPayable).toBe(0);
+  });
+
   it('buckets dues by age (0-30 / 30-60 / 60+)', () => {
     const asOf = new Date('2026-06-30T00:00:00Z');
     const b = agingBuckets(

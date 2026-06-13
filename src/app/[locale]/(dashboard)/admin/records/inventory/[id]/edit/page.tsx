@@ -3,6 +3,7 @@ import { getTranslations } from 'next-intl/server';
 import { getPageContext } from '@/server/page-context';
 import { prisma } from '@/server/db/client';
 import { enumLabel } from '@/lib/enums';
+import { optionalDecimalString } from '@/lib/decimal';
 import { PageHeader } from '@/components/ui/primitives';
 import { RecordForm } from '@/components/records/form';
 import { BackLink } from '@/components/records/parts';
@@ -33,9 +34,9 @@ export default async function EditInventoryPage({
     category: item.category,
     unit: item.unit,
     productId: item.productId ?? '',
-    reorderPoint: item.reorderPoint ?? '',
+    reorderPoint: optionalDecimalString(item.reorderPoint),
     avgDailyUsage: item.avgDailyUsage ?? '',
-    unitCost: item.unitCost ?? '',
+    unitCost: optionalDecimalString(item.unitCost),
   };
   const errors = { invalid: t('err.invalid'), exists: t('err.exists'), forbidden: t('err.forbidden') };
 

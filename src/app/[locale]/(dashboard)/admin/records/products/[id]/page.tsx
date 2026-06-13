@@ -5,7 +5,8 @@ import { getPageContext } from '@/server/page-context';
 import { prisma } from '@/server/db/client';
 import { enumLabel } from '@/lib/enums';
 import { getListOptions } from '@/server/lists/resolver';
-import { formatMoney, formatNumber, type AppLocale } from '@/lib/money';
+import { formatMoney, formatNumber, formatQuantity, type AppLocale } from '@/lib/money';
+import { decimalNumber, type DecimalLike } from '@/lib/decimal';
 import { formatDate, formatDateTime, dateInputValue } from '@/lib/dates';
 import { productionCapacity } from '@/lib/metrics/inventory';
 import { effectivePrice, scheduledPrices } from '@/lib/metrics/pricing';
@@ -65,9 +66,9 @@ export default async function ProductDetailPage({
   const stockRows = stockIds.length
     ? await prisma.stockMovement.groupBy({ by: ['inventoryItemId'], where: { inventoryItemId: { in: stockIds } }, _sum: { quantity: true } })
     : [];
-  const stockByItem = new Map(stockRows.map((s) => [s.inventoryItemId, s._sum.quantity ?? 0]));
+  const stockByItem = new Map(stockRows.map((s) => [s.inventoryItemId, decimalNumber(s._sum.quantity)]));
   const capacity = productionCapacity(
-    p.components.map((c) => ({ inventoryItemId: c.inventoryItemId, quantity: c.quantity })),
+    p.components.map((c) => ({ inventoryItemId: c.inventoryItemId, quantity: decimalNumber(c.quantity) })),
     stockByItem,
   );
   const limitingName = capacity.limiting ? (p.components.find((c) => c.inventoryItemId === capacity.limiting)?.name ?? '') : '';
@@ -242,12 +243,12 @@ function CostTab({
   t,
 }: {
   productId: string;
-  components: { id: string; name: string; quantity: number; unitCost: number; inventoryItemId: string | null }[];
+  components: { id: string; name: string; quantity: DecimalLike; unitCost: DecimalLike; inventoryItemId: string | null }[];
   currency: 'IQD' | 'USD';
   locale: AppLocale;
   t: T;
 }) {
-  const total = components.reduce((s, c) => s + c.quantity * c.unitCost, 0);
+  const total = components.reduce((s, c) => s + decimalNumber(c.quantity) * decimalNumber(c.unitCost), 0);
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
@@ -261,9 +262,9 @@ function CostTab({
         columns={[{ label: t('f.name') }, { label: t('f.qty'), align: 'end' }, { label: t('f.unitCost'), align: 'end' }, { label: t('f.lineTotal'), align: 'end' }]}
         rows={components.map((c) => [
           c.inventoryItemId ? `${c.name} · ${t('price.linked')}` : c.name,
-          formatNumber(c.quantity, locale),
+          formatQuantity(c.quantity, locale),
           formatMoney(c.unitCost, currency, locale),
-          formatMoney(c.quantity * c.unitCost, currency, locale),
+          formatMoney(decimalNumber(c.quantity) * decimalNumber(c.unitCost), currency, locale),
         ])}
         emptyLabel={t('costRecipeHint')}
       />
@@ -280,7 +281,7 @@ function InventoryTab({
   locale,
   t,
 }: {
-  items: { id: string; nameEn: string; nameAr: string; unit: string; unitCost: number | null; reorderPoint: number | null }[];
+  items: { id: string; nameEn: string; nameAr: string; unit: string; unitCost: DecimalLike; reorderPoint: DecimalLike }[];
   stockByItem: Map<string, number>;
   capacity: { producible: number | null };
   limitingName: string;
@@ -306,7 +307,7 @@ function InventoryTab({
         columns={[{ label: t('f.item') }, { label: t('f.currentStock'), align: 'end' }, { label: t('f.unitCost'), align: 'end' }, { label: '', align: 'end' }]}
         rows={items.map((it) => [
           locale === 'ar' ? it.nameAr : it.nameEn,
-          `${formatNumber(stockByItem.get(it.id) ?? 0, locale)} ${it.unit}`,
+          `${formatQuantity(stockByItem.get(it.id) ?? 0, locale)} ${it.unit}`,
           it.unitCost != null ? formatMoney(it.unitCost, 'IQD', locale) : '—',
           <Link key="o" href={`/admin/records/inventory/${it.id}`} className="font-medium text-primary hover:underline">{t('open')}</Link>,
         ])}

@@ -2,10 +2,10 @@ import { getTranslations } from 'next-intl/server';
 import { getPageContext } from '@/server/page-context';
 import { prisma } from '@/server/db/client';
 import { PageHeader } from '@/components/ui/primitives';
-import { RecordForm } from '@/components/records/form';
 import { BackLink } from '@/components/records/parts';
-import { createEntry } from '@/server/finance/entries';
-import { entryFields } from '../_fields';
+import { CentralEntryPanel } from '@/components/finance/CentralEntryPanel';
+import { createCentralRecord, quickCreateCustomer, quickCreateParty } from '@/server/finance/central-records';
+import { dateInputValue } from '@/lib/dates';
 
 export default async function NewEntryPage({
   params,
@@ -17,29 +17,41 @@ export default async function NewEntryPage({
   const { locale } = await getPageContext(params, searchParams, 'manage:finance');
   const t = await getTranslations('finance');
   const tr = await getTranslations('records');
-  const [accounts, parties, branches] = await Promise.all([
-    prisma.financeAccount.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true } }),
-    prisma.party.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true } }),
+  const [accounts, parties, branches, inventoryItems] = await Promise.all([
+    prisma.financeAccount.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true, currency: true } }),
+    prisma.party.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true, type: true } }),
     prisma.branch.findMany({ where: { isActive: true }, orderBy: { nameEn: 'asc' }, select: { id: true, nameEn: true, nameAr: true } }),
+    prisma.inventoryItem.findMany({
+      where: { isActive: true },
+      orderBy: { nameEn: 'asc' },
+      select: { id: true, nameEn: true, nameAr: true, unit: true, category: true },
+    }),
   ]);
-  const accountOptions = accounts.map((a) => ({ value: a.id, label: a.name }));
-  const partyOptions = parties.map((p) => ({ value: p.id, label: p.name }));
+  const accountOptions = accounts.map((a) => ({ value: a.id, label: `${a.name} (${a.currency})` }));
+  const partyOptions = parties.map((p) => ({ value: p.id, label: `${p.name} · ${p.type.toLowerCase().replaceAll('_', ' ')}` }));
   const branchOptions = branches.map((b) => ({ value: b.id, label: locale === 'ar' ? b.nameAr : b.nameEn }));
-  const errors = { invalid: tr('err.invalid'), forbidden: tr('err.forbidden') };
+  const inventoryOptions = inventoryItems.map((item) => ({
+    value: item.id,
+    label: `${locale === 'ar' ? item.nameAr : item.nameEn} (${item.unit})`,
+    unit: item.unit,
+    category: item.category,
+  }));
 
   return (
     <>
       <BackLink href="/finance/ledger" label={tr('back')} />
-      <PageHeader title={t('recordEntry')} subtitle={t('subtitle')} />
-      <RecordForm
-        action={createEntry}
-        fields={entryFields((k) => t(k), locale, accountOptions, partyOptions, branchOptions)}
-        initial={{ obligation: 'no', currency: 'IQD' }}
+      <PageHeader title={t('recordEntry')} subtitle={t('centralEntrySubtitle')} />
+      <CentralEntryPanel
+        action={createCentralRecord}
+        createParty={quickCreateParty}
+        createCustomer={quickCreateCustomer}
         locale={locale}
-        submitLabel={tr('create')}
+        today={dateInputValue()}
+        accounts={accountOptions}
+        parties={partyOptions}
+        inventoryItems={inventoryOptions}
+        branches={branchOptions}
         cancelHref="/finance/ledger"
-        cancelLabel={tr('cancel')}
-        errors={errors}
       />
     </>
   );

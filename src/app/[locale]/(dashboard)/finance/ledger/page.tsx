@@ -22,8 +22,8 @@ function one(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] ?? '' : value ?? '';
 }
 
-function active(e: { reversedAt: Date | null; reversalOfId: string | null }) {
-  return !e.reversedAt && !e.reversalOfId;
+function active(e: { archivedAt: Date | null; reversedAt: Date | null; reversalOfId: string | null }) {
+  return !e.archivedAt && !e.reversedAt && !e.reversalOfId;
 }
 
 export default async function LedgerPage({
@@ -73,6 +73,8 @@ export default async function LedgerPage({
   if (status === 'due') and.push({ obligation: true, reversedAt: null, reversalOfId: null });
   if (status === 'reversed') and.push({ reversedAt: { not: null } });
   if (status === 'reversal') and.push({ reversalOfId: { not: null } });
+  if (status === 'archived') and.push({ archivedAt: { not: null } });
+  else and.push({ archivedAt: null });
   const where: Prisma.FinanceEntryWhereInput = and.length ? { AND: and } : {};
   const orderBy: Prisma.FinanceEntryOrderByWithRelationInput =
     sort === 'date_asc' ? { date: 'asc' }
@@ -134,7 +136,9 @@ export default async function LedgerPage({
       ? `${e.account?.name ?? '—'} → ${e.toAccount?.name ?? '—'}`
       : e.account?.name ?? '—';
     const related = e.orderId ?? e.importKey ?? e.reference ?? '—';
-    const statusBadge = e.reversalOfId ? (
+    const statusBadge = e.archivedAt ? (
+      <Badge key="s" variant="warning">{t('archived')}</Badge>
+    ) : e.reversalOfId ? (
       <Badge key="s" variant="muted">{t('reversalMarker')}</Badge>
     ) : e.reversedAt ? (
       <Badge key="s" variant="danger">{t('reversed')}</Badge>
@@ -199,6 +203,7 @@ export default async function LedgerPage({
           <option value="">{tc('all')}</option>
           <option value="paid">{t('f.paid')}</option>
           <option value="due">{t('f.due')}</option>
+          <option value="archived">{t('archived')}</option>
           <option value="reversed">{t('reversed')}</option>
           <option value="reversal">{t('reversalMarker')}</option>
         </select>

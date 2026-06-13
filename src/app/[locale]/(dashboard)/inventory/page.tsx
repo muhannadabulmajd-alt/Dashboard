@@ -4,7 +4,7 @@ import { getInventoryItems } from '@/server/db/repositories/inventory.repo';
 import * as M from '@/lib/metrics';
 import { enumLabel } from '@/lib/enums';
 import { buildExportHref } from '@/lib/filters';
-import { formatMoney, formatNumber } from '@/lib/money';
+import { formatMoney, formatNumber, formatQuantity } from '@/lib/money';
 import { KpiCard } from '@/components/kpi/KpiCard';
 import { BarChartCard, DonutChartCard } from '@/components/charts/Charts';
 import { DataTable } from '@/components/data-table/DataTable';
@@ -54,11 +54,11 @@ export default async function InventoryPage({
   const ledgerRows = rows.map((r) => [
     name(r.it),
     enumLabel(r.it.category, locale),
-    `${formatNumber(r.oc.opening, locale)} ${r.it.unit}`,
-    formatNumber(r.oc.additions, locale),
-    formatNumber(r.oc.deductions, locale),
+    `${formatQuantity(r.oc.opening, locale)} ${r.it.unit}`,
+    formatQuantity(r.oc.additions, locale),
+    formatQuantity(r.oc.deductions, locale),
     <span key="c" className={r.row.belowReorder ? 'font-semibold text-danger' : ''}>
-      {formatNumber(r.row.current, locale)} {r.it.unit}
+      {formatQuantity(r.row.current, locale)} {r.it.unit}
     </span>,
     r.row.coverageDays == null ? '—' : formatNumber(Math.round(r.row.coverageDays), locale),
   ]);
@@ -71,7 +71,7 @@ export default async function InventoryPage({
   const expiryRows = expiry.map((e) => [
     name(e.item),
     formatNumber(e.daysToExpiry, locale),
-    `${formatNumber(e.quantity, locale)} ${e.item.unit}`,
+    `${formatQuantity(e.quantity, locale)} ${e.item.unit}`,
   ]);
 
   return (

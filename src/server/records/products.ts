@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { prisma } from '@/server/db/client';
 import { PRODUCT_LINES } from '@/lib/enums';
+import { decimalNumber, roundMoney } from '@/lib/decimal';
 import { requireCap, audit, reqField, optField, type ActionState } from './shared';
 
 const LIST = '/[locale]/(dashboard)/admin/records/products';
@@ -126,8 +127,8 @@ const componentSchema = z.array(
   z.object({
     inventoryItemId: z.string().optional(),
     name: z.string().min(1),
-    quantity: z.coerce.number().int().nonnegative(),
-    unitCost: z.coerce.number().int().nonnegative(),
+    quantity: z.coerce.number().nonnegative().refine((v) => Number.isInteger(v * 1000)),
+    unitCost: z.coerce.number().nonnegative(),
   }),
 );
 
@@ -156,7 +157,7 @@ export async function saveProductComponents(productId: string, _prev: ActionStat
   const items = linkedIds.length
     ? await prisma.inventoryItem.findMany({ where: { id: { in: linkedIds } }, select: { id: true, unitCost: true } })
     : [];
-  const costById = new Map(items.map((i) => [i.id, i.unitCost ?? 0]));
+  const costById = new Map(items.map((i) => [i.id, decimalNumber(i.unitCost)]));
   const rows = components.map((c) => ({
     productId,
     inventoryItemId: c.inventoryItemId || null,
@@ -164,7 +165,7 @@ export async function saveProductComponents(productId: string, _prev: ActionStat
     quantity: c.quantity,
     unitCost: c.inventoryItemId ? (costById.get(c.inventoryItemId) ?? c.unitCost) : c.unitCost,
   }));
-  const cost = rows.reduce((s, c) => s + c.quantity * c.unitCost, 0);
+  const cost = roundMoney(rows.reduce((s, c) => s + c.quantity * decimalNumber(c.unitCost), 0));
   await prisma.$transaction(async (tx) => {
     await tx.productComponent.deleteMany({ where: { productId } });
     if (rows.length) {

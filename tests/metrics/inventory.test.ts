@@ -154,6 +154,20 @@ describe('inventory metrics', () => {
       expect(s.activeCost).toBe(3_000); // oldest (A) still depleted first
     });
 
+    it('supports three-decimal quantities for fractional stock', () => {
+      const s = fifoStatus(
+        [
+          { id: 'frac-a', qtyReceived: 0.75, unitCost: 1_200, receivedAt: new Date('2026-04-01') },
+          { id: 'frac-b', qtyReceived: 1.25, unitCost: 1_500, receivedAt: new Date('2026-05-01') },
+        ],
+        0.5,
+      );
+      expect(s.activeCost).toBe(1_200);
+      expect(s.totalRemaining).toBe(1.5);
+      expect(s.layers.map((l) => l.remaining)).toEqual([0.25, 1.25]);
+      expect(s.value).toBe(0.25 * 1_200 + 1.25 * 1_500);
+    });
+
     it('returns null active cost with no layers', () => {
       expect(fifoStatus([], 0).activeCost).toBeNull();
     });

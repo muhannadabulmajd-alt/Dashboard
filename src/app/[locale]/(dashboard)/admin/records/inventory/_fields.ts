@@ -15,8 +15,8 @@ export function inventoryFields(
     { name: 'category', label: t('f.category'), type: 'select', required: true, options: opts(INVENTORY_CATEGORIES) },
     { name: 'unit', label: t('f.unit'), type: 'text', required: true, hint: t('h.inventoryUnit') },
     { name: 'productId', label: t('f.linkedVariation'), type: 'select', options: products, hint: t('h.linkedVariation') },
-    { name: 'reorderPoint', label: t('f.reorderPoint'), type: 'number', hint: t('h.reorderPoint') },
+    { name: 'reorderPoint', label: t('f.reorderPoint'), type: 'number', step: '0.001', hint: t('h.reorderPoint') },
     { name: 'avgDailyUsage', label: t('f.avgDailyUsage'), type: 'number', step: '0.1', hint: t('h.avgDailyUsage') },
-    { name: 'unitCost', label: t('f.unitCost'), type: 'number', hint: t('h.inventoryCost') },
+    { name: 'unitCost', label: t('f.unitCost'), type: 'number', step: '0.001', hint: t('h.inventoryCost') },
   ];
 }

@@ -30,7 +30,7 @@ export default async function FinancePartyDetailPage({
   const [p, entries, rate] = await Promise.all([
     prisma.party.findUnique({ where: { id } }),
     prisma.financeEntry.findMany({
-      where: { partyId: id },
+      where: { partyId: id, archivedAt: null },
       select: {
         id: true,
         date: true,
@@ -40,6 +40,7 @@ export default async function FinancePartyDetailPage({
         obligation: true,
         obligationKind: true,
         settlesId: true,
+        archivedAt: true,
         reversedAt: true,
         reversalOfId: true,
         dueDate: true,
@@ -59,12 +60,12 @@ export default async function FinancePartyDetailPage({
   const iqd = (amount: number, currency: Currency) => convertToIqd(amount, currency, rate);
   const paidByObligation = new Map<string, number>();
   for (const e of entries) {
-    if (e.reversedAt || e.reversalOfId) continue;
+    if (e.archivedAt || e.reversedAt || e.reversalOfId) continue;
     if (e.settlesId) paidByObligation.set(e.settlesId, (paidByObligation.get(e.settlesId) ?? 0) + iqd(e.amount, e.currency));
   }
   const balances = entries.reduce(
     (acc, e) => {
-      if (e.reversedAt || e.reversalOfId) return acc;
+      if (e.archivedAt || e.reversedAt || e.reversalOfId) return acc;
       if (!e.obligation || !e.obligationKind) return acc;
       const outstanding = Math.max(0, iqd(e.amount, e.currency) - (paidByObligation.get(e.id) ?? 0));
       if (e.obligationKind === 'PAYABLE') acc.payables += outstanding;

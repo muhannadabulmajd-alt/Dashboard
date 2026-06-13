@@ -19,8 +19,8 @@ export default async function ShareholdersPage({
 
   const [shareholders, capEntries, expenseEntries] = await Promise.all([
     prisma.party.findMany({ where: { type: 'SHAREHOLDER' }, orderBy: { name: 'asc' } }),
-    prisma.financeEntry.findMany({ where: { type: 'CAPITAL_IN', currency: 'IQD', reversedAt: null, reversalOfId: null }, select: { partyId: true, amount: true } }),
-    prisma.financeEntry.findMany({ where: { type: { in: ['EXPENSE', 'PURCHASE'] }, currency: 'IQD', reversedAt: null, reversalOfId: null }, select: { amount: true } }),
+    prisma.financeEntry.findMany({ where: { type: 'CAPITAL_IN', currency: 'IQD', archivedAt: null, reversedAt: null, reversalOfId: null }, select: { partyId: true, amount: true } }),
+    prisma.financeEntry.findMany({ where: { type: { in: ['EXPENSE', 'PURCHASE'] }, currency: 'IQD', archivedAt: null, reversedAt: null, reversalOfId: null }, select: { amount: true } }),
   ]);
 
   const totalCapital = capEntries.reduce((s, e) => s + e.amount, 0);

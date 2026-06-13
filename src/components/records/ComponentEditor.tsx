@@ -90,11 +90,11 @@ export function ComponentEditor({
               </div>
               <div className="flex flex-col gap-1">
                 {i === 0 ? <label className="text-xs text-muted-foreground">{labels.quantity}</label> : null}
-                <input type="number" value={r.quantity} onChange={(e) => set(i, 'quantity', e.target.value)} className={input} />
+                <input type="number" step="0.001" value={r.quantity} onChange={(e) => set(i, 'quantity', e.target.value)} className={input} />
               </div>
               <div className="flex flex-col gap-1">
                 {i === 0 ? <label className="text-xs text-muted-foreground">{labels.unitCost}</label> : null}
-                <input type="number" value={r.unitCost} onChange={(e) => set(i, 'unitCost', e.target.value)} className={input} />
+                <input type="number" step="0.001" value={r.unitCost} onChange={(e) => set(i, 'unitCost', e.target.value)} className={input} />
               </div>
               <button
                 type="button"
