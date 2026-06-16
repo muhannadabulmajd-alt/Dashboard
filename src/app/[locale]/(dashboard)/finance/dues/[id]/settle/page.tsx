@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { getPageContext } from '@/server/page-context';
 import { prisma } from '@/server/db/client';
+import { getListOptions } from '@/server/lists/resolver';
 import { formatMoney, toMajor } from '@/lib/money';
 import { PageHeader } from '@/components/ui/primitives';
 import { RecordForm, type FieldDef } from '@/components/records/form';
@@ -28,15 +29,19 @@ export default async function SettlePage({
 
   const paid = ob.settlements.reduce((s, x) => s + x.amount, 0);
   const outstanding = Math.max(0, ob.amount - paid);
-  const accounts = await prisma.financeAccount.findMany({
-    where: { isActive: true, currency: ob.currency },
-    orderBy: { name: 'asc' },
-    select: { id: true, name: true },
-  });
+  const [accounts, paymentMethods] = await Promise.all([
+    prisma.financeAccount.findMany({
+      where: { isActive: true, currency: ob.currency },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true },
+    }),
+    getListOptions('paymentMethod', locale),
+  ]);
 
   const fields: FieldDef[] = [
     { name: 'amount', label: t('f.amount'), type: 'number', required: true, hint: t('h.settlementAmount') },
     { name: 'accountId', label: t('f.account'), type: 'select', required: true, options: accounts.map((a) => ({ value: a.id, label: a.name })), hint: t('h.account') },
+    { name: 'paymentMethod', label: t('f.paymentMethod'), type: 'select', options: paymentMethods, hint: t('h.paymentMethod') },
     { name: 'date', label: t('f.date'), type: 'date', required: true, hint: t('h.date') },
   ];
   const initial = { amount: toMajor(outstanding, ob.currency), date: new Date().toISOString().slice(0, 10) };

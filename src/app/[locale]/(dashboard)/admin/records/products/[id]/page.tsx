@@ -41,6 +41,7 @@ export default async function ProductDetailPage({
       ? sp.tab
       : 'overview';
   const t = await getTranslations('records');
+  const unitOptions = await getListOptions('unit', locale);
 
   const p = await prisma.product.findUnique({
     where: { id },
@@ -147,8 +148,10 @@ export default async function ProductDetailPage({
         <OrderUsageForm
           productId={p.id}
           locale={locale}
+          unitOptions={unitOptions}
           initial={{
             invoiceName: p.invoiceName ?? '',
+            sellUnit: p.sellUnit,
             minSellingPrice: p.minSellingPrice != null ? String(p.minSellingPrice) : '',
             allowDiscount: p.allowDiscount,
             allowPriceOverride: p.allowPriceOverride,

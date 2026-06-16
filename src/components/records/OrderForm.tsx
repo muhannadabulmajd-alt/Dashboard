@@ -13,7 +13,7 @@ type Opt = { value: string; label: string };
 export type OrderLineInput = { sku: string; quantity: string; unitGrossPrice: string; lineDiscount: string };
 export type OrderInitial = { header: Record<string, string>; lines: OrderLineInput[] };
 /** A selectable variation for the order line picker. */
-export type CatalogItem = { sku: string; name: string; group: string; price: number };
+export type CatalogItem = { sku: string; name: string; group: string; price: number; unit: string };
 const emptyLine: OrderLineInput = { sku: '', quantity: '1', unitGrossPrice: '0', lineDiscount: '0' };
 
 // Header inputs are defined at module scope so re-renders (line edits) don't
@@ -79,6 +79,7 @@ export function OrderForm({
   fulfillmentOptions,
   statusOptions,
   accountOptions,
+  paymentMethodOptions,
   labels,
   errors,
   cancelHref,
@@ -94,6 +95,7 @@ export function OrderForm({
   fulfillmentOptions: Opt[];
   statusOptions: Opt[];
   accountOptions: Opt[];
+  paymentMethodOptions?: Opt[];
   labels: Record<string, string>;
   errors: Record<string, string>;
   cancelHref: string;
@@ -116,6 +118,7 @@ export function OrderForm({
     return [...m.entries()];
   }, [catalog]);
   const priceBySku = useMemo(() => new Map(catalog.map((c) => [c.sku, c.price])), [catalog]);
+  const unitBySku = useMemo(() => new Map(catalog.map((c) => [c.sku, c.unit])), [catalog]);
 
   // Selecting a variation fills the SKU and auto-fills its price (overridable).
   const pickVariation = (i: number, sku: string) =>
@@ -188,10 +191,11 @@ export function OrderForm({
           >
             <option value="CREDIT">{labels.financeCredit}</option>
             <option value="PAID">{labels.financePaid}</option>
+            <option value="PARTIAL">{labels.financePartial}</option>
             <option value="NONE">{labels.financeNone}</option>
           </select>
         </div>
-        {financeMode === 'PAID' ? (
+        {financeMode === 'PAID' || financeMode === 'PARTIAL' ? (
           <div className="flex flex-col gap-1">
             <label htmlFor="finance-account-field" className="text-xs font-medium text-muted-foreground">{labels.paymentAccount}</label>
             <select id="finance-account-field" name="financeAccountId" required className={input} defaultValue={h.financeAccountId}>
@@ -203,6 +207,15 @@ export function OrderForm({
               ))}
             </select>
           </div>
+        ) : null}
+        {financeMode === 'PARTIAL' ? (
+          <HeaderField name="financePaidAmount" label={labels.financePaidAmount} type="number" defaultValue={h.financePaidAmount} />
+        ) : null}
+        {financeMode === 'PAID' || financeMode === 'PARTIAL' ? (
+          <>
+            <HeaderSelect name="financePaymentMethod" label={labels.paymentMethod} options={paymentMethodOptions ?? []} defaultValue={h.financePaymentMethod} />
+            <HeaderField name="financePaymentDate" label={labels.paymentDate} type="date" defaultValue={h.financePaymentDate || h.placedAt} />
+          </>
         ) : null}
         {financeMode === 'CREDIT' ? (
           <HeaderField name="financeDueDate" label={labels.paymentDueDate} type="date" defaultValue={h.financeDueDate || h.placedAt} />
@@ -226,7 +239,7 @@ export function OrderForm({
         </div>
         <div className="space-y-2">
           {lines.map((l, i) => (
-            <div key={i} className="grid grid-cols-[2fr_1fr_1fr_1fr_auto] items-end gap-2">
+            <div key={i} className="grid grid-cols-[2fr_0.8fr_1fr_1fr_1fr_auto] items-end gap-2">
               <div className="flex flex-col gap-1">
                 {i === 0 ? <label className="text-xs text-muted-foreground">{labels.variation ?? labels.sku}</label> : null}
                 {catalog.length ? (
@@ -246,6 +259,12 @@ export function OrderForm({
                 ) : (
                   <input value={l.sku} onChange={(e) => setLine(i, 'sku', e.target.value)} className={input} />
                 )}
+              </div>
+              <div className="flex flex-col gap-1">
+                {i === 0 ? <label className="text-xs text-muted-foreground">{labels.unit}</label> : null}
+                <div className="min-h-10 rounded-lg border bg-muted/35 px-3 py-2 text-sm text-muted-foreground">
+                  {unitBySku.get(l.sku) ?? 'unit'}
+                </div>
               </div>
               <div className="flex flex-col gap-1">
                 {i === 0 ? <label className="text-xs text-muted-foreground">{labels.qty}</label> : null}

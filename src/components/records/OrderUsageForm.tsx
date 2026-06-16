@@ -14,11 +14,14 @@ export function OrderUsageForm({
   productId,
   locale,
   initial,
+  unitOptions,
 }: {
   productId: string;
   locale: string;
+  unitOptions: { value: string; label: string }[];
   initial: {
     invoiceName: string;
+    sellUnit: string;
     minSellingPrice: string;
     allowDiscount: boolean;
     allowPriceOverride: boolean;
@@ -40,6 +43,16 @@ export function OrderUsageForm({
       <div className="flex flex-col gap-1">
         <label className="text-xs font-medium text-muted-foreground">{t('usage.invoiceName')}</label>
         <input name="invoiceName" type="text" defaultValue={initial.invoiceName} placeholder={t('usage.invoiceNameHint')} className={input} />
+      </div>
+      <div className="flex flex-col gap-1">
+        <label className="text-xs font-medium text-muted-foreground">{t('usage.sellUnit')}</label>
+        <select name="sellUnit" defaultValue={initial.sellUnit || 'unit'} className={input}>
+          {unitOptions.map((unit) => (
+            <option key={unit.value} value={unit.value}>
+              {unit.label}
+            </option>
+          ))}
+        </select>
       </div>
       <div className="flex flex-col gap-1">
         <label className="text-xs font-medium text-muted-foreground">{t('usage.minSellingPrice')}</label>

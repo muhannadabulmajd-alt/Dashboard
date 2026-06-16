@@ -342,6 +342,7 @@ export async function ingestCsv(
           productId: string;
           sku: string;
           quantity: number;
+          unitLabel: string;
           unitGrossPrice: number;
           lineDiscount: number;
           lineNet: number;
@@ -350,7 +351,7 @@ export async function ingestCsv(
         for (const l of order.lines) {
           const product = await prisma.product.findUnique({
             where: { sku: l.sku },
-            select: { id: true, cogsPerUnit: true },
+            select: { id: true, cogsPerUnit: true, sellUnit: true },
           });
           if (!product) {
             errors.push({ row: 0, message: `${order.orderNumber}: unknown SKU ${l.sku}` });
@@ -360,6 +361,7 @@ export async function ingestCsv(
             productId: product.id,
             sku: l.sku,
             quantity: l.quantity,
+            unitLabel: product.sellUnit,
             unitGrossPrice: l.unitGrossPrice,
             lineDiscount: l.lineDiscount,
             lineNet: l.unitGrossPrice * l.quantity - l.lineDiscount,
@@ -378,6 +380,7 @@ export async function ingestCsv(
           placedAt: order.placedAt,
           customerId: customer?.id ?? null,
           branchId,
+          createdById: opts.userId,
           channel: order.channel,
           governorate: order.governorate,
           fulfillmentMethod: order.fulfillmentMethod,

@@ -182,6 +182,7 @@ export async function saveProductComponents(productId: string, _prev: ActionStat
 
 const orderUsageSchema = z.object({
   invoiceName: z.string().optional(),
+  sellUnit: z.string().min(1).default('unit'),
   minSellingPrice: z.coerce.number().int().nonnegative().optional(),
   allowDiscount: z.coerce.boolean(),
   allowPriceOverride: z.coerce.boolean(),
@@ -199,6 +200,7 @@ export async function saveOrderUsage(productId: string, _prev: ActionState, fd: 
   const locale = reqField(fd, 'locale') || 'ar';
   const r = orderUsageSchema.safeParse({
     invoiceName: optField(fd, 'invoiceName'),
+    sellUnit: optField(fd, 'sellUnit') ?? 'unit',
     minSellingPrice: optField(fd, 'minSellingPrice'),
     allowDiscount: fd.get('allowDiscount') != null,
     allowPriceOverride: fd.get('allowPriceOverride') != null,
@@ -209,6 +211,7 @@ export async function saveOrderUsage(productId: string, _prev: ActionState, fd: 
     where: { id: productId },
     data: {
       invoiceName: r.data.invoiceName || null,
+      sellUnit: r.data.sellUnit,
       minSellingPrice: r.data.minSellingPrice ?? null,
       allowDiscount: r.data.allowDiscount,
       allowPriceOverride: r.data.allowPriceOverride,

@@ -27,5 +27,6 @@ export async function getOrderCatalog(locale: string, ungroupedLabel: string): P
     name: `${locale === 'ar' ? p.nameAr : p.nameEn} — ${p.sizeLabel} · ${enumLabel(p.grind, locale as AppLocale)}`,
     group: p.group ? (locale === 'ar' ? p.group.nameAr : p.group.nameEn) : ungroupedLabel,
     price: effectivePrice(p.prices, p.sellingPrice, now),
+    unit: p.sellUnit,
   }));
 }

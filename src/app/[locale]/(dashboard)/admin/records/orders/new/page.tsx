@@ -19,13 +19,14 @@ export default async function NewOrderPage({
   const t = await getTranslations('records');
   // Dropdowns come from the managed system lists (§9) — relabels, reordering
   // and user-added values all apply here.
-  const [catalog, channels, governorates, fulfillment, statuses, accounts] = await Promise.all([
+  const [catalog, channels, governorates, fulfillment, statuses, accounts, paymentMethods] = await Promise.all([
     getOrderCatalog(locale, t('ungrouped')),
     getListOptions('channel', locale),
     getListOptions('governorate', locale),
     getListOptions('fulfillment', locale),
     getListOptions('orderStatus', locale),
     prisma.financeAccount.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true, currency: true } }),
+    getListOptions('paymentMethod', locale),
   ]);
 
   const labels = {
@@ -45,6 +46,7 @@ export default async function NewOrderPage({
     items: t('f.items'),
     sku: t('f.sku'),
     variation: t('f.variation'),
+    unit: t('f.unit'),
     qty: t('f.qty'),
     unitPrice: t('f.unitPrice'),
     discount: t('f.discount'),
@@ -58,8 +60,12 @@ export default async function NewOrderPage({
     financeMode: t('f.financeMode'),
     financeCredit: t('f.financeCredit'),
     financePaid: t('f.financePaid'),
+    financePartial: t('f.financePartial'),
     financeNone: t('f.financeNone'),
+    financePaidAmount: t('f.financePaidAmount'),
     paymentAccount: t('f.paymentAccount'),
+    paymentMethod: t('f.paymentMethod'),
+    paymentDate: t('f.paymentDate'),
     paymentDueDate: t('f.paymentDueDate'),
     addLine: t('addLine'),
     removeLine: t('removeLine'),
@@ -87,6 +93,7 @@ export default async function NewOrderPage({
         fulfillmentOptions={fulfillment}
         statusOptions={statuses}
         accountOptions={accounts.map((a) => ({ value: a.id, label: `${a.name} (${a.currency})` }))}
+        paymentMethodOptions={paymentMethods}
         labels={labels}
         errors={errors}
         cancelHref="/admin/records/orders"

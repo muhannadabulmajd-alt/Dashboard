@@ -10,6 +10,7 @@ import {
   FULFILLMENT_METHODS,
   ORDER_STATUSES,
   INVENTORY_CATEGORIES,
+  PAYMENT_METHODS,
 } from '@/lib/enums';
 
 /** How a list is backed: an `enum` column (fixed set — relabel/reorder/hide
@@ -40,7 +41,8 @@ export const LISTS: ListDef[] = [
   { key: 'customerSource', base: CUSTOMER_SOURCES, kind: 'soft', usage: { model: 'customer', field: 'campaignSource' } },
   { key: 'productType', base: [], kind: 'soft', usage: { model: 'productGroup', field: 'productType' } },
   { key: 'variationType', base: [], kind: 'soft', usage: { model: 'product', field: 'variationType' } },
-  { key: 'unit', base: ['g', 'kg', 'unit', 'bag', 'box', 'sachet'], kind: 'soft', usage: { model: 'inventoryItem', field: 'unit' } },
+  { key: 'unit', base: ['g', 'kg', 'lb', 'ml', 'l', 'unit', 'piece', 'sachet', 'pack', 'box', 'bag', 'carton'], kind: 'soft', usage: { model: 'inventoryItem', field: 'unit' } },
+  { key: 'paymentMethod', base: PAYMENT_METHODS, kind: 'text', usage: { model: 'financeEntry', field: 'paymentMethod' } },
   { key: 'packaging', base: [], kind: 'soft' },
 ];
 

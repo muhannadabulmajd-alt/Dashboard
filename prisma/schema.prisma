@@ -208,6 +208,7 @@ model User {
   createdBy       User?        @relation("UserCreatedBy", fields: [createdById], references: [id])
   createdUsers    User[]       @relation("UserCreatedBy")
   operatedBatches RoastBatch[] @relation("BatchOperator")
+  createdOrders   Order[]      @relation("OrderCreatedBy")
   auditLogs       AuditLog[]
 
   @@index([role])
@@ -282,6 +283,7 @@ model Product {
   imageUrl           String?
   sellingPrice       Int // minor units of sellingCurrency (current base price)
   sellingCurrency    Currency    @default(IQD)
+  sellUnit           String      @default("unit")
   minSellingPrice    Int? // optional floor for manual price overrides
   cogsPerUnit        Int // minor units of sellingCurrency
   invoiceName        String? // display name on the invoice (defaults to name)
@@ -404,6 +406,7 @@ model Order {
   placedAt          DateTime
   customerId        String?
   branchId          String?
+  createdById       String?
   channel           String // list-managed (§9): code from the "channel" system list
   governorate       String // list-managed code
   fulfillmentMethod FulfillmentMethod
@@ -424,6 +427,7 @@ model Order {
   lines          OrderLine[]
   customer       Customer?       @relation(fields: [customerId], references: [id])
   branch         Branch?         @relation(fields: [branchId], references: [id])
+  createdBy      User?           @relation("OrderCreatedBy", fields: [createdById], references: [id])
   offer          Offer?          @relation(fields: [offerId], references: [id])
   shipment       Shipment?
   stockMovements StockMovement[]
@@ -434,6 +438,7 @@ model Order {
   @@index([status])
   @@index([customerId])
   @@index([offerId])
+  @@index([createdById])
 }
 
 model OrderLine {
@@ -442,6 +447,7 @@ model OrderLine {
   productId        String
   sku              String // denormalized snapshot
   quantity         Int
+  unitLabel        String @default("unit")
   unitGrossPrice   Int
   lineDiscount     Int    @default(0)
   lineNet          Int
@@ -883,6 +889,7 @@ model FinanceEntry {
   toAccountId    String?
   partyId        String?
   categoryType   ExpenseCategoryType?
+  paymentMethod  String?
   settlesId      String? // payment that settles an obligation (partial allowed)
   importKey      String?              @unique // idempotent bulk import (re-uploads upsert)
   description    String?
@@ -914,6 +921,7 @@ model FinanceEntry {
   @@index([obligation])
   @@index([accountId])
   @@index([partyId])
+  @@index([paymentMethod])
   @@index([settlesId])
   @@index([branchId])
   @@index([orderId])

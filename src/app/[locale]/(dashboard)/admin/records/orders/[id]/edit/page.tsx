@@ -19,16 +19,17 @@ export default async function EditOrderPage({
   const { locale } = await getPageContext(params, searchParams, 'manage:orders');
   const { id } = await params;
   const t = await getTranslations('records');
-  const [catalog, channels, governorates, fulfillment, statuses, accounts, financeEntry] = await Promise.all([
+  const [catalog, channels, governorates, fulfillment, statuses, accounts, paymentMethods, financeEntries] = await Promise.all([
     getOrderCatalog(locale, t('ungrouped')),
     getListOptions('channel', locale),
     getListOptions('governorate', locale),
     getListOptions('fulfillment', locale),
     getListOptions('orderStatus', locale),
     prisma.financeAccount.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true, currency: true } }),
-    prisma.financeEntry.findFirst({
+    getListOptions('paymentMethod', locale),
+    prisma.financeEntry.findMany({
       where: { orderId: id, importKey: { startsWith: `ORD:${id}:` }, reversedAt: null, reversalOfId: null },
-      select: { obligation: true, accountId: true, dueDate: true },
+      select: { importKey: true, obligation: true, accountId: true, dueDate: true, amount: true, paymentMethod: true, date: true },
     }),
   ]);
 
@@ -37,6 +38,11 @@ export default async function EditOrderPage({
     include: { customer: { select: { externalId: true } }, lines: { orderBy: { id: 'asc' } } },
   });
   if (!o) notFound();
+  const financeAr = financeEntries.find((entry) => entry.importKey === `ORD:${id}:AR`);
+  const financePay = financeEntries.find((entry) => entry.importKey === `ORD:${id}:PAY`);
+  const financePartial = financeEntries.find((entry) => entry.importKey === `ORD:${id}:PARTIAL`);
+  const activeFinance = financePartial ?? financePay ?? financeAr;
+  const financeMode = financePartial ? 'PARTIAL' : financePay ? 'PAID' : financeAr ? 'CREDIT' : 'CREDIT';
 
   const initial = {
     header: {
@@ -52,9 +58,12 @@ export default async function EditOrderPage({
       orderDiscount: String(o.orderDiscount),
       extraCharges: String(o.extraCharges),
       notes: o.notes ?? '',
-      financeMode: financeEntry ? (financeEntry.obligation ? 'CREDIT' : 'PAID') : 'CREDIT',
-      financeAccountId: financeEntry?.accountId ?? '',
-      financeDueDate: financeEntry?.dueDate ? financeEntry.dueDate.toISOString().slice(0, 10) : o.placedAt.toISOString().slice(0, 10),
+      financeMode,
+      financeAccountId: activeFinance?.accountId ?? '',
+      financePaidAmount: financePartial ? String(financePartial.amount) : '',
+      financePaymentMethod: activeFinance?.paymentMethod ?? '',
+      financePaymentDate: activeFinance?.date ? activeFinance.date.toISOString().slice(0, 10) : o.placedAt.toISOString().slice(0, 10),
+      financeDueDate: financeAr?.dueDate ? financeAr.dueDate.toISOString().slice(0, 10) : o.placedAt.toISOString().slice(0, 10),
     },
     lines: o.lines.map(
       (l): OrderLineInput => ({
@@ -83,6 +92,7 @@ export default async function EditOrderPage({
     items: t('f.items'),
     sku: t('f.sku'),
     variation: t('f.variation'),
+    unit: t('f.unit'),
     qty: t('f.qty'),
     unitPrice: t('f.unitPrice'),
     discount: t('f.discount'),
@@ -96,8 +106,12 @@ export default async function EditOrderPage({
     financeMode: t('f.financeMode'),
     financeCredit: t('f.financeCredit'),
     financePaid: t('f.financePaid'),
+    financePartial: t('f.financePartial'),
     financeNone: t('f.financeNone'),
+    financePaidAmount: t('f.financePaidAmount'),
     paymentAccount: t('f.paymentAccount'),
+    paymentMethod: t('f.paymentMethod'),
+    paymentDate: t('f.paymentDate'),
     paymentDueDate: t('f.paymentDueDate'),
     addLine: t('addLine'),
     removeLine: t('removeLine'),
@@ -126,6 +140,7 @@ export default async function EditOrderPage({
         fulfillmentOptions={fulfillment}
         statusOptions={statuses}
         accountOptions={accounts.map((a) => ({ value: a.id, label: `${a.name} (${a.currency})` }))}
+        paymentMethodOptions={paymentMethods}
         labels={labels}
         errors={errors}
         cancelHref={`/admin/records/orders/${id}`}

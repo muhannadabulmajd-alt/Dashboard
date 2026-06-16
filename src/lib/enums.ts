@@ -148,6 +148,19 @@ export const FINANCE_TYPES = [
 
 export const OBLIGATION_KINDS = ['PAYABLE', 'RECEIVABLE'] as const;
 
+export const PAYMENT_METHODS = [
+  'CASH',
+  'BANK_TRANSFER',
+  'POS',
+  'ZAIN_CASH',
+  'FASTPAY',
+  'ASIAHAWALA',
+  'ONLINE_PAYMENT',
+  'CREDIT',
+  'MIXED',
+  'OTHER',
+] as const;
+
 // --- Bilingual labels -------------------------------------------------------
 
 type Label = { en: string; ar: string };
@@ -183,6 +196,14 @@ export const ENUM_LABELS: Record<string, Label> = {
   SALAHUDDIN: { en: 'Saladin', ar: 'صلاح الدين' },
   HALABJA: { en: 'Halabja', ar: 'حلبجة' },
   OTHER: { en: 'Other', ar: 'أخرى' },
+  // Payment methods
+  BANK_TRANSFER: { en: 'Bank transfer', ar: 'تحويل مصرفي' },
+  ZAIN_CASH: { en: 'Zain Cash', ar: 'زين كاش' },
+  FASTPAY: { en: 'FastPay', ar: 'فاست بي' },
+  ASIAHAWALA: { en: 'AsiaHawala', ar: 'آسيا حوالة' },
+  ONLINE_PAYMENT: { en: 'Online payment', ar: 'دفع إلكتروني' },
+  CREDIT: { en: 'Credit / unpaid', ar: 'آجل / غير مدفوع' },
+  MIXED: { en: 'Mixed payment', ar: 'دفع مختلط' },
   // Product lines
   TURKISH: { en: 'Turkish', ar: 'تركية' },
   ESPRESSO: { en: 'Espresso', ar: 'إسبريسو' },

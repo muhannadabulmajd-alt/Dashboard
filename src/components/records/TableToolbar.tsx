@@ -7,6 +7,7 @@ import { Search, X } from 'lucide-react';
 
 type Opt = { value: string; label: string };
 export type FilterDef = { name: string; label: string; options: Opt[] };
+export type InputFilterDef = { name: string; label: string; type?: 'text' | 'date' | 'number' };
 
 const control =
   'min-h-10 rounded-lg border border-input bg-background px-3 py-2 text-sm text-roast outline-none focus:border-primary focus:bg-card';
@@ -19,11 +20,13 @@ const control =
 export function TableToolbar({
   searchPlaceholder,
   filters = [],
+  inputs = [],
   sorts = [],
   sortLabel,
 }: {
   searchPlaceholder: string;
   filters?: FilterDef[];
+  inputs?: InputFilterDef[];
   sorts?: Opt[];
   sortLabel: string;
 }) {
@@ -48,6 +51,7 @@ export function TableToolbar({
     next.delete('sort');
     next.delete('page');
     for (const f of filters) next.delete(f.name);
+    for (const f of inputs) next.delete(f.name);
     router.push(next.toString() ? `${pathname}?${next}` : pathname);
   };
 
@@ -64,7 +68,10 @@ export function TableToolbar({
   }, [q]);
 
   const hasActiveFilters =
-    q.length > 0 || Boolean(params.get('sort')) || filters.some((f) => Boolean(params.get(f.name)));
+    q.length > 0 ||
+    Boolean(params.get('sort')) ||
+    filters.some((f) => Boolean(params.get(f.name))) ||
+    inputs.some((f) => Boolean(params.get(f.name)));
 
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-[var(--radius)] border border-border/80 bg-card p-2 shadow-[0_1px_0_rgba(83,45,31,0.05)]">
@@ -93,6 +100,20 @@ export function TableToolbar({
             </option>
           ))}
         </select>
+      ))}
+      {inputs.map((f) => (
+        <input
+          key={f.name}
+          type={f.type ?? 'text'}
+          defaultValue={params.get(f.name) ?? ''}
+          onBlur={(e) => apply({ [f.name]: e.target.value })}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') apply({ [f.name]: e.currentTarget.value });
+          }}
+          placeholder={f.label}
+          className={control}
+          aria-label={f.label}
+        />
       ))}
       {sorts.length ? (
         <select

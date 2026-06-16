@@ -71,6 +71,7 @@ export default async function OrderDetailPage({
 
   const lineCols: Column[] = [
     { label: t('f.product') },
+    { label: t('f.unit') },
     { label: t('f.qty'), align: 'end' },
     { label: t('f.unitPrice'), align: 'end' },
     { label: t('f.lineTotal'), align: 'end' },
@@ -78,6 +79,7 @@ export default async function OrderDetailPage({
 
   const lineRows = o.lines.map((l) => [
     `${l.sku} — ${locale === 'ar' ? l.product.nameAr : l.product.nameEn}`,
+    l.unitLabel,
     l.quantity,
     formatMoney(l.unitGrossPrice, o.currency, locale),
     formatMoney(l.lineNet, o.currency, locale),

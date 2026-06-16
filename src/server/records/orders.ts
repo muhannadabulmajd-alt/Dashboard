@@ -6,6 +6,8 @@ import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/server/db/client';
 import { FULFILLMENT_METHODS } from '@/lib/enums';
+import { invoicePaymentSnapshot, invoiceTotal } from '@/lib/invoice';
+import { toMinor } from '@/lib/money';
 import { syncActiveCostForProducts } from '@/server/inventory/fifo';
 import { closeOrderFinance, syncOrderFinance, type FinanceSyncMode } from '@/server/finance/sync';
 import { requireCap, audit, reqField, optField, type ActionState } from './shared';
@@ -20,6 +22,7 @@ type LineData = {
   productId: string;
   sku: string;
   quantity: number;
+  unitLabel: string;
   unitGrossPrice: number;
   lineDiscount: number;
   lineNet: number;
@@ -70,8 +73,11 @@ const headerSchema = z.object({
   orderDiscount: z.coerce.number().int().nonnegative().default(0),
   extraCharges: z.coerce.number().int().nonnegative().default(0),
   notes: z.string().optional(),
-  financeMode: z.enum(['NONE', 'CREDIT', 'PAID']).default('CREDIT'),
+  financeMode: z.enum(['NONE', 'CREDIT', 'PAID', 'PARTIAL']).default('CREDIT'),
   financeAccountId: z.string().optional(),
+  financePaidAmount: z.coerce.number().int().nonnegative().optional(),
+  financePaymentMethod: z.string().optional(),
+  financePaymentDate: z.coerce.date().optional(),
   financeDueDate: z.coerce.date().optional(),
 });
 
@@ -100,6 +106,9 @@ function parseHeader(fd: FormData) {
     notes: optField(fd, 'notes'),
     financeMode: optField(fd, 'financeMode') || 'CREDIT',
     financeAccountId: optField(fd, 'financeAccountId'),
+    financePaidAmount: optField(fd, 'financePaidAmount'),
+    financePaymentMethod: optField(fd, 'financePaymentMethod'),
+    financePaymentDate: optField(fd, 'financePaymentDate'),
     financeDueDate: optField(fd, 'financeDueDate'),
   });
 }
@@ -125,20 +134,21 @@ export async function createOrder(_prev: ActionState, fd: FormData): Promise<Act
   const locale = reqField(fd, 'locale') || 'ar';
   if (await prisma.order.findUnique({ where: { orderNumber: h.data.orderNumber }, select: { id: true } }))
     return { error: 'exists' };
-  if (h.data.financeMode === 'PAID' && !h.data.financeAccountId) return { error: 'invalid' };
+  if ((h.data.financeMode === 'PAID' || h.data.financeMode === 'PARTIAL') && !h.data.financeAccountId) return { error: 'invalid' };
 
   // Resolve products by SKU and build line rows (mirrors the CSV importer).
   const lineData: LineData[] = [];
   for (const l of parsedLines.data) {
     const product = await prisma.product.findUnique({
       where: { sku: l.sku },
-      select: { id: true, cogsPerUnit: true },
+      select: { id: true, cogsPerUnit: true, sellUnit: true },
     });
     if (!product) return { error: 'sku' };
     lineData.push({
       productId: product.id,
       sku: l.sku,
       quantity: l.quantity,
+      unitLabel: product.sellUnit,
       unitGrossPrice: l.unitGrossPrice,
       lineDiscount: l.lineDiscount,
       lineNet: l.unitGrossPrice * l.quantity - l.lineDiscount,
@@ -155,6 +165,10 @@ export async function createOrder(_prev: ActionState, fd: FormData): Promise<Act
   const branch = await prisma.branch.findFirst({ orderBy: { createdAt: 'asc' }, select: { id: true } });
   const gross = lineData.reduce((s, l) => s + l.unitGrossPrice * l.quantity, 0);
   const discount = lineData.reduce((s, l) => s + l.lineDiscount, 0) + h.data.orderDiscount;
+  const total = Math.max(0, gross - discount + h.data.deliveryFee + h.data.extraCharges);
+  if (h.data.financeMode === 'PARTIAL' && (!h.data.financePaidAmount || h.data.financePaidAmount <= 0 || h.data.financePaidAmount >= total)) {
+    return { error: 'invalid' };
+  }
 
   const order = await prisma.$transaction(async (tx) => {
     const o = await tx.order.create({
@@ -163,6 +177,7 @@ export async function createOrder(_prev: ActionState, fd: FormData): Promise<Act
         placedAt: h.data.placedAt,
         customerId: customer?.id ?? null,
         branchId: branch?.id ?? null,
+        createdById: user.id,
         channel: h.data.channel,
         governorate: h.data.governorate,
         fulfillmentMethod: h.data.fulfillmentMethod,
@@ -185,6 +200,9 @@ export async function createOrder(_prev: ActionState, fd: FormData): Promise<Act
       mode: h.data.financeMode as FinanceSyncMode,
       accountId: h.data.financeAccountId,
       dueDate: h.data.financeDueDate,
+      paidAmount: h.data.financePaidAmount,
+      paymentMethod: h.data.financePaymentMethod,
+      paymentDate: h.data.financePaymentDate,
       createdById: user.id,
     });
     return o;
@@ -205,7 +223,7 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
   const h = parseHeader(fd);
   if (!h.success) return { error: 'invalid' };
   const locale = reqField(fd, 'locale') || 'ar';
-  if (h.data.financeMode === 'PAID' && !h.data.financeAccountId) return { error: 'invalid' };
+  if ((h.data.financeMode === 'PAID' || h.data.financeMode === 'PARTIAL') && !h.data.financeAccountId) return { error: 'invalid' };
 
   // Full edit (CR-2): the submitted line items replace the existing ones and
   // every total is recomputed, so reports/invoice stay in sync automatically.
@@ -227,12 +245,13 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
 
   const lineData: LineData[] = [];
   for (const l of parsedLines.data) {
-    const product = await prisma.product.findUnique({ where: { sku: l.sku }, select: { id: true, cogsPerUnit: true } });
+    const product = await prisma.product.findUnique({ where: { sku: l.sku }, select: { id: true, cogsPerUnit: true, sellUnit: true } });
     if (!product) return { error: 'sku' };
     lineData.push({
       productId: product.id,
       sku: l.sku,
       quantity: l.quantity,
+      unitLabel: product.sellUnit,
       unitGrossPrice: l.unitGrossPrice,
       lineDiscount: l.lineDiscount,
       lineNet: l.unitGrossPrice * l.quantity - l.lineDiscount,
@@ -244,6 +263,10 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
     : null;
   const gross = lineData.reduce((s, l) => s + l.unitGrossPrice * l.quantity, 0);
   const discount = lineData.reduce((s, l) => s + l.lineDiscount, 0) + h.data.orderDiscount;
+  const total = Math.max(0, gross - discount + h.data.deliveryFee + h.data.extraCharges);
+  if (h.data.financeMode === 'PARTIAL' && (!h.data.financePaidAmount || h.data.financePaidAmount <= 0 || h.data.financePaidAmount >= total)) {
+    return { error: 'invalid' };
+  }
 
   // Replace lines + update header + recompute totals atomically, and reverse +
   // reapply the order's stock deductions. orderNumber is immutable (CR-5).
@@ -276,6 +299,9 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
       mode: h.data.financeMode as FinanceSyncMode,
       accountId: h.data.financeAccountId,
       dueDate: h.data.financeDueDate,
+      paidAmount: h.data.financePaidAmount,
+      paymentMethod: h.data.financePaymentMethod,
+      paymentDate: h.data.financePaymentDate,
       createdById: user.id,
     });
   });
@@ -303,4 +329,103 @@ export async function deleteOrder(id: string, locale: string): Promise<void> {
   revalidatePath(LEDGER, 'page');
   revalidatePath(DUES, 'page');
   redirect(`/${locale}/admin/records/orders`);
+}
+
+const invoicePaymentSchema = z.object({
+  amount: z.coerce.number().positive(),
+  accountId: z.string().min(1),
+  paymentMethod: z.string().optional(),
+  date: z.coerce.date(),
+});
+
+export async function recordInvoicePayment(
+  orderId: string,
+  fd: FormData,
+): Promise<void> {
+  const user = await requireCap('manage:finance');
+  if (!user) return;
+  const locale = reqField(fd, 'locale') || 'ar';
+  const parsed = invoicePaymentSchema.safeParse({
+    amount: reqField(fd, 'amount'),
+    accountId: reqField(fd, 'accountId'),
+    paymentMethod: optField(fd, 'paymentMethod'),
+    date: reqField(fd, 'date'),
+  });
+  if (!parsed.success) return;
+
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: {
+      id: true,
+      status: true,
+      orderNumber: true,
+      grossAmount: true,
+      discountAmount: true,
+      refundAmount: true,
+      deliveryFee: true,
+      extraCharges: true,
+      currency: true,
+      branchId: true,
+    },
+  });
+  if (!order) return;
+
+  const entries = await prisma.financeEntry.findMany({
+    where: {
+      OR: [{ orderId }, { settles: { is: { orderId } } }],
+    },
+    select: {
+      id: true,
+      orderId: true,
+      type: true,
+      amount: true,
+      obligation: true,
+      obligationKind: true,
+      settlesId: true,
+      archivedAt: true,
+      reversedAt: true,
+      reversalOfId: true,
+    },
+  });
+  const snapshot = invoicePaymentSnapshot(order, entries);
+  if (snapshot.remaining <= 0 || snapshot.receivableIds.length === 0) return;
+
+  const amount = Math.min(toMinor(parsed.data.amount, order.currency), snapshot.remaining);
+  const receivableId = snapshot.receivableIds[0];
+  const receivable = await prisma.financeEntry.findUnique({
+    where: { id: receivableId },
+    select: { partyId: true },
+  });
+
+  const payment = await prisma.financeEntry.create({
+    data: {
+      date: parsed.data.date,
+      type: 'PAYMENT_IN',
+      amount,
+      currency: order.currency,
+      obligation: false,
+      accountId: parsed.data.accountId,
+      partyId: receivable?.partyId ?? null,
+      paymentMethod: parsed.data.paymentMethod ?? null,
+      settlesId: receivableId,
+      branchId: order.branchId,
+      orderId: order.id,
+      reference: order.orderNumber,
+      description: `Invoice payment: ${order.orderNumber}`,
+      createdById: user.id,
+    },
+  });
+  await audit(user.id, 'INVOICE_PAYMENT', 'FinanceEntry', {
+    id: payment.id,
+    orderId,
+    amount,
+    total: invoiceTotal(order),
+    remainingBefore: snapshot.remaining,
+    paymentMethod: parsed.data.paymentMethod ?? null,
+  });
+  revalidatePath(FINANCE, 'page');
+  revalidatePath(LEDGER, 'page');
+  revalidatePath(DUES, 'page');
+  revalidatePath(`/${locale}/invoice/${orderId}`, 'page');
+  redirect(`/${locale}/invoice/${orderId}`);
 }

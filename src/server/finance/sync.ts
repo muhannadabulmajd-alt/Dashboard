@@ -4,17 +4,18 @@ import { roundMoney } from '@/lib/decimal';
 
 type Tx = Prisma.TransactionClient;
 
-export type FinanceSyncMode = 'NONE' | 'CREDIT' | 'PAID';
+export type FinanceSyncMode = 'NONE' | 'CREDIT' | 'PAID' | 'PARTIAL';
 
 const ORDER_KEY = (orderId: string, kind: 'AR' | 'PAY') => `ORD:${orderId}:${kind}`;
+const ORDER_PARTIAL_KEY = (orderId: string) => `ORD:${orderId}:PARTIAL`;
 const RECEIPT_KEY = (movementId: string) => `INV:${movementId}:PUR`;
 
-async function closeOrDeleteAutoEntry(tx: Tx, importKey: string, description: string) {
+async function closeOrDeleteAutoEntry(tx: Tx, importKey: string, description: string): Promise<number> {
   const row = await tx.financeEntry.findUnique({
     where: { importKey },
     include: { settlements: { select: { amount: true } } },
   });
-  if (!row) return;
+  if (!row) return 0;
   const settled = row.settlements.reduce((sum, s) => sum + s.amount, 0);
   if (settled > 0) {
     await tx.financeEntry.update({
@@ -24,9 +25,10 @@ async function closeOrDeleteAutoEntry(tx: Tx, importKey: string, description: st
         description,
       },
     });
-    return;
+    return settled;
   }
   await tx.financeEntry.delete({ where: { id: row.id } });
+  return 0;
 }
 
 async function resolveOrderParty(tx: Tx, orderId: string) {
@@ -82,6 +84,9 @@ export async function syncOrderFinance(
     accountId?: string | null;
     dueDate?: Date | null;
     createdById?: string | null;
+    paidAmount?: number | null;
+    paymentMethod?: string | null;
+    paymentDate?: Date | null;
   },
 ) {
   const order = await tx.order.findUnique({
@@ -112,37 +117,81 @@ export async function syncOrderFinance(
   if (!canSync || input.mode === 'NONE') {
     await closeOrDeleteAutoEntry(tx, arKey, `Closed finance sync for order ${order.orderNumber}`);
     await closeOrDeleteAutoEntry(tx, paidKey, `Closed finance sync for order ${order.orderNumber}`);
+    await closeOrDeleteAutoEntry(tx, ORDER_PARTIAL_KEY(order.id), `Closed partial payment sync for order ${order.orderNumber}`);
     return;
   }
 
   const isPaid = input.mode === 'PAID';
-  if (isPaid && !input.accountId) return;
+  const isPartial = input.mode === 'PARTIAL';
+  if ((isPaid || isPartial) && !input.accountId) return;
 
-  await closeOrDeleteAutoEntry(
-    tx,
-    isPaid ? arKey : paidKey,
-    `Replaced by ${isPaid ? 'paid income' : 'receivable'} sync for order ${order.orderNumber}`,
-  );
+  if (isPaid) {
+    await closeOrDeleteAutoEntry(tx, ORDER_PARTIAL_KEY(order.id), `Replaced by paid income sync for order ${order.orderNumber}`);
+    const settledKept = await closeOrDeleteAutoEntry(tx, arKey, `Closed receivable sync for paid order ${order.orderNumber}`);
+    const directPaidAmount = Math.max(0, amount - settledKept);
+    if (directPaidAmount <= 0) {
+      await closeOrDeleteAutoEntry(tx, paidKey, `Closed paid income sync for order ${order.orderNumber}`);
+      return;
+    }
+    const partyId = await resolveOrderParty(tx, order.id);
+    await tx.financeEntry.upsert({
+      where: { importKey: paidKey },
+      create: {
+        importKey: paidKey,
+        date: order.placedAt,
+        type: 'INCOME',
+        amount: directPaidAmount,
+        currency: 'IQD',
+        obligation: false,
+        accountId: input.accountId ?? null,
+        partyId,
+        paymentMethod: input.paymentMethod ?? null,
+        branchId: order.branchId,
+        orderId: order.id,
+        reference: order.orderNumber,
+        description: `Order paid: ${order.orderNumber}`,
+        createdById: input.createdById ?? null,
+      },
+      update: {
+        date: order.placedAt,
+        type: 'INCOME',
+        amount: directPaidAmount,
+        currency: 'IQD',
+        obligation: false,
+        obligationKind: null,
+        dueDate: null,
+        accountId: input.accountId ?? null,
+        partyId,
+        paymentMethod: input.paymentMethod ?? null,
+        branchId: order.branchId,
+        orderId: order.id,
+        reference: order.orderNumber,
+        description: `Order paid: ${order.orderNumber}`,
+      },
+    });
+    return;
+  }
+
+  await closeOrDeleteAutoEntry(tx, paidKey, `Replaced by receivable sync for order ${order.orderNumber}`);
 
   const partyId = await resolveOrderParty(tx, order.id);
-  const importKey = isPaid ? paidKey : arKey;
-  await tx.financeEntry.upsert({
-    where: { importKey },
+  const receivable = await tx.financeEntry.upsert({
+    where: { importKey: arKey },
     create: {
-      importKey,
+      importKey: arKey,
       date: order.placedAt,
       type: 'INCOME',
       amount,
       currency: 'IQD',
-      obligation: !isPaid,
-      obligationKind: isPaid ? null : 'RECEIVABLE',
-      dueDate: isPaid ? null : input.dueDate ?? order.placedAt,
-      accountId: isPaid ? input.accountId ?? null : null,
+      obligation: true,
+      obligationKind: 'RECEIVABLE',
+      dueDate: input.dueDate ?? order.placedAt,
+      accountId: null,
       partyId,
       branchId: order.branchId,
       orderId: order.id,
       reference: order.orderNumber,
-      description: isPaid ? `Order paid: ${order.orderNumber}` : `Order receivable: ${order.orderNumber}`,
+      description: `Order receivable: ${order.orderNumber}`,
       createdById: input.createdById ?? null,
     },
     update: {
@@ -150,15 +199,65 @@ export async function syncOrderFinance(
       type: 'INCOME',
       amount,
       currency: 'IQD',
-      obligation: !isPaid,
-      obligationKind: isPaid ? null : 'RECEIVABLE',
-      dueDate: isPaid ? null : input.dueDate ?? order.placedAt,
-      accountId: isPaid ? input.accountId ?? null : null,
+      obligation: true,
+      obligationKind: 'RECEIVABLE',
+      dueDate: input.dueDate ?? order.placedAt,
+      accountId: null,
       partyId,
       branchId: order.branchId,
       orderId: order.id,
       reference: order.orderNumber,
-      description: isPaid ? `Order paid: ${order.orderNumber}` : `Order receivable: ${order.orderNumber}`,
+      description: `Order receivable: ${order.orderNumber}`,
+    },
+    select: { id: true },
+  });
+
+  if (!isPartial) {
+    await closeOrDeleteAutoEntry(tx, ORDER_PARTIAL_KEY(order.id), `Closed partial payment sync for order ${order.orderNumber}`);
+    return;
+  }
+
+  const paidAmount = Math.min(amount, Math.max(0, input.paidAmount ?? 0));
+  if (paidAmount <= 0) {
+    await closeOrDeleteAutoEntry(tx, ORDER_PARTIAL_KEY(order.id), `Closed empty partial payment sync for order ${order.orderNumber}`);
+    return;
+  }
+
+  await tx.financeEntry.upsert({
+    where: { importKey: ORDER_PARTIAL_KEY(order.id) },
+    create: {
+      importKey: ORDER_PARTIAL_KEY(order.id),
+      date: input.paymentDate ?? order.placedAt,
+      type: 'PAYMENT_IN',
+      amount: paidAmount,
+      currency: 'IQD',
+      obligation: false,
+      accountId: input.accountId ?? null,
+      partyId,
+      paymentMethod: input.paymentMethod ?? null,
+      settlesId: receivable.id,
+      branchId: order.branchId,
+      orderId: order.id,
+      reference: order.orderNumber,
+      description: `Partial payment: ${order.orderNumber}`,
+      createdById: input.createdById ?? null,
+    },
+    update: {
+      date: input.paymentDate ?? order.placedAt,
+      type: 'PAYMENT_IN',
+      amount: paidAmount,
+      currency: 'IQD',
+      obligation: false,
+      obligationKind: null,
+      dueDate: null,
+      accountId: input.accountId ?? null,
+      partyId,
+      paymentMethod: input.paymentMethod ?? null,
+      settlesId: receivable.id,
+      branchId: order.branchId,
+      orderId: order.id,
+      reference: order.orderNumber,
+      description: `Partial payment: ${order.orderNumber}`,
     },
   });
 }
@@ -166,6 +265,7 @@ export async function syncOrderFinance(
 export async function closeOrderFinance(tx: Tx, orderId: string) {
   await closeOrDeleteAutoEntry(tx, ORDER_KEY(orderId, 'AR'), `Closed finance sync for deleted order ${orderId}`);
   await closeOrDeleteAutoEntry(tx, ORDER_KEY(orderId, 'PAY'), `Closed finance sync for deleted order ${orderId}`);
+  await closeOrDeleteAutoEntry(tx, ORDER_PARTIAL_KEY(orderId), `Closed partial payment sync for deleted order ${orderId}`);
 }
 
 function categoryForInventory(category: string) {

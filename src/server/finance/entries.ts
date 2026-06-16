@@ -28,6 +28,7 @@ const entryAuditSelect = {
   toAccountId: true,
   partyId: true,
   categoryType: true,
+  paymentMethod: true,
   settlesId: true,
   branchId: true,
   orderId: true,
@@ -267,6 +268,7 @@ export async function deleteEntry(id: string, locale: string): Promise<void> {
 const settleSchema = z.object({
   amount: z.coerce.number().positive(),
   accountId: z.string().min(1),
+  paymentMethod: z.string().optional(),
   date: z.coerce.date(),
 });
 
@@ -281,6 +283,7 @@ export async function settleEntry(
   const r = settleSchema.safeParse({
     amount: reqField(fd, 'amount'),
     accountId: reqField(fd, 'accountId'),
+    paymentMethod: optField(fd, 'paymentMethod'),
     date: reqField(fd, 'date'),
   });
   if (!r.success) return { error: 'invalid' };
@@ -305,8 +308,10 @@ export async function settleEntry(
       obligation: false,
       accountId: r.data.accountId,
       partyId: ob.partyId,
+      paymentMethod: r.data.paymentMethod ?? null,
       settlesId: ob.id,
       branchId: ob.branchId,
+      orderId: ob.orderId,
       description: 'Settlement',
       createdById: user.id,
     },
@@ -316,8 +321,10 @@ export async function settleEntry(
     obligationId,
     amount,
     accountId: r.data.accountId,
+    paymentMethod: r.data.paymentMethod ?? null,
     partyId: ob.partyId,
     branchId: ob.branchId,
+    orderId: ob.orderId,
     date: r.data.date.toISOString(),
   });
   revalidatePath(HUB, 'page');
