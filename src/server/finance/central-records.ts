@@ -9,10 +9,11 @@ import { audit, optField, reqField, type ActionState } from '@/server/records/sh
 import { can } from '@/lib/rbac';
 import { toMinor, convertToIqd } from '@/lib/money';
 import { parseDecimalInput } from '@/lib/decimal';
-import { CURRENCIES, EXPENSE_CATEGORY_TYPES, INVENTORY_CATEGORIES, PARTY_TYPES } from '@/lib/enums';
+import { CURRENCIES, EXPENSE_CATEGORY_TYPES, INVENTORY_CATEGORIES, PARTY_TYPES, PAYMENT_METHODS } from '@/lib/enums';
+import { ledgerUnitCostMinor } from '@/lib/ledger-lines';
 import { isMeasurementUnit } from '@/lib/units';
 import { syncActiveCost } from '@/server/inventory/fifo';
-import type { Currency, FinanceType, ObligationKind, Prisma, Role } from '@prisma/client';
+import type { Currency, ExpenseCategoryType, FinanceType, ObligationKind, Prisma, Role } from '@prisma/client';
 
 const FINANCE = '/[locale]/(dashboard)/finance';
 const LEDGER = '/[locale]/(dashboard)/finance/ledger';
@@ -35,6 +36,12 @@ const RECORD_KINDS = [
 type RecordKind = (typeof RECORD_KINDS)[number];
 type Tx = Prisma.TransactionClient;
 
+const LINE_TYPES = ['INVENTORY', 'EXPENSE', 'SERVICE', 'OTHER'] as const;
+type LedgerLineType = (typeof LINE_TYPES)[number];
+
+const PURCHASE_PAYMENT_MODES = ['PAID', 'CREDIT', 'PARTIAL'] as const;
+type PurchasePaymentMode = (typeof PURCHASE_PAYMENT_MODES)[number];
+
 type MoneyShape = {
   amount: number;
   origCurrency: Currency | null;
@@ -43,6 +50,28 @@ type MoneyShape = {
 };
 
 type QuickCreateResult = { ok: true; id: string; label: string } | { ok: false; error: string };
+
+type ParsedLedgerLine = {
+  token: string;
+  lineNo: number;
+  itemType: LedgerLineType;
+  itemName: string;
+  categoryType: ExpenseCategoryType | null;
+  inventoryItemId: string | null;
+  inventoryItemMode: 'existing' | 'new';
+  newItemNameEn: string;
+  newItemNameAr: string;
+  newItemCategory: string;
+  unit: string;
+  quantity: number;
+  unitCost: string;
+  discountAmount: number;
+  extraAmount: number;
+  lineTotal: number;
+  originalLineTotal: number;
+  branchId: string | null;
+  notes: string | null;
+};
 
 function isOwnerAdmin(role: Role): boolean {
   return role === 'OWNER' || role === 'ADMIN';
@@ -90,6 +119,115 @@ async function parseMoney(fd: FormData): Promise<MoneyShape | null> {
     origCurrency: currency,
     origAmount: origMinor,
     fxRate: rate,
+  };
+}
+
+async function parseCurrencyShape(fd: FormData): Promise<{ currency: Currency; fxRate: number | null } | null> {
+  const currency = oneOf(reqField(fd, 'currency'), CURRENCIES);
+  if (!currency) return null;
+  if (currency === 'IQD') return { currency, fxRate: null };
+  const fallbackRate = await getUsdToIqd();
+  const rate = Math.round(Number(optField(fd, 'rate') ?? fallbackRate));
+  if (!Number.isFinite(rate) || rate <= 0) return null;
+  return { currency, fxRate: rate };
+}
+
+function parseMajorAmount(value: string | undefined, allowZero = true): number | null {
+  if (!value) return allowZero ? 0 : null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return null;
+  if (!allowZero && parsed <= 0) return null;
+  return parsed;
+}
+
+function inputMajorToIqdMinor(amountMajor: number, currency: Currency, fxRate: number | null): number {
+  const originalMinor = toMinor(amountMajor, currency);
+  return convertToIqd(originalMinor, currency, fxRate ?? 1);
+}
+
+function parseLedgerLineTokens(fd: FormData): string[] {
+  const raw = reqField(fd, 'lineIds');
+  return raw
+    .split(',')
+    .map((token) => token.trim())
+    .filter(Boolean);
+}
+
+function parsePurchasePaymentMode(fd: FormData): PurchasePaymentMode {
+  return oneOf(reqField(fd, 'paymentMode') || 'PAID', PURCHASE_PAYMENT_MODES) ?? 'PAID';
+}
+
+function parsePaymentMethod(fd: FormData): string | null {
+  const method = reqField(fd, 'paymentMethod');
+  return PAYMENT_METHODS.includes(method as (typeof PAYMENT_METHODS)[number]) ? method : null;
+}
+
+async function parseLedgerLines(fd: FormData): Promise<{ lines: ParsedLedgerLine[]; money: MoneyShape } | null> {
+  const currencyShape = await parseCurrencyShape(fd);
+  if (!currencyShape) return null;
+  const tokens = parseLedgerLineTokens(fd);
+  if (!tokens.length) return null;
+
+  const lines: ParsedLedgerLine[] = [];
+  let total = 0;
+  let originalTotal = 0;
+  let lineNo = 1;
+
+  for (const token of tokens) {
+    const prefix = `line_${token}_`;
+    const itemType = oneOf(reqField(fd, `${prefix}type`) || 'EXPENSE', LINE_TYPES);
+    const unit = reqField(fd, `${prefix}unit`) || 'unit';
+    const quantity = parseDecimalInput(reqField(fd, `${prefix}quantity`), 3);
+    const unitCostMajor = parseMajorAmount(reqField(fd, `${prefix}unitCost`), false);
+    if (!itemType || !isMeasurementUnit(unit) || quantity == null || quantity <= 0 || unitCostMajor == null) return null;
+
+    const discountMajor = parseMajorAmount(optField(fd, `${prefix}discount`), true);
+    const extraMajor = parseMajorAmount(optField(fd, `${prefix}extra`), true);
+    if (discountMajor == null || extraMajor == null) return null;
+
+    const lineMajor = Math.max(0, quantity * unitCostMajor - discountMajor + extraMajor);
+    const originalLineTotal = toMinor(lineMajor, currencyShape.currency);
+    const lineTotal = convertToIqd(originalLineTotal, currencyShape.currency, currencyShape.fxRate ?? 1);
+    const discountAmount = inputMajorToIqdMinor(discountMajor, currencyShape.currency, currencyShape.fxRate);
+    const extraAmount = inputMajorToIqdMinor(extraMajor, currencyShape.currency, currencyShape.fxRate);
+    const categoryType = oneOf(reqField(fd, `${prefix}categoryType`), EXPENSE_CATEGORY_TYPES);
+    const inventoryItemMode = reqField(fd, `${prefix}inventoryItemMode`) === 'new' ? 'new' : 'existing';
+
+    lines.push({
+      token,
+      lineNo,
+      itemType,
+      itemName: reqField(fd, `${prefix}itemName`),
+      categoryType,
+      inventoryItemId: optField(fd, `${prefix}inventoryItemId`) ?? null,
+      inventoryItemMode,
+      newItemNameEn: reqField(fd, `${prefix}newItemNameEn`),
+      newItemNameAr: reqField(fd, `${prefix}newItemNameAr`),
+      newItemCategory: reqField(fd, `${prefix}newItemCategory`),
+      unit,
+      quantity,
+      unitCost: ledgerUnitCostMinor(lineTotal, quantity),
+      discountAmount,
+      extraAmount,
+      lineTotal,
+      originalLineTotal,
+      branchId: optField(fd, `${prefix}branchId`) ?? optField(fd, 'branchId') ?? null,
+      notes: optField(fd, `${prefix}notes`) ?? null,
+    });
+    total += lineTotal;
+    originalTotal += originalLineTotal;
+    lineNo += 1;
+  }
+
+  if (total <= 0) return null;
+  return {
+    lines,
+    money: {
+      amount: total,
+      origCurrency: currencyShape.currency === 'IQD' ? null : currencyShape.currency,
+      origAmount: currencyShape.currency === 'IQD' ? null : originalTotal,
+      fxRate: currencyShape.fxRate,
+    },
   };
 }
 
@@ -215,6 +353,51 @@ async function resolveInventoryItem(
   return created;
 }
 
+async function resolveLineInventoryItem(
+  tx: Tx,
+  line: ParsedLedgerLine,
+  userId: string,
+): Promise<{ id: string; category: string; branchId: string | null; nameEn: string; nameAr: string; unit: string } | null> {
+  if (line.inventoryItemMode === 'existing') {
+    if (!line.inventoryItemId) return null;
+    return tx.inventoryItem.findUnique({
+      where: { id: line.inventoryItemId },
+      select: { id: true, category: true, branchId: true, nameEn: true, nameAr: true, unit: true },
+    });
+  }
+
+  const category = oneOf(line.newItemCategory, INVENTORY_CATEGORIES);
+  const nameEn = line.newItemNameEn || line.itemName;
+  const nameAr = line.newItemNameAr || nameEn;
+  if (!nameEn || !category || !isMeasurementUnit(line.unit)) return null;
+  const created = await tx.inventoryItem.create({
+    data: {
+      nameEn,
+      nameAr,
+      category,
+      unit: line.unit,
+      branchId: line.branchId,
+      unitCost: line.unitCost,
+    },
+    select: { id: true, category: true, branchId: true, nameEn: true, nameAr: true, unit: true },
+  });
+  await tx.auditLog.create({
+    data: {
+      userId,
+      action: 'CREATE',
+      entity: 'InventoryItem',
+      entityId: created.id,
+      metadata: { source: 'multi-item-ledger-line', nameEn, nameAr, category, unit: line.unit },
+    },
+  });
+  return created;
+}
+
+function overallCategory(lines: ParsedLedgerLine[]): ExpenseCategoryType | null {
+  const categories = new Set(lines.map((line) => line.categoryType).filter(Boolean));
+  return categories.size === 1 ? ([...categories][0] as ExpenseCategoryType) : null;
+}
+
 async function nextCustomerCode(tx: Tx): Promise<string> {
   const rows = await tx.customer.findMany({ select: { externalId: true } });
   let max = 0;
@@ -307,22 +490,153 @@ export async function createCentralRecord(_prev: ActionState, fd: FormData): Pro
   const locale = reqField(fd, 'locale') || 'ar';
   const kind = oneOf(reqField(fd, 'recordKind'), RECORD_KINDS);
   const date = parseDate(reqField(fd, 'date'));
-  const money = await parseMoney(fd);
-  if (!kind || !date || !money || money.amount <= 0) return { error: 'invalid' };
+  if (!kind || !date) return { error: 'invalid' };
+
+  const lineTokens = parseLedgerLineTokens(fd);
+  const isMultiLinePurchase = kind === 'STOCK_PURCHASE' && lineTokens.length > 0;
+  const linePayload = isMultiLinePurchase ? await parseLedgerLines(fd) : null;
+  const money = isMultiLinePurchase ? linePayload?.money ?? null : await parseMoney(fd);
+  if (!money || money.amount <= 0) return { error: 'invalid' };
 
   const quantity = kind === 'STOCK_PURCHASE' || kind === 'ASSET_PURCHASE' ? parseQuantity(fd) : null;
-  if ((kind === 'STOCK_PURCHASE' || kind === 'ASSET_PURCHASE') && !quantity) return { error: 'invalid' };
+  if (!isMultiLinePurchase && (kind === 'STOCK_PURCHASE' || kind === 'ASSET_PURCHASE') && !quantity) return { error: 'invalid' };
 
-  const paidMode = reqField(fd, 'paymentMode') || 'PAID';
-  const payable = paidMode === 'CREDIT';
-  if ((kind === 'STOCK_PURCHASE' || kind === 'ASSET_PURCHASE') && !payable && !optField(fd, 'accountId')) {
+  const paidMode = parsePurchasePaymentMode(fd);
+  const payable = paidMode !== 'PAID';
+  const needsPaymentAccount = (kind === 'STOCK_PURCHASE' || kind === 'ASSET_PURCHASE') && (paidMode === 'PAID' || paidMode === 'PARTIAL');
+  if (needsPaymentAccount && !optField(fd, 'accountId')) {
     return { error: 'invalid' };
   }
+  const paidAmountMajor = parseMajorAmount(optField(fd, 'paidAmount'), true);
+  const currencyShape = await parseCurrencyShape(fd);
+  const paidAmount = paidMode === 'PAID'
+    ? money.amount
+    : paidMode === 'PARTIAL' && paidAmountMajor != null && currencyShape
+      ? inputMajorToIqdMinor(paidAmountMajor, currencyShape.currency, currencyShape.fxRate)
+      : 0;
+  if (paidMode === 'PARTIAL' && (paidAmount <= 0 || paidAmount >= money.amount)) return { error: 'invalid' };
 
   let newId = '';
   const touchedItems: string[] = [];
   try {
     await prisma.$transaction(async (tx) => {
+    if (isMultiLinePurchase && linePayload) {
+      const paymentMethod = parsePaymentMethod(fd);
+      const entry = await tx.financeEntry.create({
+        data: {
+          ...baseEntryData(fd, date, money, 'PURCHASE', payable, payable ? 'PAYABLE' : null),
+          accountId: paidMode === 'PAID' ? optField(fd, 'accountId') ?? null : null,
+          categoryType: overallCategory(linePayload.lines),
+          paymentMethod: paidMode === 'CREDIT' ? 'CREDIT' : paymentMethod,
+          createdById: user.id,
+          description: optField(fd, 'description') ?? 'Vendor invoice / purchase',
+        },
+        select: { id: true },
+      });
+
+      for (const line of linePayload.lines) {
+        let inventoryItemId = line.inventoryItemId;
+        let categoryType = line.categoryType;
+        let itemName = line.itemName;
+        if (line.itemType === 'INVENTORY') {
+          const item = await resolveLineInventoryItem(tx, line, user.id);
+          if (!item) throw new Error('invalid-line-item');
+          inventoryItemId = item.id;
+          categoryType = categoryForInventory(item.category);
+          itemName = itemName || item.nameEn;
+          await tx.inventoryCostLayer.create({
+            data: {
+              inventoryItemId: item.id,
+              financeEntryId: entry.id,
+              qtyReceived: decimalData(line.quantity),
+              unitCost: line.unitCost,
+              receivedAt: date,
+            },
+          });
+          await tx.stockMovement.create({
+            data: {
+              inventoryItemId: item.id,
+              financeEntryId: entry.id,
+              occurredAt: date,
+              reason: 'PURCHASE',
+              quantity: decimalData(line.quantity),
+              reference: optField(fd, 'reference') ?? null,
+              branchId: line.branchId ?? item.branchId,
+            },
+          });
+          touchedItems.push(item.id);
+        } else if (!categoryType) {
+          categoryType = 'OVERHEAD';
+        }
+        if (!itemName) throw new Error('invalid-line-name');
+        await tx.ledgerEntryLine.create({
+          data: {
+            financeEntryId: entry.id,
+            lineNo: line.lineNo,
+            itemType: line.itemType,
+            itemName,
+            categoryType,
+            inventoryItemId,
+            unit: line.unit,
+            quantity: decimalData(line.quantity),
+            unitCost: line.unitCost,
+            discountAmount: line.discountAmount,
+            extraAmount: line.extraAmount,
+            lineTotal: line.lineTotal,
+            branchId: line.branchId,
+            notes: line.notes,
+          },
+        });
+      }
+
+      if (paidMode === 'PARTIAL') {
+        await tx.financeEntry.create({
+          data: {
+            date: parseOptionalDate(optField(fd, 'paymentDate')) ?? date,
+            type: 'PAYMENT_OUT',
+            amount: paidAmount,
+            currency: 'IQD',
+            obligation: false,
+            accountId: optField(fd, 'accountId') ?? null,
+            partyId: optField(fd, 'partyId') ?? null,
+            categoryType: overallCategory(linePayload.lines),
+            paymentMethod,
+            settlesId: entry.id,
+            branchId: optField(fd, 'branchId') ?? null,
+            description: `Payment for ${optField(fd, 'reference') ?? entry.id.slice(-8)}`,
+            reference: optField(fd, 'reference') ?? null,
+            createdById: user.id,
+          },
+        });
+      }
+
+      await tx.auditLog.create({
+        data: {
+          userId: user.id,
+          action: 'CREATE',
+          entity: 'FinanceEntry',
+          entityId: entry.id,
+          metadata: {
+            source: 'multi-item-ledger-panel',
+            kind,
+            lines: linePayload.lines.map((line) => ({
+              lineNo: line.lineNo,
+              itemType: line.itemType,
+              itemName: line.itemName,
+              quantity: decimalData(line.quantity),
+              unit: line.unit,
+              lineTotal: line.lineTotal,
+            })),
+            total: money.amount,
+            paidAmount,
+            paymentMode: paidMode,
+          },
+        },
+      });
+      newId = entry.id;
+      return;
+    }
+
     if (kind === 'STOCK_PURCHASE') {
       const qty = quantity as number;
       const unit = reqField(fd, 'unit');
@@ -330,11 +644,13 @@ export async function createCentralRecord(_prev: ActionState, fd: FormData): Pro
       const unitCost = unitCostData(money.amount, qty);
       const item = await resolveInventoryItem(tx, fd, user.id, unitCost);
       if (!item) throw new Error('invalid-item');
+      const paymentMethod = parsePaymentMethod(fd);
       const entry = await tx.financeEntry.create({
         data: {
           ...baseEntryData(fd, date, money, 'PURCHASE', payable, payable ? 'PAYABLE' : null),
-          accountId: payable ? null : optField(fd, 'accountId') ?? null,
+          accountId: paidMode === 'PAID' ? optField(fd, 'accountId') ?? null : null,
           categoryType: categoryForInventory(item.category),
+          paymentMethod: paidMode === 'CREDIT' ? 'CREDIT' : paymentMethod,
           branchId: optField(fd, 'branchId') ?? item.branchId,
           createdById: user.id,
           description: optField(fd, 'description') ?? 'Bought stock',
@@ -362,6 +678,26 @@ export async function createCentralRecord(_prev: ActionState, fd: FormData): Pro
           branchId: optField(fd, 'branchId') ?? item.branchId,
         },
       });
+      if (paidMode === 'PARTIAL') {
+        await tx.financeEntry.create({
+          data: {
+            date: parseOptionalDate(optField(fd, 'paymentDate')) ?? date,
+            type: 'PAYMENT_OUT',
+            amount: paidAmount,
+            currency: 'IQD',
+            obligation: false,
+            accountId: optField(fd, 'accountId') ?? null,
+            partyId: optField(fd, 'partyId') ?? null,
+            categoryType: categoryForInventory(item.category),
+            paymentMethod,
+            settlesId: entry.id,
+            branchId: optField(fd, 'branchId') ?? item.branchId,
+            description: `Payment for ${optField(fd, 'reference') ?? entry.id.slice(-8)}`,
+            reference: optField(fd, 'reference') ?? null,
+            createdById: user.id,
+          },
+        });
+      }
       await tx.auditLog.create({
         data: {
           userId: user.id,
@@ -391,11 +727,13 @@ export async function createCentralRecord(_prev: ActionState, fd: FormData): Pro
       const category = reqField(fd, 'assetCategory') || 'Equipment';
       if (!name || !isMeasurementUnit(unit)) throw new Error('invalid-asset');
       const unitCost = unitCostData(money.amount, qty);
+      const paymentMethod = parsePaymentMethod(fd);
       const entry = await tx.financeEntry.create({
         data: {
           ...baseEntryData(fd, date, money, 'PURCHASE', payable, payable ? 'PAYABLE' : null),
-          accountId: payable ? null : optField(fd, 'accountId') ?? null,
+          accountId: paidMode === 'PAID' ? optField(fd, 'accountId') ?? null : null,
           categoryType: 'EQUIPMENT',
+          paymentMethod: paidMode === 'CREDIT' ? 'CREDIT' : paymentMethod,
           createdById: user.id,
           description: optField(fd, 'description') ?? `Bought equipment: ${name}`,
         },
@@ -427,6 +765,26 @@ export async function createCentralRecord(_prev: ActionState, fd: FormData): Pro
           metadata: { source: 'central-ledger-panel', financeEntryId: entry.id, name, quantity: decimalData(qty), unit, totalCost: money.amount, unitCost },
         },
       });
+      if (paidMode === 'PARTIAL') {
+        await tx.financeEntry.create({
+          data: {
+            date: parseOptionalDate(optField(fd, 'paymentDate')) ?? date,
+            type: 'PAYMENT_OUT',
+            amount: paidAmount,
+            currency: 'IQD',
+            obligation: false,
+            accountId: optField(fd, 'accountId') ?? null,
+            partyId: optField(fd, 'partyId') ?? null,
+            categoryType: 'EQUIPMENT',
+            paymentMethod,
+            settlesId: entry.id,
+            branchId: optField(fd, 'branchId') ?? null,
+            description: `Payment for ${optField(fd, 'reference') ?? entry.id.slice(-8)}`,
+            reference: optField(fd, 'reference') ?? null,
+            createdById: user.id,
+          },
+        });
+      }
       newId = entry.id;
       return;
     }
@@ -481,6 +839,7 @@ async function entrySnapshot(tx: Tx, id: string) {
   return tx.financeEntry.findUnique({
     where: { id },
     include: {
+      ledgerLines: true,
       stockMovements: true,
       costLayers: true,
       fixedAsset: true,

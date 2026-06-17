@@ -2,17 +2,36 @@
 
 import { useActionState, useMemo, useState, useTransition } from 'react';
 import { Loader2, Plus, X } from 'lucide-react';
-import { enumLabel, EXPENSE_CATEGORY_TYPES, INVENTORY_CATEGORIES, PARTY_TYPES } from '@/lib/enums';
+import { enumLabel, EXPENSE_CATEGORY_TYPES, INVENTORY_CATEGORIES, PARTY_TYPES, PAYMENT_METHODS } from '@/lib/enums';
 import { MEASUREMENT_UNITS } from '@/lib/units';
 import { cn } from '@/lib/utils';
 import { Link } from '@/i18n/navigation';
 import type { ActionState } from '@/server/records/shared';
 
 type Option = { value: string; label: string };
-type InventoryOption = Option & { unit: string; category: string };
+type InventoryOption = Option & { unit: string; category: string; name: string };
 type QuickCreateResult = { ok: true; id: string; label: string } | { ok: false; error: string };
 type CreateAction = (prev: ActionState, fd: FormData) => Promise<ActionState>;
 type QuickAction = (fd: FormData) => Promise<QuickCreateResult>;
+type LineType = 'INVENTORY' | 'EXPENSE' | 'SERVICE' | 'OTHER';
+
+type LedgerLineRow = {
+  id: string;
+  type: LineType;
+  itemName: string;
+  inventoryItemMode: 'existing' | 'new';
+  inventoryItemId: string;
+  newItemNameEn: string;
+  newItemNameAr: string;
+  newItemCategory: string;
+  categoryType: string;
+  unit: string;
+  quantity: string;
+  unitCost: string;
+  discount: string;
+  extra: string;
+  notes: string;
+};
 
 type RecordKind =
   | 'MONEY_IN'
@@ -29,10 +48,46 @@ const input =
   'min-h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-roast outline-none focus:border-primary focus:bg-card';
 const label = 'text-xs font-semibold text-muted-foreground';
 
+let lineSeed = 1;
+
+function makeLine(overrides: Partial<LedgerLineRow> = {}): LedgerLineRow {
+  const id = `l${lineSeed++}`;
+  const cleanOverrides = { ...overrides };
+  delete cleanOverrides.id;
+  return {
+    id,
+    type: 'INVENTORY',
+    itemName: '',
+    inventoryItemMode: 'existing',
+    inventoryItemId: '',
+    newItemNameEn: '',
+    newItemNameAr: '',
+    newItemCategory: 'PACKAGING',
+    categoryType: 'OVERHEAD',
+    unit: 'unit',
+    quantity: '1.000',
+    unitCost: '',
+    discount: '',
+    extra: '',
+    notes: '',
+    ...cleanOverrides,
+  };
+}
+
+function moneyNumber(value: string): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function lineTotal(row: LedgerLineRow): number {
+  const total = moneyNumber(row.quantity) * moneyNumber(row.unitCost) - moneyNumber(row.discount) + moneyNumber(row.extra);
+  return Math.max(0, total);
+}
+
 const KIND_LABELS: Record<RecordKind, { en: string; ar: string; hint: { en: string; ar: string } }> = {
   MONEY_IN: { en: 'Money in', ar: 'مال داخل', hint: { en: 'Cash or bank money received now.', ar: 'مبلغ استلمته الآن نقداً أو في البنك.' } },
   MONEY_OUT: { en: 'Money out', ar: 'مال خارج', hint: { en: 'A payment or normal expense.', ar: 'دفعة أو مصروف عادي.' } },
-  STOCK_PURCHASE: { en: 'Bought stock', ar: 'شراء مخزون', hint: { en: 'Adds inventory, cost, and ledger record together.', ar: 'يضيف المخزون والكلفة والسجل معاً.' } },
+  STOCK_PURCHASE: { en: 'Vendor invoice / purchase', ar: 'فاتورة مورد / شراء', hint: { en: 'Record one invoice with stock, service, and expense lines together.', ar: 'سجل فاتورة واحدة تحتوي مخزوناً وخدمات ومصاريف معاً.' } },
   ASSET_PURCHASE: { en: 'Bought equipment / asset', ar: 'شراء معدّة / أصل', hint: { en: 'Tracks equipment in a simple asset list.', ar: 'يسجل المعدّة في قائمة أصول بسيطة.' } },
   CUSTOMER_DUE: { en: 'Customer owes us', ar: 'عميل عليه مبلغ لنا', hint: { en: 'Record money to collect later.', ar: 'مبلغ سنحصله لاحقاً.' } },
   SUPPLIER_DUE: { en: 'We owe supplier', ar: 'علينا مبلغ لمورّد', hint: { en: 'Record a bill to pay later.', ar: 'فاتورة سندفعها لاحقاً.' } },
@@ -60,11 +115,21 @@ const COPY = {
     paymentMode: 'Payment status',
     paidNow: 'Paid now',
     payLater: 'Pay later',
+    partial: 'Partially paid',
+    paidAmount: 'Amount paid',
+    paymentMethod: 'Payment method',
+    paymentDate: 'Payment date',
     dueDate: 'Due date',
     category: 'What was this for?',
     reference: 'Invoice / reference',
     note: 'Note',
     stockItem: 'Stock item',
+    lines: 'Invoice lines',
+    lineType: 'Line type',
+    inventoryLine: 'Inventory item',
+    expenseLine: 'Expense',
+    serviceLine: 'Service',
+    otherLine: 'Other',
     existingItem: 'Use existing item',
     newItem: 'Create new item',
     itemNameEn: 'Item name',
@@ -74,6 +139,18 @@ const COPY = {
     quantity: 'Total quantity',
     unit: 'Unit',
     expiryDate: 'Expiry date',
+    unitCost: 'Unit price',
+    discount: 'Discount',
+    extra: 'Extra cost',
+    lineTotal: 'Line total',
+    addLine: 'Add line',
+    duplicate: 'Duplicate',
+    moveUp: 'Up',
+    moveDown: 'Down',
+    remove: 'Remove',
+    total: 'Total',
+    remaining: 'Remaining',
+    attachment: 'Attachment link',
     assetName: 'Asset name',
     assetCategory: 'Asset type',
     submit: 'Add record',
@@ -106,11 +183,21 @@ const COPY = {
     paymentMode: 'حالة الدفع',
     paidNow: 'مدفوع الآن',
     payLater: 'دفع لاحق',
+    partial: 'مدفوع جزئياً',
+    paidAmount: 'المبلغ المدفوع',
+    paymentMethod: 'طريقة الدفع',
+    paymentDate: 'تاريخ الدفع',
     dueDate: 'تاريخ الاستحقاق',
     category: 'ما الغرض من هذا؟',
     reference: 'رقم الفاتورة / المرجع',
     note: 'ملاحظة',
     stockItem: 'صنف المخزون',
+    lines: 'سطور الفاتورة',
+    lineType: 'نوع السطر',
+    inventoryLine: 'صنف مخزون',
+    expenseLine: 'مصروف',
+    serviceLine: 'خدمة',
+    otherLine: 'أخرى',
     existingItem: 'استخدام صنف موجود',
     newItem: 'إنشاء صنف جديد',
     itemNameEn: 'اسم الصنف',
@@ -120,6 +207,18 @@ const COPY = {
     quantity: 'الكمية الكلية',
     unit: 'الوحدة',
     expiryDate: 'تاريخ الانتهاء',
+    unitCost: 'سعر الوحدة',
+    discount: 'خصم',
+    extra: 'تكلفة إضافية',
+    lineTotal: 'مجموع السطر',
+    addLine: 'إضافة سطر',
+    duplicate: 'تكرار',
+    moveUp: 'أعلى',
+    moveDown: 'أسفل',
+    remove: 'حذف',
+    total: 'المجموع',
+    remaining: 'المتبقي',
+    attachment: 'رابط المرفق',
     assetName: 'اسم الأصل',
     assetCategory: 'نوع الأصل',
     submit: 'إضافة السجل',
@@ -248,7 +347,11 @@ export function CentralEntryPanel({
   const [recordKind, setRecordKind] = useState<RecordKind>('MONEY_IN');
   const [currency, setCurrency] = useState('IQD');
   const [paymentMode, setPaymentMode] = useState('PAID');
-  const [inventoryItemMode, setInventoryItemMode] = useState('existing');
+  const [paidAmount, setPaidAmount] = useState('');
+  const [lines, setLines] = useState<LedgerLineRow[]>(() => [
+    makeLine(),
+    makeLine({ type: 'EXPENSE', itemName: 'Delivery fee', categoryType: 'SHIPPING', quantity: '1.000', unit: 'unit' }),
+  ]);
   const [partyOptions, setPartyOptions] = useState<Option[]>(parties);
   const [partyId, setPartyId] = useState('');
   const [popup, setPopup] = useState<'party' | 'customer' | null>(null);
@@ -270,8 +373,42 @@ export function CentralEntryPanel({
     [locale],
   );
   const unitOptions = MEASUREMENT_UNITS.map((value) => ({ value, label: value }));
-  const showPaidAccount = !['CUSTOMER_DUE', 'SUPPLIER_DUE'].includes(recordKind) && (recordKind !== 'STOCK_PURCHASE' && recordKind !== 'ASSET_PURCHASE' || paymentMode === 'PAID');
+  const paymentMethodOptions = useMemo(
+    () => PAYMENT_METHODS.map((value) => ({ value, label: enumLabel(value, locale) })),
+    [locale],
+  );
+  const purchaseTotal = useMemo(() => lines.reduce((sum, row) => sum + lineTotal(row), 0), [lines]);
+  const paidNow = paymentMode === 'PAID' ? purchaseTotal : moneyNumber(paidAmount);
+  const remaining = paymentMode === 'CREDIT' ? purchaseTotal : Math.max(0, purchaseTotal - paidNow);
+  const paidTooMuch = paymentMode === 'PARTIAL' && paidNow >= purchaseTotal && purchaseTotal > 0;
+  const showPaidAccount = !['CUSTOMER_DUE', 'SUPPLIER_DUE'].includes(recordKind) && (recordKind !== 'STOCK_PURCHASE' && recordKind !== 'ASSET_PURCHASE' || paymentMode === 'PAID' || paymentMode === 'PARTIAL');
   const showParty = ['STOCK_PURCHASE', 'ASSET_PURCHASE', 'CUSTOMER_DUE', 'SUPPLIER_DUE', 'MONEY_IN', 'MONEY_OUT'].includes(recordKind);
+
+  function updateLine(id: string, patch: Partial<LedgerLineRow>) {
+    setLines((current) => current.map((row) => (row.id === id ? { ...row, ...patch } : row)));
+  }
+
+  function duplicateLine(id: string) {
+    const row = lines.find((entry) => entry.id === id);
+    if (!row) return;
+    setLines((current) => [...current, makeLine(row)]);
+  }
+
+  function moveLine(id: string, direction: -1 | 1) {
+    setLines((current) => {
+      const index = current.findIndex((row) => row.id === id);
+      const nextIndex = index + direction;
+      if (index < 0 || nextIndex < 0 || nextIndex >= current.length) return current;
+      const copy = [...current];
+      const [row] = copy.splice(index, 1);
+      copy.splice(nextIndex, 0, row);
+      return copy;
+    });
+  }
+
+  function removeLine(id: string) {
+    setLines((current) => (current.length > 1 ? current.filter((row) => row.id !== id) : current));
+  }
 
   function savePopup() {
     const fd = new FormData();
@@ -319,7 +456,9 @@ export function CentralEntryPanel({
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           <Field name="date" labelText={c.date} type="date" required value={today} />
-          <Field name="amount" labelText={c.amount} type="number" required step="0.01" placeholder="0" />
+          {recordKind === 'STOCK_PURCHASE' ? null : (
+            <Field name="amount" labelText={c.amount} type="number" required step="0.01" placeholder="0" />
+          )}
           <SelectField
             name="currency"
             labelText={c.currency}
@@ -352,13 +491,24 @@ export function CentralEntryPanel({
                 options={[
                   { value: 'PAID', label: c.paidNow },
                   { value: 'CREDIT', label: c.payLater },
+                  { value: 'PARTIAL', label: c.partial },
                 ]}
                 value={paymentMode}
                 onChange={setPaymentMode}
                 empty={false}
               />
-              {paymentMode === 'CREDIT' ? <Field name="dueDate" labelText={c.dueDate} type="date" value={today} /> : null}
+              {paymentMode === 'PARTIAL' ? (
+                <>
+                  <Field name="paidAmount" labelText={c.paidAmount} type="number" required step="0.01" value={paidAmount} onChange={setPaidAmount} placeholder="0" />
+                  <Field name="paymentDate" labelText={c.paymentDate} type="date" value={today} />
+                </>
+              ) : null}
+              {paymentMode !== 'PAID' ? <Field name="dueDate" labelText={c.dueDate} type="date" value={today} /> : null}
             </>
+          ) : null}
+
+          {(recordKind === 'STOCK_PURCHASE' || recordKind === 'ASSET_PURCHASE') && (paymentMode === 'PAID' || paymentMode === 'PARTIAL') ? (
+            <SelectField name="paymentMethod" labelText={c.paymentMethod} options={paymentMethodOptions} empty={false} />
           ) : null}
 
           {['CUSTOMER_DUE', 'SUPPLIER_DUE'].includes(recordKind) ? <Field name="dueDate" labelText={c.dueDate} type="date" value={today} /> : null}
@@ -390,31 +540,140 @@ export function CentralEntryPanel({
         ) : null}
 
         {recordKind === 'STOCK_PURCHASE' ? (
-          <div className="grid gap-4 rounded-lg border border-primary/20 bg-linen/25 p-3 md:grid-cols-2 xl:grid-cols-3">
-            <SelectField
-              name="inventoryItemMode"
-              labelText={c.stockItem}
-              options={[
-                { value: 'existing', label: c.existingItem },
-                { value: 'new', label: c.newItem },
-              ]}
-              value={inventoryItemMode}
-              onChange={setInventoryItemMode}
-              empty={false}
-            />
-            {inventoryItemMode === 'existing' ? (
-              <SelectField name="inventoryItemId" labelText={c.stockItem} options={inventoryItems} required />
-            ) : (
-              <>
-                <Field name="newItemNameEn" labelText={c.itemNameEn} required />
-                <Field name="newItemNameAr" labelText={c.itemNameAr} />
-                <SelectField name="newItemCategory" labelText={c.itemCategory} options={inventoryCategoryOptions} required />
-                <Field name="newItemReorderPoint" labelText={c.reorderPoint} type="number" step="0.001" />
-              </>
-            )}
-            <Field name="quantity" labelText={c.quantity} type="number" required step="0.001" placeholder="0.000" />
-            <SelectField name="unit" labelText={c.unit} options={unitOptions} required empty={false} />
-            <Field name="expiryDate" labelText={c.expiryDate} type="date" />
+          <div className="space-y-3 rounded-lg border border-primary/20 bg-linen/25 p-3">
+            <input type="hidden" name="lineIds" value={lines.map((row) => row.id).join(',')} />
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-foreground">{c.lines}</h3>
+                <p className="text-xs text-muted-foreground">{selectedKind.hint[locale]}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setLines((current) => [...current, makeLine()])}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border/80 bg-card px-3 py-2 text-sm font-semibold hover:bg-muted"
+              >
+                <Plus className="size-4" />
+                {c.addLine}
+              </button>
+            </div>
+            <div className="space-y-3">
+              {lines.map((row, index) => {
+                const prefix = `line_${row.id}_`;
+                const selectedInventory = inventoryItems.find((item) => item.value === row.inventoryItemId);
+                return (
+                  <div key={row.id} className="rounded-lg border border-border/80 bg-card p-3">
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                      <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-semibold text-muted-foreground">#{index + 1}</span>
+                      <div className="flex flex-wrap gap-1.5">
+                        <button type="button" onClick={() => moveLine(row.id, -1)} className="rounded-lg border px-2 py-1 text-xs font-semibold hover:bg-muted">
+                          {c.moveUp}
+                        </button>
+                        <button type="button" onClick={() => moveLine(row.id, 1)} className="rounded-lg border px-2 py-1 text-xs font-semibold hover:bg-muted">
+                          {c.moveDown}
+                        </button>
+                        <button type="button" onClick={() => duplicateLine(row.id)} className="rounded-lg border px-2 py-1 text-xs font-semibold hover:bg-muted">
+                          {c.duplicate}
+                        </button>
+                        <button type="button" onClick={() => removeLine(row.id)} className="rounded-lg border px-2 py-1 text-xs font-semibold text-danger hover:bg-danger-soft">
+                          {c.remove}
+                        </button>
+                      </div>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                      <SelectField
+                        name={`${prefix}type`}
+                        labelText={c.lineType}
+                        value={row.type}
+                        onChange={(value) => updateLine(row.id, { type: value as LineType })}
+                        options={[
+                          { value: 'INVENTORY', label: c.inventoryLine },
+                          { value: 'EXPENSE', label: c.expenseLine },
+                          { value: 'SERVICE', label: c.serviceLine },
+                          { value: 'OTHER', label: c.otherLine },
+                        ]}
+                        empty={false}
+                      />
+                      {row.type === 'INVENTORY' ? (
+                        <>
+                          <SelectField
+                            name={`${prefix}inventoryItemMode`}
+                            labelText={c.stockItem}
+                            value={row.inventoryItemMode}
+                            onChange={(value) => updateLine(row.id, { inventoryItemMode: value === 'new' ? 'new' : 'existing' })}
+                            options={[
+                              { value: 'existing', label: c.existingItem },
+                              { value: 'new', label: c.newItem },
+                            ]}
+                            empty={false}
+                          />
+                          {row.inventoryItemMode === 'existing' ? (
+                            <SelectField
+                              name={`${prefix}inventoryItemId`}
+                              labelText={c.stockItem}
+                              value={row.inventoryItemId}
+                              onChange={(value) => {
+                                const item = inventoryItems.find((entry) => entry.value === value);
+                                updateLine(row.id, { inventoryItemId: value, unit: item?.unit ?? row.unit, itemName: item?.name ?? row.itemName });
+                              }}
+                              options={inventoryItems}
+                              required
+                            />
+                          ) : (
+                            <>
+                              <Field name={`${prefix}newItemNameEn`} labelText={c.itemNameEn} required value={row.newItemNameEn} onChange={(value) => updateLine(row.id, { newItemNameEn: value, itemName: value })} />
+                              <Field name={`${prefix}newItemNameAr`} labelText={c.itemNameAr} value={row.newItemNameAr} onChange={(value) => updateLine(row.id, { newItemNameAr: value })} />
+                              <SelectField
+                                name={`${prefix}newItemCategory`}
+                                labelText={c.itemCategory}
+                                value={row.newItemCategory}
+                                onChange={(value) => updateLine(row.id, { newItemCategory: value })}
+                                options={inventoryCategoryOptions}
+                                required
+                                empty={false}
+                              />
+                            </>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <Field name={`${prefix}itemName`} labelText={c.itemNameEn} required value={row.itemName} onChange={(value) => updateLine(row.id, { itemName: value })} />
+                          <SelectField
+                            name={`${prefix}categoryType`}
+                            labelText={c.category}
+                            value={row.categoryType}
+                            onChange={(value) => updateLine(row.id, { categoryType: value })}
+                            options={categoryOptions}
+                            required
+                            empty={false}
+                          />
+                        </>
+                      )}
+                      {row.type === 'INVENTORY' ? (
+                        <input type="hidden" name={`${prefix}itemName`} value={row.itemName || selectedInventory?.name || ''} />
+                      ) : null}
+                      <Field name={`${prefix}quantity`} labelText={c.quantity} type="number" required step="0.001" value={row.quantity} onChange={(value) => updateLine(row.id, { quantity: value })} placeholder="0.000" />
+                      <SelectField name={`${prefix}unit`} labelText={c.unit} options={unitOptions} required value={row.unit} onChange={(value) => updateLine(row.id, { unit: value })} empty={false} />
+                      <Field name={`${prefix}unitCost`} labelText={c.unitCost} type="number" required step="0.01" value={row.unitCost} onChange={(value) => updateLine(row.id, { unitCost: value })} placeholder="0" />
+                      <Field name={`${prefix}discount`} labelText={c.discount} type="number" step="0.01" value={row.discount} onChange={(value) => updateLine(row.id, { discount: value })} placeholder="0" />
+                      <Field name={`${prefix}extra`} labelText={c.extra} type="number" step="0.01" value={row.extra} onChange={(value) => updateLine(row.id, { extra: value })} placeholder="0" />
+                      <Field name={`${prefix}notes`} labelText={c.note} value={row.notes} onChange={(value) => updateLine(row.id, { notes: value })} />
+                      <div className="flex flex-col justify-end gap-1">
+                        <span className={label}>{c.lineTotal}</span>
+                        <div className="min-h-10 rounded-lg border border-border/80 bg-muted/45 px-3 py-2 text-sm font-semibold text-foreground">
+                          {lineTotal(row).toLocaleString(locale === 'ar' ? 'ar-IQ' : 'en-US')} {currency}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="grid gap-3 rounded-lg border border-border/80 bg-background/70 p-3 text-sm font-semibold md:grid-cols-3">
+              <div>{c.total}: {purchaseTotal.toLocaleString(locale === 'ar' ? 'ar-IQ' : 'en-US')} {currency}</div>
+              <div>{c.paidAmount}: {paidNow.toLocaleString(locale === 'ar' ? 'ar-IQ' : 'en-US')} {currency}</div>
+              <div>{c.remaining}: {remaining.toLocaleString(locale === 'ar' ? 'ar-IQ' : 'en-US')} {currency}</div>
+              {paidTooMuch ? <p className="text-danger md:col-span-3">{c.invalid}</p> : null}
+            </div>
           </div>
         ) : null}
 
@@ -427,9 +686,10 @@ export function CentralEntryPanel({
           </div>
         ) : null}
 
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-4 md:grid-cols-3">
           <Field name="reference" labelText={c.reference} />
           <Field name="description" labelText={c.note} />
+          <Field name="attachmentUrl" labelText={c.attachment} type="url" />
         </div>
 
         {state?.error ? (

@@ -6,6 +6,7 @@ import { enumLabel } from '@/lib/enums';
 import { formatMoney, formatQuantity } from '@/lib/money';
 import { formatDate } from '@/lib/dates';
 import { can } from '@/lib/rbac';
+import { ledgerPaymentSnapshot, ledgerPaymentStatusLabel } from '@/lib/ledger-lines';
 import { Badge, PageHeader } from '@/components/ui/primitives';
 import { BackLink, DetailGrid, type DetailField } from '@/components/records/parts';
 import { RecordActions } from '@/components/records/RecordActions';
@@ -36,7 +37,18 @@ export default async function EntryDetailPage({
       party: true,
       account: true,
       toAccount: true,
-      settlements: { where: { reversedAt: null, reversalOfId: null }, select: { id: true } },
+      settlements: {
+        where: { reversedAt: null, reversalOfId: null, archivedAt: null },
+        orderBy: { date: 'asc' },
+        include: {
+          account: { select: { name: true } },
+          party: { select: { name: true } },
+        },
+      },
+      ledgerLines: {
+        include: { inventoryItem: { select: { nameEn: true, nameAr: true, unit: true } } },
+        orderBy: { lineNo: 'asc' },
+      },
       stockMovements: {
         include: { inventoryItem: { select: { nameEn: true, nameAr: true, unit: true } } },
         orderBy: { occurredAt: 'desc' },
@@ -63,11 +75,17 @@ export default async function EntryDetailPage({
   const hasSettlements = e.obligation && e.settlements.length > 0;
   const canEdit = ownerAdmin || (canManage && !isArchived && !isReversed && !isReversalMarker && !managedBySync);
   const canReverse = canEdit && !hasSettlements;
+  const paidAmount = e.obligation ? e.settlements.reduce((sum, payment) => sum + payment.amount, 0) : e.amount;
+  const paymentSnapshot = ledgerPaymentSnapshot(e.amount, paidAmount, { reversed: isReversed || isReversalMarker });
 
   const items: DetailField[] = [
     { label: t('f.transactionId'), value: e.id },
     { label: t('f.type'), value: enumLabel(e.type, locale) },
     { label: t('f.amount'), value: formatMoney(e.amount, e.currency, locale) },
+    { label: t('paidAmount'), value: formatMoney(paymentSnapshot.paid, e.currency, locale) },
+    { label: t('remainingAmount'), value: formatMoney(paymentSnapshot.remaining, e.currency, locale) },
+    { label: t('paymentStatus'), value: ledgerPaymentStatusLabel(paymentSnapshot.status, locale) },
+    { label: t('f.paymentMethod'), value: e.paymentMethod ? enumLabel(e.paymentMethod, locale) : '—' },
     ...(e.origCurrency === 'USD' && e.origAmount != null
       ? [{ label: t('f.origPaid'), value: `${formatMoney(e.origAmount, 'USD', locale)} × ${e.fxRate ?? '—'}` }]
       : []),
@@ -133,6 +151,59 @@ export default async function EntryDetailPage({
         />
       ) : null}
       <DetailGrid items={items} />
+      {e.obligation || e.settlements.length ? (
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h3 className="text-sm font-semibold">{t('paymentHistory')}</h3>
+            {canManage && paymentSnapshot.remaining > 0 && !isArchived && !isReversed ? (
+              <Link href={`/finance/dues/${e.id}/settle`} className="rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:opacity-95">
+                {t('recordPayment')}
+              </Link>
+            ) : null}
+          </div>
+          <DataTable
+            columns={[
+              { label: t('f.date') },
+              { label: t('f.amount'), align: 'end' },
+              { label: t('f.account') },
+              { label: t('f.paymentMethod') },
+              { label: t('f.description') },
+            ]}
+            rows={e.settlements.map((payment) => [
+              formatDate(payment.date, locale),
+              formatMoney(payment.amount, payment.currency, locale),
+              payment.account?.name ?? '—',
+              payment.paymentMethod ? enumLabel(payment.paymentMethod, locale) : '—',
+              payment.description ?? payment.reference ?? '—',
+            ])}
+            emptyLabel={tr('none')}
+          />
+        </div>
+      ) : null}
+      {e.ledgerLines.length ? (
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold">{t('lineItems')}</h3>
+          <DataTable
+            columns={[
+              { label: '#' },
+              { label: t('f.item') },
+              { label: t('f.category') },
+              { label: t('f.quantity'), align: 'end' },
+              { label: t('f.value'), align: 'end' },
+              { label: t('f.description') },
+            ]}
+            rows={e.ledgerLines.map((line) => [
+              line.lineNo,
+              line.inventoryItem ? (locale === 'ar' ? line.inventoryItem.nameAr : line.inventoryItem.nameEn) : line.itemName,
+              line.categoryType ? enumLabel(line.categoryType, locale) : line.itemType,
+              `${formatQuantity(line.quantity, locale)} ${line.unit}`,
+              formatMoney(line.lineTotal, 'IQD', locale),
+              line.notes ?? '—',
+            ])}
+            emptyLabel={tr('none')}
+          />
+        </div>
+      ) : null}
       {e.stockMovements.length || e.costLayers.length ? (
         <div className="space-y-2">
           <h3 className="text-sm font-semibold">{t('linkedStock')}</h3>

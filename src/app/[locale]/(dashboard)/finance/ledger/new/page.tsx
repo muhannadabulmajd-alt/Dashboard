@@ -33,6 +33,7 @@ export default async function NewEntryPage({
   const inventoryOptions = inventoryItems.map((item) => ({
     value: item.id,
     label: `${locale === 'ar' ? item.nameAr : item.nameEn} (${item.unit})`,
+    name: locale === 'ar' ? item.nameAr : item.nameEn,
     unit: item.unit,
     category: item.category,
   }));

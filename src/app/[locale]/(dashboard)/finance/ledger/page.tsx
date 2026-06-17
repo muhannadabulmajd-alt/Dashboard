@@ -2,10 +2,10 @@ import { getTranslations } from 'next-intl/server';
 import { Plus } from 'lucide-react';
 import { getPageContext } from '@/server/page-context';
 import { prisma } from '@/server/db/client';
-import { enumLabel, FINANCE_TYPES } from '@/lib/enums';
+import { enumLabel, FINANCE_TYPES, PAYMENT_METHODS } from '@/lib/enums';
 import { formatMoney } from '@/lib/money';
 import { formatDate } from '@/lib/dates';
-import { signedEffect, type FinanceEntryLike } from '@/lib/metrics/finance';
+import { ledgerPaymentSnapshot, ledgerPaymentStatusLabel } from '@/lib/ledger-lines';
 import { can } from '@/lib/rbac';
 import { Badge, PageHeader } from '@/components/ui/primitives';
 import { DataTable, type Column } from '@/components/data-table/DataTable';
@@ -20,10 +20,6 @@ const input = 'rounded-lg border bg-background px-3 py-2 text-sm outline-none fo
 
 function one(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] ?? '' : value ?? '';
-}
-
-function active(e: { archivedAt: Date | null; reversedAt: Date | null; reversalOfId: string | null }) {
-  return !e.archivedAt && !e.reversedAt && !e.reversalOfId;
 }
 
 export default async function LedgerPage({
@@ -46,9 +42,15 @@ export default async function LedgerPage({
   const accountId = one(rawParams.accountId);
   const partyId = one(rawParams.partyId);
   const branchId = one(rawParams.branchId);
+  const paymentStatus = one(rawParams.paymentStatus);
+  const paymentMethod = one(rawParams.paymentMethod);
+  const dateFrom = one(rawParams.dateFrom);
+  const dateTo = one(rawParams.dateTo);
+  const minAmount = one(rawParams.minAmount);
+  const maxAmount = one(rawParams.maxAmount);
   const sort = one(rawParams.sort) || 'date_desc';
   const currentParams = new URLSearchParams();
-  for (const [key, value] of Object.entries({ q, type, status, accountId, partyId, branchId, sort })) {
+  for (const [key, value] of Object.entries({ q, type, status, accountId, partyId, branchId, paymentStatus, paymentMethod, dateFrom, dateTo, minAmount, maxAmount, sort })) {
     if (value) currentParams.set(key, value);
   }
 
@@ -62,6 +64,8 @@ export default async function LedgerPage({
         { importKey: { contains: q } },
         { orderId: { contains: q } },
         { party: { name: { contains: q } } },
+        { ledgerLines: { some: { itemName: { contains: q } } } },
+        { ledgerLines: { some: { inventoryItem: { OR: [{ nameEn: { contains: q } }, { nameAr: { contains: q } }] } } } },
       ],
     });
   }
@@ -69,6 +73,18 @@ export default async function LedgerPage({
   if (accountId) and.push({ OR: [{ accountId }, { toAccountId: accountId }] });
   if (partyId) and.push({ partyId });
   if (branchId) and.push({ branchId });
+  if (paymentMethod) and.push({ paymentMethod });
+  const amountGte = minAmount ? Number(minAmount) : NaN;
+  const amountLte = maxAmount ? Number(maxAmount) : NaN;
+  if (Number.isFinite(amountGte)) and.push({ amount: { gte: Math.round(amountGte) } });
+  if (Number.isFinite(amountLte)) and.push({ amount: { lte: Math.round(amountLte) } });
+  const parsedDateFrom = dateFrom ? new Date(dateFrom) : null;
+  const parsedDateTo = dateTo ? new Date(dateTo) : null;
+  if (parsedDateFrom && !Number.isNaN(parsedDateFrom.getTime())) and.push({ date: { gte: parsedDateFrom } });
+  if (parsedDateTo && !Number.isNaN(parsedDateTo.getTime())) {
+    parsedDateTo.setHours(23, 59, 59, 999);
+    and.push({ date: { lte: parsedDateTo } });
+  }
   if (status === 'paid') and.push({ obligation: false, reversedAt: null, reversalOfId: null });
   if (status === 'due') and.push({ obligation: true, reversedAt: null, reversalOfId: null });
   if (status === 'reversed') and.push({ reversedAt: { not: null } });
@@ -83,7 +99,7 @@ export default async function LedgerPage({
     : sort === 'type' ? { type: 'asc' }
     : { date: 'desc' };
 
-  const [entries, accounts, parties, branches, users] = await Promise.all([
+  const [entriesRaw, accounts, parties, branches, users] = await Promise.all([
     prisma.financeEntry.findMany({
       where,
       orderBy,
@@ -92,6 +108,8 @@ export default async function LedgerPage({
         party: { select: { name: true } },
         account: { select: { name: true } },
         toAccount: { select: { name: true } },
+        settlements: { where: { archivedAt: null, reversedAt: null, reversalOfId: null }, select: { amount: true } },
+        ledgerLines: { select: { id: true } },
       },
     }),
     prisma.financeAccount.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true, currency: true } }),
@@ -99,6 +117,12 @@ export default async function LedgerPage({
     prisma.branch.findMany({ where: { isActive: true }, orderBy: { nameEn: 'asc' }, select: { id: true, nameEn: true, nameAr: true } }),
     prisma.user.findMany({ select: { id: true, name: true, email: true } }),
   ]);
+  const entries = entriesRaw.filter((entry) => {
+    if (!paymentStatus) return true;
+    const paid = entry.obligation ? entry.settlements.reduce((sum, payment) => sum + payment.amount, 0) : entry.amount;
+    const snapshot = ledgerPaymentSnapshot(entry.amount, paid, { reversed: Boolean(entry.reversedAt || entry.reversalOfId) });
+    return snapshot.status.toLowerCase() === paymentStatus;
+  });
   entries.sort((a, b) => {
     if (sort === 'date_asc') return a.date.getTime() - b.date.getTime();
     if (sort === 'amount_desc') return b.amount - a.amount;
@@ -116,11 +140,12 @@ export default async function LedgerPage({
     { label: t('f.transactionId') },
     { label: t('f.date') },
     { label: t('f.type') },
-    { label: t('f.moneyIn'), align: 'end' },
-    { label: t('f.moneyOut'), align: 'end' },
+    { label: t('f.description') },
+    { label: t('f.amount'), align: 'end' },
+    { label: t('paidAmount'), align: 'end' },
+    { label: t('remainingAmount'), align: 'end' },
     { label: t('f.account') },
     { label: t('f.party') },
-    { label: t('f.category') },
     { label: t('f.branch') },
     { label: t('f.related') },
     { label: t('f.createdBy') },
@@ -128,14 +153,12 @@ export default async function LedgerPage({
     { label: '', align: 'end' },
   ];
   const rows = entries.map((e) => {
-    const movement = e as FinanceEntryLike;
-    const effect = signedEffect(movement);
-    const moneyIn = active(e) && !e.obligation && (effect > 0 || e.type === 'TRANSFER') ? formatMoney(e.amount, e.currency, locale) : '—';
-    const moneyOut = active(e) && !e.obligation && (effect < 0 || e.type === 'TRANSFER') ? formatMoney(e.amount, e.currency, locale) : '—';
     const account = e.type === 'TRANSFER'
       ? `${e.account?.name ?? '—'} → ${e.toAccount?.name ?? '—'}`
       : e.account?.name ?? '—';
     const related = e.orderId ?? e.importKey ?? e.reference ?? '—';
+    const paid = e.obligation ? e.settlements.reduce((sum, payment) => sum + payment.amount, 0) : e.amount;
+    const snapshot = ledgerPaymentSnapshot(e.amount, paid, { reversed: Boolean(e.reversedAt || e.reversalOfId) });
     const statusBadge = e.archivedAt ? (
       <Badge key="s" variant="warning">{t('archived')}</Badge>
     ) : e.reversalOfId ? (
@@ -143,17 +166,20 @@ export default async function LedgerPage({
     ) : e.reversedAt ? (
       <Badge key="s" variant="danger">{t('reversed')}</Badge>
     ) : (
-      <Badge key="s" variant={e.obligation ? 'warning' : 'success'}>{e.obligation ? t('f.due') : t('f.paid')}</Badge>
+      <Badge key="s" variant={snapshot.status === 'PAID' ? 'success' : snapshot.status === 'PARTIAL' ? 'warning' : 'muted'}>
+        {ledgerPaymentStatusLabel(snapshot.status, locale)}
+      </Badge>
     );
     return [
       <span key="id" className="font-mono text-xs">{e.id.slice(-8)}</span>,
       formatDate(e.date, locale),
       enumLabel(e.type, locale),
-      moneyIn,
-      moneyOut,
+      e.description ?? (e.ledgerLines.length ? `${e.ledgerLines.length} ${t('lineItems')}` : '—'),
+      formatMoney(e.amount, e.currency, locale),
+      formatMoney(snapshot.paid, e.currency, locale),
+      formatMoney(snapshot.remaining, e.currency, locale),
       account,
       e.party?.name ?? '—',
-      e.categoryType ? enumLabel(e.categoryType, locale) : '—',
       e.branchId ? branchName.get(e.branchId) ?? '—' : '—',
       related,
       e.createdById ? userName.get(e.createdById) ?? e.createdById.slice(-8) : '—',
@@ -193,7 +219,7 @@ export default async function LedgerPage({
           labels={{ title: t('assignAccount'), hint: t('assignHint'), apply: t('apply') }}
         />
       ) : null}
-      <form className="grid gap-2 rounded-[var(--radius)] border bg-card p-3 md:grid-cols-4 xl:grid-cols-7">
+      <form className="grid gap-2 rounded-[var(--radius)] border bg-card p-3 md:grid-cols-4 xl:grid-cols-8">
         <input name="q" defaultValue={q} placeholder={tc('search')} className={input} />
         <select name="type" defaultValue={type} className={input}>
           <option value="">{tc('all')}</option>
@@ -207,6 +233,16 @@ export default async function LedgerPage({
           <option value="reversed">{t('reversed')}</option>
           <option value="reversal">{t('reversalMarker')}</option>
         </select>
+        <select name="paymentStatus" defaultValue={paymentStatus} className={input}>
+          <option value="">{t('paymentStatus')}</option>
+          <option value="paid">{ledgerPaymentStatusLabel('PAID', locale)}</option>
+          <option value="partial">{ledgerPaymentStatusLabel('PARTIAL', locale)}</option>
+          <option value="unpaid">{ledgerPaymentStatusLabel('UNPAID', locale)}</option>
+        </select>
+        <select name="paymentMethod" defaultValue={paymentMethod} className={input}>
+          <option value="">{t('f.paymentMethod')}</option>
+          {PAYMENT_METHODS.map((method) => <option key={method} value={method}>{enumLabel(method, locale)}</option>)}
+        </select>
         <select name="accountId" defaultValue={accountId} className={input}>
           <option value="">{t('f.account')}</option>
           {accountOptions.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
@@ -219,6 +255,10 @@ export default async function LedgerPage({
           <option value="">{t('f.branch')}</option>
           {branchOptions.map((b) => <option key={b.value} value={b.value}>{b.label}</option>)}
         </select>
+        <input name="dateFrom" type="date" defaultValue={dateFrom} className={input} aria-label={locale === 'ar' ? 'التاريخ من' : 'Date from'} />
+        <input name="dateTo" type="date" defaultValue={dateTo} className={input} aria-label={locale === 'ar' ? 'التاريخ إلى' : 'Date to'} />
+        <input name="minAmount" type="number" min="0" step="1" defaultValue={minAmount} placeholder={`${t('amount')} min`} className={input} />
+        <input name="maxAmount" type="number" min="0" step="1" defaultValue={maxAmount} placeholder={`${t('amount')} max`} className={input} />
         <select name="sort" defaultValue={sort} className={input}>
           <option value="date_desc">{t('sortDateDesc')}</option>
           <option value="date_asc">{t('sortDateAsc')}</option>
@@ -226,7 +266,7 @@ export default async function LedgerPage({
           <option value="amount_asc">{t('sortAmountAsc')}</option>
           <option value="type">{t('sortType')}</option>
         </select>
-        <div className="flex gap-2 md:col-span-4 xl:col-span-7">
+        <div className="flex gap-2 md:col-span-4 xl:col-span-8">
           <button type="submit" className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-95">
             {tc('apply')}
           </button>

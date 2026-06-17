@@ -520,11 +520,12 @@ model InventoryItem {
   isActive      Boolean           @default(true)
   createdAt     DateTime          @default(now())
 
-  product    Product?             @relation(fields: [productId], references: [id])
-  branch     Branch?              @relation(fields: [branchId], references: [id])
-  movements  StockMovement[]
-  recipeUses ProductComponent[]
-  costLayers InventoryCostLayer[]
+  product     Product?             @relation(fields: [productId], references: [id])
+  branch      Branch?              @relation(fields: [branchId], references: [id])
+  movements   StockMovement[]
+  recipeUses  ProductComponent[]
+  costLayers  InventoryCostLayer[]
+  ledgerLines LedgerEntryLine[]
 
   @@index([category])
 }
@@ -573,6 +574,33 @@ model StockMovement {
   @@index([financeEntryId])
   @@index([reason])
   @@index([orderId])
+}
+
+model LedgerEntryLine {
+  id              String               @id @default(cuid())
+  financeEntryId  String
+  lineNo          Int
+  itemType        String               @default("EXPENSE") // INVENTORY | EXPENSE | SERVICE | OTHER
+  itemName        String
+  categoryType    ExpenseCategoryType?
+  inventoryItemId String?
+  unit            String               @default("unit")
+  quantity        Decimal              @db.Decimal(14, 3)
+  unitCost        Decimal              @db.Decimal(14, 3) // minor units IQD per unit
+  discountAmount  Int                  @default(0)
+  extraAmount     Int                  @default(0)
+  lineTotal       Int
+  branchId        String?
+  notes           String?
+  createdAt       DateTime             @default(now())
+
+  financeEntry  FinanceEntry   @relation(fields: [financeEntryId], references: [id], onDelete: Cascade)
+  inventoryItem InventoryItem? @relation(fields: [inventoryItemId], references: [id], onDelete: SetNull)
+
+  @@index([financeEntryId])
+  @@index([inventoryItemId])
+  @@index([categoryType])
+  @@index([itemType])
 }
 
 model FixedAsset {
@@ -914,6 +942,7 @@ model FinanceEntry {
   settlements    FinanceEntry[]       @relation("Settlements")
   stockMovements StockMovement[]
   costLayers     InventoryCostLayer[]
+  ledgerLines    LedgerEntryLine[]
   fixedAsset     FixedAsset?
 
   @@index([date])
