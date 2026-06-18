@@ -155,7 +155,7 @@ async function updateLinkedRecords(
           inventoryItemId: true,
         },
       },
-      fixedAsset: { select: { id: true, quantity: true } },
+      fixedAssets: { select: { id: true, quantity: true, totalCost: true } },
     },
   });
   if (!linked) return;
@@ -199,18 +199,22 @@ async function updateLinkedRecords(
     }
   }
 
-  if (linked.fixedAsset) {
-    const quantity = Number(linked.fixedAsset.quantity);
-    await tx.fixedAsset.update({
-      where: { id: linked.fixedAsset.id },
-      data: {
-        totalCost: data.amount,
-        unitCost: (data.amount / quantity).toFixed(3),
-        purchaseDate: data.date,
-        partyId: data.partyId,
-        branchId: data.branchId,
-      },
-    });
+  if (linked.fixedAssets.length) {
+    const totals = proportionalIntegers(data.amount, linked.fixedAssets.map((asset) => asset.totalCost));
+    for (let index = 0; index < linked.fixedAssets.length; index++) {
+      const asset = linked.fixedAssets[index];
+      const quantity = Number(asset.quantity);
+      await tx.fixedAsset.update({
+        where: { id: asset.id },
+        data: {
+          totalCost: totals[index],
+          unitCost: (totals[index] / quantity).toFixed(3),
+          purchaseDate: data.date,
+          partyId: data.partyId,
+          branchId: data.branchId,
+        },
+      });
+    }
   }
 }
 

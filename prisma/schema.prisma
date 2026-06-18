@@ -132,6 +132,7 @@ enum InventoryCategory {
   ROASTED
   DRIP_BAGS
   PACKAGING
+  PRODUCTION_SUPPLY
   ACCESSORY
 }
 
@@ -607,6 +608,7 @@ model LedgerEntryLine {
 
 model FixedAsset {
   id             String    @id @default(cuid())
+  importKey      String?   @unique
   name           String
   category       String
   quantity       Decimal   @default(1) @db.Decimal(14, 3)
@@ -616,7 +618,7 @@ model FixedAsset {
   purchaseDate   DateTime
   partyId        String?
   branchId       String?
-  financeEntryId String?   @unique
+  financeEntryId String?
   notes          String?
   isActive       Boolean   @default(true)
   archivedAt     DateTime?
@@ -634,6 +636,7 @@ model FixedAsset {
   @@index([partyId])
   @@index([branchId])
   @@index([isActive])
+  @@index([financeEntryId])
 }
 
 // ---------------------------------------------------------------------------
@@ -946,7 +949,7 @@ model FinanceEntry {
   stockMovements StockMovement[]
   costLayers     InventoryCostLayer[]
   ledgerLines    LedgerEntryLine[]
-  fixedAsset     FixedAsset?
+  fixedAssets    FixedAsset[]
 
   @@index([date])
   @@index([type])

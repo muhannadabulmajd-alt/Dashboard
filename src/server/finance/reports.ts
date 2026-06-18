@@ -182,7 +182,7 @@ export async function getCashFlowReport(
         settlesId: true,
         categoryType: true,
         ledgerLines: { select: { itemType: true, lineTotal: true, categoryType: true } },
-        fixedAsset: { select: { id: true } },
+        fixedAssets: { take: 1, select: { id: true } },
         costLayers: { take: 1, select: { id: true } },
         settles: {
           select: {
@@ -190,7 +190,7 @@ export async function getCashFlowReport(
             amount: true,
             categoryType: true,
             ledgerLines: { select: { itemType: true, lineTotal: true, categoryType: true } },
-            fixedAsset: { select: { id: true } },
+            fixedAssets: { take: 1, select: { id: true } },
             costLayers: { take: 1, select: { id: true } },
           },
         },
@@ -232,7 +232,7 @@ export async function getCashFlowReport(
         amount: e.amount,
         categoryType: e.categoryType,
         ledgerLines: e.ledgerLines,
-        hasFixedAsset: Boolean(e.fixedAsset),
+        hasFixedAsset: e.fixedAssets.length > 0,
         hasInventoryLayer: e.costLayers.length > 0,
       }));
     } else if (e.type === 'PAYMENT_OUT' && e.settles?.type === 'PURCHASE') {
@@ -240,7 +240,7 @@ export async function getCashFlowReport(
         amount: e.settles.amount,
         categoryType: e.settles.categoryType,
         ledgerLines: e.settles.ledgerLines,
-        hasFixedAsset: Boolean(e.settles.fixedAsset),
+        hasFixedAsset: e.settles.fixedAssets.length > 0,
         hasInventoryLayer: e.settles.costLayers.length > 0,
       }));
     } else if (e.type === 'PAYMENT_OUT') addBucket(cashOut, e.settlesId ? 'supplierPayments' : 'otherPayments', amount);

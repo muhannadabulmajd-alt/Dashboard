@@ -5,6 +5,8 @@ import {
   parseBatches,
   parseOrders,
   parseInventory,
+  parsePurchases,
+  parseCapital,
 } from '@/server/ingestion/parsers';
 
 describe('product parser', () => {
@@ -97,6 +99,82 @@ describe('inventory parser', () => {
   it('requires an item name', () => {
     const { errors } = parseInventory([{ item: '', category: 'PACKAGING' }]);
     expect(errors).toHaveLength(1);
+  });
+});
+
+describe('historical finance import parsers', () => {
+  const purchaseRow = {
+    recordKey: 'DOC000001',
+    lineNo: '1',
+    date: '2026-01-01',
+    supplier: 'Supplier',
+    invoice: 'INV-1',
+    reference: 'DOC000001',
+    itemType: 'INVENTORY',
+    itemName: 'Green coffee',
+    expenseCategory: 'GREEN_COFFEE',
+    inventoryCategory: 'GREEN_COFFEE',
+    assetKey: '',
+    assetCategory: '',
+    quantity: '2.000',
+    unit: 'kg',
+    sourceUnitPrice: '25000',
+    sourceLineAmount: '50000',
+    sourceCurrency: 'IQD',
+    rate: '',
+    lineAmountIqd: '50000',
+    invoiceTotalIqd: '350000',
+    paymentMode: 'PAID',
+    paymentAccount: 'Cash on Hands',
+    branchCode: 'HQ',
+    notes: '',
+  };
+
+  it('groups mixed invoice lines and keeps exact invoice totals', () => {
+    const result = parsePurchases([
+      purchaseRow,
+      {
+        ...purchaseRow,
+        lineNo: '2',
+        itemType: 'ASSET',
+        itemName: 'Roaster',
+        expenseCategory: 'EQUIPMENT',
+        inventoryCategory: '',
+        assetKey: 'ROASTER-1',
+        assetCategory: 'Production equipment',
+        quantity: '1.000',
+        sourceUnitPrice: '300000',
+        sourceLineAmount: '300000',
+        lineAmountIqd: '300000',
+      },
+    ]);
+    expect(result.errors).toHaveLength(0);
+    expect(result.valid).toHaveLength(1);
+    expect(result.valid[0]).toMatchObject({
+      amountIqd: 350000,
+      importKey: 'PUR:HISTORICAL_SPEND:DOC000001',
+    });
+    expect(result.valid[0].lines.map((line) => line.itemType)).toEqual(['INVENTORY', 'ASSET']);
+  });
+
+  it('rejects an invoice whose lines do not equal its parent total', () => {
+    const result = parsePurchases([{ ...purchaseRow, invoiceTotalIqd: '50001' }]);
+    expect(result.valid).toHaveLength(0);
+    expect(result.errors[0].message).toContain('does not equal invoice total');
+  });
+
+  it('requires capital account and branch and creates a stable key', () => {
+    const result = parseCapital([{
+      shareholder: 'مهند منجد',
+      amount: '19007895',
+      currency: 'IQD',
+      date: '2025-01-01',
+      reference: 'HISTORICAL-CAPITAL',
+      account: 'Cash on Hands',
+      branchCode: 'HQ',
+    }]);
+    expect(result.errors).toHaveLength(0);
+    expect(result.valid[0].importKey).toContain('مهند منجد:2025-01-01:19007895');
   });
 });
 

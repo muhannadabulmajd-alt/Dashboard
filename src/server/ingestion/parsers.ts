@@ -13,6 +13,7 @@ import {
   EXPENSE_CATEGORY_TYPES,
   SHIPMENT_STATUSES,
 } from '@/lib/enums';
+import { MEASUREMENT_UNITS, type MeasurementUnit } from '@/lib/units';
 
 export type ImportDataset =
   | 'products'
@@ -369,73 +370,146 @@ export function parseInventory(rows: Raw[]): ParseResult<InventoryInput> {
 
 const curField = z.preprocess(blank, z.enum(CURRENCIES).default('IQD'));
 
-export interface PurchaseInput {
-  amount: number; // major units in `currency` (converted to IQD on ingest)
-  currency: (typeof CURRENCIES)[number];
-  rate?: number; // IQD per $1 on the purchase date (used only when currency=USD)
-  date: Date;
-  supplier?: string;
-  reference?: string;
-  description: string;
+export interface PurchaseLineInput {
+  lineNo: number;
+  itemType: 'INVENTORY' | 'ASSET' | 'EXPENSE' | 'SERVICE' | 'OTHER';
+  itemName: string;
   categoryType?: (typeof EXPENSE_CATEGORY_TYPES)[number];
+  inventoryCategory?: (typeof INVENTORY_CATEGORIES)[number];
+  assetKey?: string;
+  assetCategory?: string;
+  quantity: number;
+  unit: MeasurementUnit;
+  sourceUnitPrice?: number;
+  sourceLineAmount?: number;
+  lineAmountIqd: number;
+  notes?: string;
+}
+
+export interface PurchaseInput {
+  recordKey: string;
+  amountIqd: number;
+  sourceCurrency: (typeof CURRENCIES)[number];
+  sourceAmount?: number;
+  rate?: number;
+  date: Date;
+  supplier: string;
+  invoice: string;
+  reference: string;
+  paymentMode: 'PAID' | 'CREDIT';
+  paymentAccount: string;
+  branchCode: string;
+  description: string;
   importKey: string;
+  lines: PurchaseLineInput[];
 }
 
-/** Best-effort expense category from an Arabic/English item name (editable later). */
-function inferCategory(item: string): (typeof EXPENSE_CATEGORY_TYPES)[number] | undefined {
-  const s = item.toLowerCase();
-  const has = (...kw: string[]) => kw.some((k) => s.includes(k));
-  if (has('قهوة خام', 'بن خام', 'green')) return 'GREEN_COFFEE';
-  if (has('شحن', 'توصيل')) return 'SHIPPING';
-  if (has('ريكلام', 'اعلان', 'تسويق', 'ads')) return 'MARKETING';
-  if (has('اودو', 'اوبريتنك', 'سيستم', 'نظام', 'اشتراك', 'سوفت', 'هوست', 'دومين', 'canva', 'كانفا')) return 'TECH';
-  if (has('ايجار')) return 'RENT';
-  if (has('راتب', 'رواتب')) return 'SALARIES';
-  if (has('ماكنة', 'مكائن', 'جهاز', 'طابعة', 'معدات', 'ستيل', 'كبس', 'فلتر')) return 'EQUIPMENT';
-  if (has('كهرباء', 'ماء', 'انترنت', 'هاتف')) return 'UTILITIES';
-  if (has('كيس', 'علبة', 'علاكة', 'مغلف', 'قدح', 'كوب', 'باكيت', 'تغليف', 'ورقي', 'حافظة', 'كرتون', 'ستكر', 'ملصق'))
-    return 'PACKAGING';
-  return undefined;
-}
-
-const purchaseSchema = z
+const purchaseLineSchema = z
   .object({
-    item: z.string().min(1),
-    supplier: optStr,
-    qty: optStr,
-    unit: optStr,
-    unitPrice: optStr,
-    amount: z.preprocess(blank, z.coerce.number().nonnegative().optional()),
-    currency: curField,
-    rate: z.preprocess(blank, z.coerce.number().positive().optional()),
+    recordKey: z.string().min(1),
+    lineNo: reqInt.pipe(z.number().int().positive()),
     date: dateField,
-    invoice: optStr,
-    doc: optStr,
-    deliveryCompany: optStr,
+    supplier: z.string().min(1),
+    invoice: z.string().min(1),
+    reference: z.string().min(1),
+    itemType: z.enum(['INVENTORY', 'ASSET', 'EXPENSE', 'SERVICE', 'OTHER']),
+    itemName: z.string().min(1),
+    expenseCategory: optEnum(EXPENSE_CATEGORY_TYPES),
+    inventoryCategory: optEnum(INVENTORY_CATEGORIES),
+    assetKey: optStr,
+    assetCategory: optStr,
+    quantity: z.preprocess(blank, z.coerce.number().positive()),
+    unit: z.enum(MEASUREMENT_UNITS),
+    sourceUnitPrice: z.preprocess(blank, z.coerce.number().nonnegative().optional()),
+    sourceLineAmount: z.preprocess(blank, z.coerce.number().nonnegative().optional()),
+    sourceCurrency: curField,
+    rate: z.preprocess(blank, z.coerce.number().positive().optional()),
+    lineAmountIqd: reqMoney.pipe(z.number().positive()),
+    invoiceTotalIqd: reqMoney.pipe(z.number().positive()),
+    paymentMode: z.enum(['PAID', 'CREDIT']).default('PAID'),
+    paymentAccount: z.string().min(1),
+    branchCode: z.string().min(1),
+    notes: optStr,
   })
-  .transform((r): PurchaseInput => {
-    const amount = r.amount ?? 0;
-    const ref = r.invoice?.trim() || r.doc?.trim() || undefined;
-    const qtyUnit = [r.qty?.trim(), r.unit?.trim()].filter(Boolean).join(' ');
-    const description =
-      r.item.trim() +
-      (qtyUnit ? ` (${qtyUnit})` : '') +
-      (r.deliveryCompany?.trim() ? ` — ${r.deliveryCompany.trim()}` : '');
-    const key = `PUR:${r.doc?.trim() || r.invoice?.trim() || r.item.trim()}:${r.date.toISOString().slice(0, 10)}:${amount}`;
-    return {
-      amount,
-      currency: r.currency,
-      rate: r.rate,
-      date: r.date,
-      supplier: r.supplier,
-      reference: ref,
-      description,
-      categoryType: inferCategory(r.item),
-      importKey: key,
-    };
+  .superRefine((row, ctx) => {
+    if (row.itemType === 'INVENTORY' && !row.inventoryCategory) {
+      ctx.addIssue({ code: 'custom', path: ['inventoryCategory'], message: 'required for inventory lines' });
+    }
+    if (row.itemType === 'ASSET' && (!row.assetKey || !row.assetCategory)) {
+      ctx.addIssue({ code: 'custom', path: ['assetKey'], message: 'assetKey and assetCategory are required for asset lines' });
+    }
   });
 
-export const parsePurchases = (rows: Raw[]) => parseEach(rows, purchaseSchema);
+export function parsePurchases(rows: Raw[]): ParseResult<PurchaseInput> {
+  const { valid, errors } = parseEach(rows, purchaseLineSchema);
+  const grouped = new Map<string, typeof valid>();
+  for (const row of valid) {
+    const key = row.recordKey.trim();
+    grouped.set(key, [...(grouped.get(key) ?? []), row]);
+  }
+
+  const purchases: PurchaseInput[] = [];
+  for (const [recordKey, group] of grouped) {
+    const first = group[0];
+    const inconsistent = group.some((row) =>
+      row.date.getTime() !== first.date.getTime() ||
+      row.supplier.trim() !== first.supplier.trim() ||
+      row.invoice.trim() !== first.invoice.trim() ||
+      row.reference.trim() !== first.reference.trim() ||
+      row.sourceCurrency !== first.sourceCurrency ||
+      row.invoiceTotalIqd !== first.invoiceTotalIqd ||
+      row.paymentMode !== first.paymentMode ||
+      row.paymentAccount.trim() !== first.paymentAccount.trim() ||
+      row.branchCode.trim() !== first.branchCode.trim()
+    );
+    const lineTotal = group.reduce((sum, row) => sum + row.lineAmountIqd, 0);
+    const lineNos = new Set(group.map((row) => row.lineNo));
+    if (inconsistent || lineNos.size !== group.length || lineTotal !== first.invoiceTotalIqd) {
+      errors.push({
+        row: 0,
+        message: `${recordKey}: inconsistent invoice fields, duplicate line numbers, or line total ${lineTotal} does not equal invoice total ${first.invoiceTotalIqd}`,
+      });
+      continue;
+    }
+    const sourceAmount = first.sourceCurrency === 'USD'
+      ? group.reduce((sum, row) => sum + (row.sourceLineAmount ?? 0), 0)
+      : undefined;
+    purchases.push({
+      recordKey,
+      amountIqd: first.invoiceTotalIqd,
+      sourceCurrency: first.sourceCurrency,
+      sourceAmount: sourceAmount && sourceAmount > 0 ? sourceAmount : undefined,
+      rate: first.rate,
+      date: first.date,
+      supplier: first.supplier.trim(),
+      invoice: first.invoice.trim(),
+      reference: first.reference.trim(),
+      paymentMode: first.paymentMode,
+      paymentAccount: first.paymentAccount.trim(),
+      branchCode: first.branchCode.trim(),
+      description: `${first.supplier.trim()} — ${first.invoice.trim()}`,
+      importKey: `PUR:HISTORICAL_SPEND:${recordKey}`,
+      lines: group
+        .sort((a, b) => a.lineNo - b.lineNo)
+        .map((row) => ({
+          lineNo: row.lineNo,
+          itemType: row.itemType,
+          itemName: row.itemName.trim(),
+          categoryType: row.expenseCategory,
+          inventoryCategory: row.inventoryCategory,
+          assetKey: row.assetKey?.trim(),
+          assetCategory: row.assetCategory?.trim(),
+          quantity: row.quantity,
+          unit: row.unit,
+          sourceUnitPrice: row.sourceUnitPrice,
+          sourceLineAmount: row.sourceLineAmount,
+          lineAmountIqd: row.lineAmountIqd,
+          notes: row.notes,
+        })),
+    });
+  }
+  return { valid: purchases, errors };
+}
 
 export interface CapitalInput {
   shareholder: string;
@@ -443,6 +517,8 @@ export interface CapitalInput {
   currency: (typeof CURRENCIES)[number];
   date: Date;
   reference?: string;
+  account: string;
+  branchCode: string;
   importKey: string;
 }
 
@@ -453,6 +529,8 @@ const capitalSchema = z
     currency: curField,
     date: dateField,
     reference: optStr,
+    account: z.string().min(1),
+    branchCode: z.string().min(1),
   })
   .transform((r): CapitalInput => ({
     shareholder: r.shareholder.trim(),
@@ -460,6 +538,8 @@ const capitalSchema = z
     currency: r.currency,
     date: r.date,
     reference: r.reference,
+    account: r.account.trim(),
+    branchCode: r.branchCode.trim(),
     importKey: `CAP:${r.shareholder.trim()}:${r.date.toISOString().slice(0, 10)}:${r.amount}:${r.reference?.trim() ?? ''}`,
   }));
 
@@ -603,12 +683,12 @@ export const TEMPLATES: Record<ImportDataset, { headers: string[]; example: stri
     example: ['قهوة خام برازيل ريو ميناس', 'GREEN_COFFEE', 'GRAM', '0', '30000', '5000', '15', '5000', '200'],
   },
   purchases: {
-    headers: ['item', 'supplier', 'qty', 'unit', 'unitPrice', 'amount', 'currency', 'rate', 'date', 'invoice', 'doc', 'deliveryCompany'],
-    example: ['قهوة خام برازيل', 'بوابة الرافدين', '30', 'كيلو', '15000', '450000', 'IQD', '', '2026-03-15', '1572307', 'DOC000102', 'سما السندباد'],
+    headers: ['recordKey', 'lineNo', 'date', 'supplier', 'invoice', 'reference', 'itemType', 'itemName', 'expenseCategory', 'inventoryCategory', 'assetKey', 'assetCategory', 'quantity', 'unit', 'sourceUnitPrice', 'sourceLineAmount', 'sourceCurrency', 'rate', 'lineAmountIqd', 'invoiceTotalIqd', 'paymentMode', 'paymentAccount', 'branchCode', 'notes'],
+    example: ['DOC000102', '1', '2026-03-15', 'بوابة الرافدين', '1572307', 'DOC000102', 'INVENTORY', 'قهوة خام برازيل', 'GREEN_COFFEE', 'GREEN_COFFEE', '', '', '30', 'kg', '15000', '450000', 'IQD', '', '450000', '450000', 'PAID', 'Cash on Hands', 'HQ', ''],
   },
   capital: {
-    headers: ['shareholder', 'amount', 'date', 'currency', 'reference'],
-    example: ['مهند منجد', '1000000', '2026-01-15', 'IQD', 'DOC000149'],
+    headers: ['shareholder', 'amount', 'date', 'currency', 'reference', 'account', 'branchCode'],
+    example: ['مهند منجد', '1000000', '2025-01-01', 'IQD', 'HISTORICAL-CAPITAL', 'Cash on Hands', 'HQ'],
   },
   shipments: {
     headers: ['orderNumber', 'courier', 'status', 'governorate', 'shippingCost', 'dispatchedAt', 'deliveredAt', 'failureReason'],

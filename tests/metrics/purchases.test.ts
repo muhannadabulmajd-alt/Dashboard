@@ -4,18 +4,19 @@ import { allocationTotal, classifyPurchase } from '@/lib/metrics/purchases';
 describe('purchase classification', () => {
   it('splits a mixed invoice without treating inventory as operating expense', () => {
     const allocation = classifyPurchase({
-      amount: 175_000,
+      amount: 475_000,
       categoryType: null,
       ledgerLines: [
         { itemType: 'INVENTORY', lineTotal: 100_000, categoryType: 'GREEN_COFFEE' },
+        { itemType: 'ASSET', lineTotal: 300_000, categoryType: 'EQUIPMENT' },
         { itemType: 'SERVICE', lineTotal: 50_000, categoryType: 'MAINTENANCE' },
         { itemType: 'EXPENSE', lineTotal: 25_000, categoryType: 'SHIPPING' },
       ],
       hasFixedAsset: false,
       hasInventoryLayer: true,
     });
-    expect(allocation).toEqual({ operatingExpense: 75_000, inventory: 100_000, fixedAsset: 0, unclassified: 0 });
-    expect(allocationTotal(allocation)).toBe(175_000);
+    expect(allocation).toEqual({ operatingExpense: 75_000, inventory: 100_000, fixedAsset: 300_000, unclassified: 0 });
+    expect(allocationTotal(allocation)).toBe(475_000);
   });
 
   it('keeps fixed assets and inventory receipts off the P&L', () => {

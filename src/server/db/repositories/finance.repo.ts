@@ -49,7 +49,7 @@ export async function getExpenses(
         type: true,
         categoryType: true,
         ledgerLines: { select: { itemType: true, lineTotal: true, categoryType: true, branchId: true } },
-        fixedAsset: { select: { id: true } },
+        fixedAssets: { take: 1, select: { id: true } },
         costLayers: { take: 1, select: { id: true } },
       },
     }),
@@ -71,7 +71,7 @@ export async function getExpenses(
         amount: r.amount,
         categoryType: r.categoryType,
         ledgerLines: r.ledgerLines,
-        hasFixedAsset: Boolean(r.fixedAsset),
+        hasFixedAsset: r.fixedAssets.length > 0,
         hasInventoryLayer: r.costLayers.length > 0,
       });
       if (allocation.operatingExpense <= 0) return [];

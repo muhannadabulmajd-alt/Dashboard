@@ -39,6 +39,7 @@ const ASSET_LIKE_CATEGORIES = new Set<ExpenseCategoryType>(['GREEN_COFFEE', 'PAC
 
 export function purchaseBucketForLine(line: PurchaseLineFact): PurchaseBucket {
   if (line.itemType === 'INVENTORY') return 'INVENTORY';
+  if (line.itemType === 'ASSET') return 'FIXED_ASSET';
   if (line.itemType === 'EXPENSE' || line.itemType === 'SERVICE' || line.itemType === 'OTHER') return 'OPERATING_EXPENSE';
   return 'UNCLASSIFIED';
 }
@@ -50,6 +51,7 @@ export function classifyPurchase(input: PurchaseFactInput): PurchaseAllocation {
       const bucket = purchaseBucketForLine(line);
       if (bucket === 'OPERATING_EXPENSE') result.operatingExpense += line.lineTotal;
       else if (bucket === 'INVENTORY') result.inventory += line.lineTotal;
+      else if (bucket === 'FIXED_ASSET') result.fixedAsset += line.lineTotal;
       else result.unclassified += line.lineTotal;
     }
     return result;

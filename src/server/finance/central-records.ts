@@ -845,7 +845,7 @@ async function entrySnapshot(tx: Tx, id: string) {
       ledgerLines: true,
       stockMovements: true,
       costLayers: true,
-      fixedAsset: true,
+      fixedAssets: true,
       settlements: true,
     },
   });
@@ -856,7 +856,7 @@ export async function archiveFinanceEntry(id: string, locale: string, active: bo
   if (!user) return;
   const snapshot = await prisma.financeEntry.findUnique({
     where: { id },
-    include: { fixedAsset: true },
+    include: { fixedAssets: true },
   });
   if (!snapshot) redirect(`/${locale}/finance/ledger`);
   const archivedAt = active ? null : new Date();
@@ -869,9 +869,9 @@ export async function archiveFinanceEntry(id: string, locale: string, active: bo
         archiveReason: active ? null : 'Archived by Owner/Admin',
       },
     });
-    if (snapshot.fixedAsset) {
+    for (const asset of snapshot.fixedAssets) {
       await tx.fixedAsset.update({
-        where: { id: snapshot.fixedAsset.id },
+        where: { id: asset.id },
         data: {
           isActive: active,
           archivedAt,

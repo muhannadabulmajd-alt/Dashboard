@@ -89,6 +89,7 @@ export const INVENTORY_CATEGORIES = [
   'ROASTED',
   'DRIP_BAGS',
   'PACKAGING',
+  'PRODUCTION_SUPPLY',
   'ACCESSORY',
 ] as const;
 
@@ -246,6 +247,7 @@ export const ENUM_LABELS: Record<string, Label> = {
   // Inventory categories
   GREEN_COFFEE: { en: 'Green coffee', ar: 'بن أخضر' },
   ROASTED: { en: 'Roasted coffee', ar: 'بن محمّص' },
+  PRODUCTION_SUPPLY: { en: 'Production supply', ar: 'مستلزمات إنتاج' },
   PACKAGING: { en: 'Packaging', ar: 'تغليف' },
   ACCESSORY: { en: 'Accessory', ar: 'مستلزم' },
   // Expense categories

@@ -57,7 +57,7 @@ export default async function EntryDetailPage({
         include: { inventoryItem: { select: { nameEn: true, nameAr: true, unit: true } } },
         orderBy: { receivedAt: 'desc' },
       },
-      fixedAsset: true,
+      fixedAssets: { orderBy: { createdAt: 'asc' } },
     },
   });
   if (!e) notFound();
@@ -224,17 +224,20 @@ export default async function EntryDetailPage({
           />
         </div>
       ) : null}
-      {e.fixedAsset ? (
+      {e.fixedAssets.length ? (
         <div className="space-y-2">
           <h3 className="text-sm font-semibold">{t('linkedAsset')}</h3>
-          <DetailGrid
-            items={[
-              { label: t('f.name'), value: e.fixedAsset.name },
-              { label: t('f.category'), value: e.fixedAsset.category },
-              { label: t('f.quantity'), value: `${formatQuantity(e.fixedAsset.quantity, locale)} ${e.fixedAsset.unit}` },
-              { label: t('f.value'), value: formatMoney(e.fixedAsset.totalCost, 'IQD', locale) },
-            ]}
-          />
+          {e.fixedAssets.map((asset) => (
+            <DetailGrid
+              key={asset.id}
+              items={[
+                { label: t('f.name'), value: asset.name },
+                { label: t('f.category'), value: asset.category },
+                { label: t('f.quantity'), value: `${formatQuantity(asset.quantity, locale)} ${asset.unit}` },
+                { label: t('f.value'), value: formatMoney(asset.totalCost, 'IQD', locale) },
+              ]}
+            />
+          ))}
         </div>
       ) : null}
       {canReverse ? (
