@@ -1,7 +1,7 @@
 import { getTranslations } from 'next-intl/server';
 import { getPageContext } from '@/server/page-context';
 import { getOrders, getOrderLines } from '@/server/db/repositories/sales.repo';
-import { getExpenses, getBatches } from '@/server/db/repositories/finance.repo';
+import { getExpenses } from '@/server/db/repositories/finance.repo';
 import * as M from '@/lib/metrics';
 import { enumLabel } from '@/lib/enums';
 import { buildExportHref, buildFinanceExportHref } from '@/lib/filters';
@@ -15,8 +15,6 @@ import { WaterfallChart, BarChartCard, type WaterfallStep } from '@/components/c
 import { DataTable } from '@/components/data-table/DataTable';
 import { Badge, PageHeader } from '@/components/ui/primitives';
 import { SectionGuide } from '@/components/records/SectionGuide';
-
-const CUPS_PER_KG = 83; // ~12g per cup
 
 export default async function PnlPage({
   params,
@@ -34,11 +32,13 @@ export default async function PnlPage({
   const tc = await getTranslations('common');
   const canExport = can(user.role, 'export:financial');
 
-  const [orders, lines, expenses, batches] = await Promise.all([
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const [orders, lines, expenses, mtdOrders] = await Promise.all([
     getOrders(filters, scope, range),
     getOrderLines(filters, scope, range),
     getExpenses(filters, scope, range),
-    getBatches(filters, scope, range),
+    getOrders(filters, scope, { start: monthStart, end: now }),
   ]);
 
   const gross = M.grossSales(orders);
@@ -48,7 +48,8 @@ export default async function PnlPage({
   const cogs = M.cogs(lines);
   const margin = M.grossMargin(net, cogs);
   const opex = M.operatingExpenses(expenses, 'IQD');
-  const profit = M.operatingProfit(margin.amount, opex);
+  const deliveryCosts = M.deliveryCostTotal(orders);
+  const profit = M.operatingProfit(margin.amount, opex, deliveryCosts);
   const contribution = M.contributionMargin(net, cogs, { delivery: M.deliveryCostTotal(orders) });
 
   // Cost/margin alerts (§9/§17): active products priced below cost or thin margin.
@@ -63,13 +64,8 @@ export default async function PnlPage({
     .filter((a) => a.status !== 'ok')
     .sort((a, b) => rank[a.status] - rank[b.status]);
 
-  const greenSpend = expenses.filter((e) => e.categoryType === 'GREEN_COFFEE').reduce((s, e) => s + e.amount, 0);
-  const roastedKg = M.totalRoastedOutput(batches) / 1000;
-  const costPerKg = roastedKg > 0 ? Math.round(greenSpend / roastedKg) : 0;
-  const costPerCup = Math.round(M.costPerCup(costPerKg, CUPS_PER_KG));
-
   const { dayOfMonth, daysInMonth } = monthProgress();
-  const runRate = M.runRate(net, dayOfMonth, daysInMonth);
+  const runRate = M.runRate(M.netSales(mtdOrders), dayOfMonth, daysInMonth);
 
   const waterfall: WaterfallStep[] = [
     { label: t('revenue'), value: gross, kind: 'total' },
@@ -78,6 +74,7 @@ export default async function PnlPage({
     { label: t('netSales'), value: net, kind: 'total' },
     { label: t('cogs'), value: cogs, kind: 'dec' },
     { label: t('grossMargin'), value: margin.amount, kind: 'total' },
+    { label: t('deliveryCosts'), value: deliveryCosts, kind: 'dec' },
     { label: t('operatingCosts'), value: opex, kind: 'dec' },
     { label: t('operatingProfit'), value: profit, kind: 'total' },
   ];
@@ -135,8 +132,8 @@ export default async function PnlPage({
         <KpiCard label={tk('contributionMargin')} value={formatMoney(contribution, 'IQD', locale)} locale={locale} />
         <KpiCard label={tk('cashBurn')} value={formatMoney(profit, 'IQD', locale)} locale={locale} invertDelta />
         <KpiCard label={tk('runRate')} value={formatMoney(runRate, 'IQD', locale)} locale={locale} />
-        <KpiCard label={t('perKg')} value={formatMoney(costPerKg, 'IQD', locale)} locale={locale} invertDelta />
-        <KpiCard label={t('perCup')} value={formatMoney(costPerCup, 'IQD', locale)} locale={locale} invertDelta />
+        <KpiCard label={t('operatingCosts')} value={formatMoney(opex, 'IQD', locale)} locale={locale} invertDelta />
+        <KpiCard label={t('deliveryCosts')} value={formatMoney(deliveryCosts, 'IQD', locale)} locale={locale} invertDelta />
       </section>
 
       {marginAlerts.length ? (

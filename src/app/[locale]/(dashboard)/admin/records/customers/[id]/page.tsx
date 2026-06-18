@@ -12,6 +12,7 @@ import { archiveCustomer, deleteCustomer } from '@/server/records/customers';
 import { formatDate } from '@/lib/dates';
 import { formatMoney, formatNumber } from '@/lib/money';
 import { Link } from '@/i18n/navigation';
+import { getOrderStatusRoleMap } from '@/server/lists/resolver';
 
 export default async function CustomerDetailPage({
   params,
@@ -23,11 +24,14 @@ export default async function CustomerDetailPage({
   const { locale } = await getPageContext(params, searchParams, 'manage:customers');
   const { id } = await params;
   const t = await getTranslations('records');
+  const statusRoles = await getOrderStatusRoleMap();
+  const saleStatuses = [...statusRoles].filter(([, role]) => role === 'SALE').map(([code]) => code);
   const [c, spendOrders] = await Promise.all([
     prisma.customer.findUnique({
       where: { id },
       include: {
         orders: {
+          where: { status: { in: saleStatuses } },
           orderBy: { placedAt: 'desc' },
           take: 12,
           include: { lines: { include: { product: { select: { nameEn: true, nameAr: true } } } } },
@@ -35,7 +39,7 @@ export default async function CustomerDetailPage({
       },
     }),
     prisma.order.findMany({
-      where: { customerId: id },
+      where: { customerId: id, status: { in: saleStatuses } },
       select: { grossAmount: true, discountAmount: true, refundAmount: true },
     }),
   ]);

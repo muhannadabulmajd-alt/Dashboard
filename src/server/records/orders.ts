@@ -10,6 +10,7 @@ import { invoicePaymentSnapshot, invoiceTotal } from '@/lib/invoice';
 import { toMinor } from '@/lib/money';
 import { syncActiveCostForProducts } from '@/server/inventory/fifo';
 import { closeOrderFinance, syncOrderFinance, type FinanceSyncMode } from '@/server/finance/sync';
+import { getOrderStatusRoleMap } from '@/server/lists/resolver';
 import { requireCap, audit, reqField, optField, type ActionState } from './shared';
 
 const LIST = '/[locale]/(dashboard)/admin/records/orders';
@@ -113,8 +114,32 @@ function parseHeader(fd: FormData) {
   });
 }
 
-const refundFor = (status: string, gross: number, discount: number) =>
-  status === 'RETURNED' || status === 'REFUNDED' ? gross - discount : 0;
+const refundFor = (isReturn: boolean, gross: number, discount: number, deliveryFee: number, extraCharges: number) =>
+  isReturn
+    ? Math.max(0, gross - discount + deliveryFee + extraCharges)
+    : 0;
+
+async function syncCustomerStats(
+  tx: Prisma.TransactionClient,
+  customerId: string | null | undefined,
+  saleStatuses: string[],
+): Promise<void> {
+  if (!customerId) return;
+  const stats = await tx.order.aggregate({
+    where: { customerId, status: { in: saleStatuses } },
+    _count: { _all: true },
+    _min: { placedAt: true },
+    _max: { placedAt: true },
+  });
+  await tx.customer.update({
+    where: { id: customerId },
+    data: {
+      ordersCount: stats._count._all,
+      firstOrderAt: stats._min.placedAt,
+      lastOrderAt: stats._max.placedAt,
+    },
+  });
+}
 
 export async function createOrder(_prev: ActionState, fd: FormData): Promise<ActionState> {
   const user = await requireCap(CAP);
@@ -135,6 +160,9 @@ export async function createOrder(_prev: ActionState, fd: FormData): Promise<Act
   if (await prisma.order.findUnique({ where: { orderNumber: h.data.orderNumber }, select: { id: true } }))
     return { error: 'exists' };
   if ((h.data.financeMode === 'PAID' || h.data.financeMode === 'PARTIAL') && !h.data.financeAccountId) return { error: 'invalid' };
+  const statusRoles = await getOrderStatusRoleMap();
+  const statusRole = statusRoles.get(h.data.status) ?? 'UNKNOWN';
+  const saleStatuses = [...statusRoles].filter(([, role]) => role === 'SALE').map(([code]) => code);
 
   // Resolve products by SKU and build line rows (mirrors the CSV importer).
   const lineData: LineData[] = [];
@@ -187,15 +215,15 @@ export async function createOrder(_prev: ActionState, fd: FormData): Promise<Act
         orderDiscount: h.data.orderDiscount,
         extraCharges: h.data.extraCharges,
         notes: h.data.notes ?? null,
-        refundAmount: refundFor(h.data.status, gross, discount),
+        refundAmount: refundFor(statusRole === 'RETURN', gross, discount, h.data.deliveryFee, h.data.extraCharges),
         deliveryFee: h.data.deliveryFee,
         deliveryCost: h.data.deliveryCost,
         lines: { create: lineData },
       },
     });
-    // Only completed orders consume stock (§11.3). Pending/cancelled/returned
-    // don't deduct — and editing to one of those (updateOrder) reverses them.
-    if (h.data.status === 'COMPLETED') await applySoldMovements(tx, o.id, h.data.placedAt, lineData);
+    // Only statuses mapped as completed sales consume stock. Changing the role
+    // on a later edit reverses or reapplies the linked movements atomically.
+    if (statusRole === 'SALE') await applySoldMovements(tx, o.id, h.data.placedAt, lineData);
     await syncOrderFinance(tx, o.id, {
       mode: h.data.financeMode as FinanceSyncMode,
       accountId: h.data.financeAccountId,
@@ -204,7 +232,9 @@ export async function createOrder(_prev: ActionState, fd: FormData): Promise<Act
       paymentMethod: h.data.financePaymentMethod,
       paymentDate: h.data.financePaymentDate,
       createdById: user.id,
+      statusRole,
     });
+    await syncCustomerStats(tx, customer?.id, saleStatuses);
     return o;
   });
   // Stock consumption changed → roll each linked item's active FIFO cost (§8).
@@ -224,6 +254,9 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
   if (!h.success) return { error: 'invalid' };
   const locale = reqField(fd, 'locale') || 'ar';
   if ((h.data.financeMode === 'PAID' || h.data.financeMode === 'PARTIAL') && !h.data.financeAccountId) return { error: 'invalid' };
+  const statusRoles = await getOrderStatusRoleMap();
+  const statusRole = statusRoles.get(h.data.status) ?? 'UNKNOWN';
+  const saleStatuses = [...statusRoles].filter(([, role]) => role === 'SALE').map(([code]) => code);
 
   // Full edit (CR-2): the submitted line items replace the existing ones and
   // every total is recomputed, so reports/invoice stay in sync automatically.
@@ -238,7 +271,7 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
 
   const existing = await prisma.order.findUnique({
     where: { id },
-    select: { id: true, lines: { select: { productId: true } } },
+    select: { id: true, customerId: true, lines: { select: { productId: true } } },
   });
   if (!existing) return { error: 'notfound' };
   const oldProductIds = existing.lines.map((l) => l.productId);
@@ -287,14 +320,14 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
         orderDiscount: h.data.orderDiscount,
         extraCharges: h.data.extraCharges,
         notes: h.data.notes ?? null,
-        refundAmount: refundFor(h.data.status, gross, discount),
+        refundAmount: refundFor(statusRole === 'RETURN', gross, discount, h.data.deliveryFee, h.data.extraCharges),
         deliveryFee: h.data.deliveryFee,
         deliveryCost: h.data.deliveryCost,
         lines: { create: lineData },
       },
     });
-    // Prior deductions were cleared above; re-apply only if still completed.
-    if (h.data.status === 'COMPLETED') await applySoldMovements(tx, id, h.data.placedAt, lineData);
+    // Prior deductions were cleared above; re-apply only for a completed-sale role.
+    if (statusRole === 'SALE') await applySoldMovements(tx, id, h.data.placedAt, lineData);
     await syncOrderFinance(tx, id, {
       mode: h.data.financeMode as FinanceSyncMode,
       accountId: h.data.financeAccountId,
@@ -303,7 +336,10 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
       paymentMethod: h.data.financePaymentMethod,
       paymentDate: h.data.financePaymentDate,
       createdById: user.id,
+      statusRole,
     });
+    await syncCustomerStats(tx, existing.customerId, saleStatuses);
+    if (customer?.id !== existing.customerId) await syncCustomerStats(tx, customer?.id, saleStatuses);
   });
   // Re-derive FIFO cost for items touched before or after the edit (a removed
   // line reverses its consumption; an added line consumes), §8.
@@ -319,9 +355,13 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
 export async function deleteOrder(id: string, locale: string): Promise<void> {
   const user = await requireCap(CAP);
   if (!user) return;
+  const statusRoles = await getOrderStatusRoleMap();
+  const saleStatuses = [...statusRoles].filter(([, role]) => role === 'SALE').map(([code]) => code);
   await prisma.$transaction(async (tx) => {
+    const order = await tx.order.findUnique({ where: { id }, select: { customerId: true } });
     await closeOrderFinance(tx, id);
     await tx.order.delete({ where: { id } }); // lines cascade
+    await syncCustomerStats(tx, order?.customerId, saleStatuses);
   });
   await audit(user.id, 'DELETE', 'Order', { id });
   revalidatePath(LIST, 'page');

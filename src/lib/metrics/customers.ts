@@ -63,7 +63,7 @@ export function firstToSecondConversion(
 ): number {
   const byCustomer = new Map<string, Date[]>();
   for (const o of orders) {
-    if (o.status === 'CANCELLED' || o.status === 'PENDING' || !o.customerId) continue;
+    if (!isSalesOrder(o) || !o.customerId) continue;
     const arr = byCustomer.get(o.customerId) ?? [];
     arr.push(o.placedAt);
     byCustomer.set(o.customerId, arr);
@@ -96,7 +96,7 @@ export function cohortRetention(
   const firstByCust = new Map<string, Date>();
   const activeMonths = new Map<string, Set<string>>();
   for (const o of orders) {
-    if (o.status === 'CANCELLED' || o.status === 'PENDING' || !o.customerId) continue;
+    if (!isSalesOrder(o) || !o.customerId) continue;
     const cur = firstByCust.get(o.customerId);
     if (!cur || o.placedAt < cur) firstByCust.set(o.customerId, o.placedAt);
     const set = activeMonths.get(o.customerId) ?? new Set<string>();

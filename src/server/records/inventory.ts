@@ -115,7 +115,7 @@ export async function receiveStock(itemId: string, _prev: ActionState, fd: FormD
   if (r.data.paymentMode === 'PAID' && !r.data.accountId) return { error: 'invalid' };
   const locale = reqField(fd, 'locale') || 'ar';
   await prisma.$transaction(async (tx) => {
-    await tx.inventoryCostLayer.create({
+    const layer = await tx.inventoryCostLayer.create({
       data: {
         inventoryItemId: itemId,
         qtyReceived: r.data.qtyReceived,
@@ -133,7 +133,7 @@ export async function receiveStock(itemId: string, _prev: ActionState, fd: FormD
         reference: r.data.reference ?? null,
       },
     });
-    await syncInventoryReceiptFinance(tx, {
+    const financeEntryId = await syncInventoryReceiptFinance(tx, {
       movementId: movement.id,
       inventoryItemId: itemId,
       quantity: r.data.qtyReceived,
@@ -146,6 +146,12 @@ export async function receiveStock(itemId: string, _prev: ActionState, fd: FormD
       reference: r.data.reference,
       createdById: user.id,
     });
+    if (financeEntryId) {
+      await Promise.all([
+        tx.inventoryCostLayer.update({ where: { id: layer.id }, data: { financeEntryId } }),
+        tx.stockMovement.update({ where: { id: movement.id }, data: { financeEntryId } }),
+      ]);
+    }
   });
   await syncActiveCost(itemId);
   await audit(user.id, 'RECEIVE', 'InventoryItem', { id: itemId, qty: r.data.qtyReceived, unitCost: r.data.unitCost });

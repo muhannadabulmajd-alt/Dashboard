@@ -4,6 +4,7 @@ import { prisma } from '@/server/db/client';
 import { ENUM_LABELS } from '@/lib/enums';
 import type { AppLocale } from '@/lib/money';
 import { LIST_BY_KEY } from './registry';
+import { orderStatusRole, type OrderMetricRole } from '@/lib/metrics/status';
 
 export interface ListEntry {
   code: string;
@@ -12,6 +13,7 @@ export interface ListEntry {
   sortOrder: number;
   isActive: boolean;
   isSystem: boolean;
+  metricRole: OrderMetricRole | null;
 }
 
 /** All overlay rows, grouped by listKey then code. Cached per request. */
@@ -44,14 +46,30 @@ export async function getListEntries(key: string): Promise<ListEntry[]> {
       sortOrder: o?.sortOrder ?? i,
       isActive: o?.isActive ?? true,
       isSystem: true,
+      metricRole: key === 'orderStatus'
+        ? ((o?.metricRole as OrderMetricRole | null) ?? orderStatusRole(code))
+        : null,
     });
     seen.add(code);
   });
   for (const [code, o] of overrides) {
     if (seen.has(code)) continue; // user-added value
-    out.push({ code, labelEn: o.labelEn, labelAr: o.labelAr, sortOrder: o.sortOrder, isActive: o.isActive, isSystem: false });
+    out.push({
+      code,
+      labelEn: o.labelEn,
+      labelAr: o.labelAr,
+      sortOrder: o.sortOrder,
+      isActive: o.isActive,
+      isSystem: false,
+      metricRole: key === 'orderStatus' ? (o.metricRole as OrderMetricRole | null) : null,
+    });
   }
   return out.sort((a, b) => a.sortOrder - b.sortOrder || a.labelEn.localeCompare(b.labelEn));
+}
+
+export async function getOrderStatusRoleMap(): Promise<Map<string, OrderMetricRole>> {
+  const entries = await getListEntries('orderStatus');
+  return new Map(entries.map((entry) => [entry.code, entry.metricRole ?? 'UNKNOWN']));
 }
 
 /** Active {value,label} options for dropdowns/filters. */

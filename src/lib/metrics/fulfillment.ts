@@ -1,5 +1,6 @@
 import type { OrderLike, ShipmentLike } from './types';
 import { isSalesOrder } from './sales';
+import { isReturnStatus } from './status';
 
 const DAY = 86_400_000;
 
@@ -37,10 +38,12 @@ export function failedDeliveryRate(shipments: ShipmentLike[]): number {
 
 /** Returned/refunded orders ÷ sales orders. */
 export function returnRate(orders: OrderLike[]): number {
-  const sales = orders.filter(isSalesOrder);
-  if (!sales.length) return 0;
-  const returned = sales.filter((o) => o.status === 'RETURNED' || o.status === 'REFUNDED').length;
-  return returned / sales.length;
+  const completed = orders.filter(isSalesOrder).length;
+  const returned = orders.filter((order) =>
+    order.metricRole ? order.metricRole === 'RETURN' : isReturnStatus(order.status),
+  ).length;
+  const resolved = completed + returned;
+  return resolved > 0 ? returned / resolved : 0;
 }
 
 export function avgShippingCost(shipments: ShipmentLike[]): number {

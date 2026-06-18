@@ -4,6 +4,9 @@ import { buildExpenseWhere, buildBatchWhere } from '@/server/filters/where-build
 import type { DashboardFilters } from '@/lib/filters';
 import type { ResolvedRange } from '@/lib/dates';
 import type { ExpenseLike, BatchLike } from '@/lib/metrics/types';
+import { classifyPurchase } from '@/lib/metrics/purchases';
+import { getUsdToIqd } from '@/server/settings';
+import { convertToIqd } from '@/lib/money';
 
 type Scope = { branchId?: string };
 
@@ -12,17 +15,19 @@ export async function getExpenses(
   scope: Scope,
   range: ResolvedRange,
 ): Promise<ExpenseLike[]> {
-  const [expenseRows, financeRows] = await Promise.all([
+  const [expenseRows, financeRows, rate] = await Promise.all([
     prisma.expense.findMany({
       where: buildExpenseWhere(filters, scope, range),
       select: {
         amount: true,
         currency: true,
         incurredAt: true,
+        branchId: true,
         category: { select: { type: true } },
       },
     }),
-    // Finance-ledger expenses/purchases also feed the P&L (one source of truth).
+    // Purchase parents may contain inventory, assets and operating lines. Only
+    // the operating allocation feeds P&L; cash flow still sees the full parent.
     prisma.financeEntry.findMany({
       where: {
         type: { in: ['EXPENSE', 'PURCHASE'] },
@@ -30,24 +35,55 @@ export async function getExpenses(
         archivedAt: null,
         reversedAt: null,
         reversalOfId: null,
-        ...(scope.branchId ? { branchId: scope.branchId } : {}),
+        ...(scope.branchId
+          ? { branchId: scope.branchId }
+          : filters.branchId?.length
+            ? { branchId: { in: filters.branchId } }
+            : {}),
       },
-      select: { amount: true, currency: true, date: true, categoryType: true },
+      select: {
+        amount: true,
+        currency: true,
+        date: true,
+        branchId: true,
+        type: true,
+        categoryType: true,
+        ledgerLines: { select: { itemType: true, lineTotal: true, categoryType: true, branchId: true } },
+        fixedAsset: { select: { id: true } },
+        costLayers: { take: 1, select: { id: true } },
+      },
     }),
+    getUsdToIqd(),
   ]);
   return [
     ...expenseRows.map((r) => ({
-      amount: r.amount,
-      currency: r.currency,
+      amount: convertToIqd(r.amount, r.currency, rate),
+      currency: 'IQD' as const,
       incurredAt: r.incurredAt,
       categoryType: r.category.type,
+      branchId: r.branchId,
     })),
-    ...financeRows.map((r) => ({
-      amount: r.amount,
-      currency: r.currency,
-      incurredAt: r.date,
-      categoryType: r.categoryType ?? 'OVERHEAD',
-    })),
+    ...financeRows.flatMap((r) => {
+      if (r.type === 'EXPENSE') {
+        return [{ amount: convertToIqd(r.amount, r.currency, rate), currency: 'IQD' as const, incurredAt: r.date, categoryType: r.categoryType ?? 'OVERHEAD', branchId: r.branchId }];
+      }
+      const allocation = classifyPurchase({
+        amount: r.amount,
+        categoryType: r.categoryType,
+        ledgerLines: r.ledgerLines,
+        hasFixedAsset: Boolean(r.fixedAsset),
+        hasInventoryLayer: r.costLayers.length > 0,
+      });
+      if (allocation.operatingExpense <= 0) return [];
+      const categories = r.ledgerLines
+        .filter((line) => line.itemType !== 'INVENTORY')
+        .map((line) => line.categoryType)
+        .filter((value): value is NonNullable<typeof value> => value != null);
+      const categoryType = categories.length && categories.every((value) => value === categories[0])
+        ? categories[0]
+        : r.categoryType ?? 'OVERHEAD';
+      return [{ amount: convertToIqd(allocation.operatingExpense, r.currency, rate), currency: 'IQD' as const, incurredAt: r.date, categoryType, branchId: r.branchId }];
+    }),
   ];
 }
 

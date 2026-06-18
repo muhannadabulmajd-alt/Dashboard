@@ -120,6 +120,100 @@ function toData(p: Parsed, obligation: boolean, fallbackRate: number) {
 
 type AuditScalar = string | number | boolean | null;
 
+function proportionalIntegers(total: number, weights: number[]): number[] {
+  const weightTotal = weights.reduce((sum, value) => sum + Math.max(0, value), 0);
+  if (!weights.length) return [];
+  if (weightTotal <= 0) return weights.map((_, index) => (index === weights.length - 1 ? total : 0));
+  const exact = weights.map((value) => (Math.max(0, value) * total) / weightTotal);
+  const result = exact.map(Math.floor);
+  const remainder = total - result.reduce((sum, value) => sum + value, 0);
+  const order = exact
+    .map((value, index) => ({ index, fraction: value - Math.floor(value) }))
+    .sort((a, b) => b.fraction - a.fraction || a.index - b.index);
+  for (let i = 0; i < remainder; i++) result[order[i % order.length].index] += 1;
+  return result;
+}
+
+async function updateLinkedRecords(
+  tx: Prisma.TransactionClient,
+  id: string,
+  data: ReturnType<typeof toData> extends infer T ? Exclude<T, null> : never,
+): Promise<void> {
+  const linked = await tx.financeEntry.findUnique({
+    where: { id },
+    select: {
+      amount: true,
+      ledgerLines: {
+        orderBy: { lineNo: 'asc' },
+        select: {
+          id: true,
+          lineTotal: true,
+          discountAmount: true,
+          extraAmount: true,
+          quantity: true,
+          unitCost: true,
+          inventoryItemId: true,
+        },
+      },
+      fixedAsset: { select: { id: true, quantity: true } },
+    },
+  });
+  if (!linked) return;
+
+  if (linked.ledgerLines.length) {
+    const totals = proportionalIntegers(data.amount, linked.ledgerLines.map((line) => line.lineTotal));
+    const discounts = proportionalIntegers(
+      Math.round(linked.ledgerLines.reduce((sum, line) => sum + line.discountAmount, 0) * data.amount / linked.amount),
+      linked.ledgerLines.map((line) => line.discountAmount),
+    );
+    const extras = proportionalIntegers(
+      Math.round(linked.ledgerLines.reduce((sum, line) => sum + line.extraAmount, 0) * data.amount / linked.amount),
+      linked.ledgerLines.map((line) => line.extraAmount),
+    );
+    for (let index = 0; index < linked.ledgerLines.length; index++) {
+      const line = linked.ledgerLines[index];
+      const quantity = Number(line.quantity);
+      const baseUnitCost = Number(line.unitCost) * data.amount / linked.amount;
+      const landedUnitCost = quantity > 0 ? totals[index] / quantity : 0;
+      await tx.ledgerEntryLine.update({
+        where: { id: line.id },
+        data: {
+          lineTotal: totals[index],
+          discountAmount: discounts[index],
+          extraAmount: extras[index],
+          unitCost: baseUnitCost.toFixed(3),
+          landedUnitCost: landedUnitCost.toFixed(3),
+          branchId: data.branchId,
+        },
+      });
+      if (line.inventoryItemId) {
+        await tx.inventoryCostLayer.updateMany({
+          where: { financeEntryId: id, inventoryItemId: line.inventoryItemId },
+          data: { unitCost: landedUnitCost.toFixed(3), receivedAt: data.date },
+        });
+        await tx.stockMovement.updateMany({
+          where: { financeEntryId: id, inventoryItemId: line.inventoryItemId },
+          data: { occurredAt: data.date, branchId: data.branchId },
+        });
+      }
+    }
+  }
+
+  if (linked.fixedAsset) {
+    const quantity = Number(linked.fixedAsset.quantity);
+    await tx.fixedAsset.update({
+      where: { id: linked.fixedAsset.id },
+      data: {
+        totalCost: data.amount,
+        unitCost: (data.amount / quantity).toFixed(3),
+        purchaseDate: data.date,
+        partyId: data.partyId,
+        branchId: data.branchId,
+      },
+    });
+  }
+}
+
 function auditValue(value: unknown): AuditScalar {
   if (value instanceof Date) return value.toISOString();
   if (value === null || value === undefined) return null;
@@ -170,7 +264,11 @@ export async function updateEntry(id: string, _prev: ActionState, fd: FormData):
   if (!data) return { error: 'invalid' };
   const locale = reqField(fd, 'locale') || 'ar';
   const before = await prisma.financeEntry.findUnique({ where: { id }, select: entryAuditSelect });
-  await prisma.financeEntry.update({ where: { id }, data });
+  if (!before) return { error: 'invalid' };
+  await prisma.$transaction(async (tx) => {
+    await tx.financeEntry.update({ where: { id }, data });
+    await updateLinkedRecords(tx, id, data);
+  });
   await audit(user.id, 'UPDATE', 'FinanceEntry', {
     id,
     reason: optField(fd, 'changeReason') ?? null,
@@ -184,7 +282,7 @@ export async function updateEntry(id: string, _prev: ActionState, fd: FormData):
 async function reverseEntryForUser(id: string, user: { id: string }, locale: string, reason: string): Promise<void> {
   const entry = await prisma.financeEntry.findUnique({
     where: { id },
-    include: { settlements: { where: { reversedAt: null, reversalOfId: null }, select: { id: true } } },
+    include: { settlements: { where: { archivedAt: null, reversedAt: null, reversalOfId: null }, select: { id: true } } },
   });
   if (!entry || entry.importKey || entry.reversedAt || entry.reversalOfId) redirect(`/${locale}/finance/ledger/${id}`);
   if (entry.obligation && entry.settlements.length > 0) {
@@ -291,9 +389,9 @@ export async function settleEntry(
 
   const ob = await prisma.financeEntry.findUnique({
     where: { id: obligationId },
-    include: { settlements: { where: { reversedAt: null, reversalOfId: null }, select: { amount: true } } },
+    include: { settlements: { where: { archivedAt: null, reversedAt: null, reversalOfId: null }, select: { amount: true } } },
   });
-  if (!ob || ob.reversedAt || ob.reversalOfId || !ob.obligation || !ob.obligationKind) return { error: 'invalid' };
+  if (!ob || ob.archivedAt || ob.reversedAt || ob.reversalOfId || !ob.obligation || !ob.obligationKind) return { error: 'invalid' };
   const paid = ob.settlements.reduce((s, x) => s + x.amount, 0);
   const outstanding = Math.max(0, ob.amount - paid);
   if (outstanding <= 0) return { error: 'invalid' };

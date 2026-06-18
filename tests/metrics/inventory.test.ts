@@ -7,6 +7,7 @@ import {
   reorderAlerts,
   nearExpiry,
   stockValueByCategory,
+  stockRow,
   productionCapacity,
   fifoStatus,
 } from '@/lib/metrics/inventory';
@@ -69,6 +70,32 @@ describe('inventory metrics', () => {
     const rows = nearExpiry([item], 30, now);
     expect(rows).toHaveLength(1);
     expect(rows[0].daysToExpiry).toBe(9);
+  });
+
+  it('nearExpiry excludes a receipt lot after FIFO consumption depletes it', () => {
+    const now = new Date('2026-06-01');
+    const item = makeItem({
+      movements: [
+        makeMovement({ quantity: 100, occurredAt: new Date('2026-05-01'), expiryDate: new Date('2026-06-10') }),
+        makeMovement({ quantity: 100, occurredAt: new Date('2026-05-02'), expiryDate: new Date('2026-07-10') }),
+        makeMovement({ quantity: -100, occurredAt: new Date('2026-05-03') }),
+      ],
+    });
+    expect(nearExpiry([item], 30, now)).toHaveLength(0);
+  });
+
+  it('stockRow values remaining FIFO layers and keeps pre-FIFO stock fallback', () => {
+    const item = makeItem({
+      unitCost: 10,
+      movements: [
+        makeMovement({ quantity: 50, occurredAt: new Date('2026-01-01') }),
+        makeMovement({ quantity: 100, occurredAt: new Date('2026-02-01') }),
+        makeMovement({ quantity: -40, occurredAt: new Date('2026-03-01') }),
+      ],
+      costLayers: [{ id: 'layer', qtyReceived: 100, unitCost: 20, receivedAt: new Date('2026-02-01') }],
+    });
+    expect(stockRow(item).current).toBe(110);
+    expect(stockRow(item).value).toBe(60 * 20 + 50 * 10);
   });
 
   it('stockValueByCategory multiplies stock by unit cost', () => {

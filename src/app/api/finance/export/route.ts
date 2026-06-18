@@ -27,6 +27,7 @@ const CASH_FLOW_LABELS: Record<CashFlowBucketKey, string> = {
   supplierPayments: 'Supplier payments',
   expensesPaid: 'Expenses paid',
   inventoryPurchasesPaid: 'Inventory purchases paid',
+  fixedAssetPurchasesPaid: 'Equipment and assets paid',
   ownerWithdrawals: 'Owner withdrawals',
   otherPayments: 'Other payments',
   transfersIn: 'Transfers in',
@@ -95,7 +96,7 @@ export async function GET(req: NextRequest) {
     const kind = p.get('kind') as ObligationKind | null;
     const obligations = await prisma.financeEntry.findMany({
       where: { obligation: true, archivedAt: null, reversedAt: null, reversalOfId: null, ...(kind ? { obligationKind: kind } : {}) },
-      include: { party: { select: { name: true } }, settlements: { where: { reversedAt: null, reversalOfId: null }, select: { amount: true } } },
+      include: { party: { select: { name: true } }, settlements: { where: { archivedAt: null, reversedAt: null, reversalOfId: null }, select: { amount: true } } },
       orderBy: { dueDate: 'asc' },
     });
     headers = ['Kind', 'Party', 'Description', 'Amount', 'Paid', 'Outstanding', 'Currency', 'DueDate'];

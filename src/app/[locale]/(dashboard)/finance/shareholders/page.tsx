@@ -17,15 +17,15 @@ export default async function ShareholdersPage({
   const { locale } = await getPageContext(params, searchParams, 'view:finance');
   const t = await getTranslations('finance');
 
-  const [shareholders, capEntries, expenseEntries] = await Promise.all([
+  const [shareholders, capEntries, drawingEntries] = await Promise.all([
     prisma.party.findMany({ where: { type: 'SHAREHOLDER' }, orderBy: { name: 'asc' } }),
     prisma.financeEntry.findMany({ where: { type: 'CAPITAL_IN', currency: 'IQD', archivedAt: null, reversedAt: null, reversalOfId: null }, select: { partyId: true, amount: true } }),
-    prisma.financeEntry.findMany({ where: { type: { in: ['EXPENSE', 'PURCHASE'] }, currency: 'IQD', archivedAt: null, reversedAt: null, reversalOfId: null }, select: { amount: true } }),
+    prisma.financeEntry.findMany({ where: { type: 'DRAWING', currency: 'IQD', archivedAt: null, reversedAt: null, reversalOfId: null }, select: { amount: true } }),
   ]);
 
   const totalCapital = capEntries.reduce((s, e) => s + e.amount, 0);
-  const totalSpent = expenseEntries.reduce((s, e) => s + e.amount, 0);
-  const remaining = totalCapital - totalSpent;
+  const ownerWithdrawals = drawingEntries.reduce((s, e) => s + e.amount, 0);
+  const netOwnerCapital = totalCapital - ownerWithdrawals;
 
   const byParty = new Map<string, { total: number; count: number }>();
   for (const e of capEntries) {
@@ -59,8 +59,8 @@ export default async function ShareholdersPage({
       <PageHeader title={t('shareholders')} subtitle={t('subtitle')} />
       <div className="grid gap-3 sm:grid-cols-3">
         <KpiCard locale={locale} label={t('totalCapital')} value={formatMoney(totalCapital, 'IQD', locale)} />
-        <KpiCard locale={locale} label={t('spent')} value={formatMoney(totalSpent, 'IQD', locale)} />
-        <KpiCard locale={locale} label={t('remaining')} value={formatMoney(remaining, 'IQD', locale)} />
+        <KpiCard locale={locale} label={t('ownerWithdrawals')} value={formatMoney(ownerWithdrawals, 'IQD', locale)} />
+        <KpiCard locale={locale} label={t('netOwnerCapital')} value={formatMoney(netOwnerCapital, 'IQD', locale)} />
       </div>
       <DataTable columns={cols} rows={rows} emptyLabel="—" />
     </>

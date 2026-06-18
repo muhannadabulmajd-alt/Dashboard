@@ -61,8 +61,12 @@ describe('invoice helpers', () => {
   });
 
   it('uses order status for canceled and refunded invoices', () => {
-    expect(invoicePaymentSnapshot(order({ status: 'CANCELLED' }), []).status).toBe('CANCELED');
-    expect(invoicePaymentSnapshot(order({ status: 'REFUNDED', refundAmount: 95_000 }), []).status).toBe('REFUNDED');
+    const canceled = invoicePaymentSnapshot(order({ status: 'CANCELLED' }), []);
+    const refunded = invoicePaymentSnapshot(order({ status: 'REFUNDED', refundAmount: 95_000 }), []);
+    expect(canceled.status).toBe('CANCELED');
+    expect(canceled.remaining).toBe(0);
+    expect(refunded.status).toBe('REFUNDED');
+    expect(refunded.remaining).toBe(0);
   });
 
   it('ignores archived and reversed payment entries', () => {

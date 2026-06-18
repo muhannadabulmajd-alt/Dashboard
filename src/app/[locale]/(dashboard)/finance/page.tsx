@@ -21,12 +21,14 @@ import { getPageContext } from '@/server/page-context';
 import { prisma } from '@/server/db/client';
 import { enumLabel } from '@/lib/enums';
 import { formatMoney, convertToIqd } from '@/lib/money';
-import { decimalNumber } from '@/lib/decimal';
 import { can } from '@/lib/rbac';
 import { accountBalance, netCash, unassignedCash, financeTotals, type FinanceEntryLike } from '@/lib/metrics/finance';
 import { cogs, grossMargin, netSales } from '@/lib/metrics';
 import { getUsdToIqd } from '@/server/settings';
 import { getOrders, getOrderLines } from '@/server/db/repositories/sales.repo';
+import { getExpenses } from '@/server/db/repositories/finance.repo';
+import { getInventoryItems } from '@/server/db/repositories/inventory.repo';
+import { stockRow } from '@/lib/metrics/inventory';
 import { setUsdToIqd } from '@/server/finance/settings';
 import { RateEditor } from '@/components/finance/RateEditor';
 import { Badge, Card, CardContent, CardHeader, CardTitle, PageHeader } from '@/components/ui/primitives';
@@ -70,10 +72,15 @@ export default async function FinancePage({
   const t = await getTranslations('finance');
   const canManage = can(user.role, 'manage:finance');
 
-  const [accounts, entriesRaw, orders, lines, inventoryItems] = await Promise.all([
+  const branchWhere = scope.branchId
+    ? { branchId: scope.branchId }
+    : filters.branchId?.length
+      ? { branchId: { in: filters.branchId } }
+      : {};
+  const [accounts, entriesRaw, orders, lines, inventoryItems, expenseRows] = await Promise.all([
     prisma.financeAccount.findMany({ where: { isActive: true }, orderBy: { createdAt: 'asc' } }),
     prisma.financeEntry.findMany({
-      where: { archivedAt: null, reversedAt: null, reversalOfId: null },
+      where: { archivedAt: null, reversedAt: null, reversalOfId: null, date: { lte: range.end }, ...branchWhere },
       select: {
         id: true, type: true, amount: true, currency: true, obligation: true,
         obligationKind: true, accountId: true, toAccountId: true, settlesId: true,
@@ -82,13 +89,8 @@ export default async function FinancePage({
     }),
     getOrders(filters, scope, range),
     getOrderLines(filters, scope, range),
-    prisma.inventoryItem.findMany({
-      where: scope.branchId ? { branchId: scope.branchId } : {},
-      select: {
-        unitCost: true,
-        movements: { select: { quantity: true } },
-      },
-    }),
+    getInventoryItems(filters, scope, range),
+    getExpenses(filters, scope, range),
   ]);
   const entries = entriesRaw as ChartEntry[];
 
@@ -135,14 +137,9 @@ export default async function FinancePage({
   const revenue = netSales(orders);
   const costOfGoods = cogs(lines);
   const gross = grossMargin(revenue, costOfGoods);
-  const operatingExpenses = entries
-    .filter((e) => e.type === 'EXPENSE')
-    .reduce((s, e) => s + iqd(e), 0);
-  const netProfit = gross.amount - operatingExpenses;
-  const inventoryValue = inventoryItems.reduce(
-    (s, item) => s + decimalNumber(item.unitCost) * item.movements.reduce((sum, m) => sum + decimalNumber(m.quantity), 0),
-    0,
-  );
+  const operatingExpenses = expenseRows.reduce((sum, expense) => sum + convertToIqd(expense.amount, expense.currency, rate), 0);
+  const netProfit = gross.amount - operatingExpenses - orders.reduce((sum, order) => sum + order.deliveryCost, 0);
+  const inventoryValue = inventoryItems.reduce((sum, item) => sum + stockRow(item).value, 0);
   const netCashMovement = combined.cashIn - combined.cashOut;
   const now = new Date();
   const paidByObligation = new Map<string, number>();
@@ -163,11 +160,12 @@ export default async function FinancePage({
     .filter((e) => e.obligation && e.obligationKind === 'PAYABLE')
     .map((e) => Math.max(0, iqd(e) - (paidByObligation.get(e.id) ?? 0)))
     .filter((amount) => amount > 0);
-  const largeExpenses = entries
-    .filter((e) => (e.type === 'EXPENSE' || e.type === 'PURCHASE') && iqd(e) >= 1_000_000)
-    .sort((a, b) => iqd(b) - iqd(a))
+  const largeExpenses = expenseRows
+    .map((expense) => convertToIqd(expense.amount, expense.currency, rate))
+    .filter((amount) => amount >= 1_000_000)
+    .sort((a, b) => b - a)
     .slice(0, 3);
-  const largestExpense = largeExpenses[0] ? iqd(largeExpenses[0]) : 0;
+  const largestExpense = largeExpenses[0] ?? 0;
   const financialAlerts: FinancialAlert[] = [
     ...(overdue.payables > 0
       ? [{
@@ -245,7 +243,7 @@ export default async function FinancePage({
   })();
   const topParties = (() => {
     const map = new Map<string, number>();
-    for (const e of entries.filter((x) => isSpend(x) || x.type === 'PAYMENT_OUT')) {
+    for (const e of entries.filter(isSpend)) {
       if (!e.party?.name) continue;
       map.set(e.party.name, (map.get(e.party.name) ?? 0) + iqd(e));
     }

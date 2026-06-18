@@ -10,6 +10,7 @@ import { Plus } from 'lucide-react';
 import { BackLink } from '@/components/records/parts';
 import { SectionGuide } from '@/components/records/SectionGuide';
 import { Link } from '@/i18n/navigation';
+import { accountBalance } from '@/lib/metrics/finance';
 
 export default async function FinanceAccountsPage({
   params,
@@ -22,20 +23,26 @@ export default async function FinanceAccountsPage({
   const t = await getTranslations('finance');
   const tr = await getTranslations('records');
   const canManage = can(user.role, 'manage:finance');
-  const accounts = await prisma.financeAccount.findMany({ orderBy: { createdAt: 'asc' } });
+  const [accounts, entries] = await Promise.all([
+    prisma.financeAccount.findMany({ orderBy: { createdAt: 'asc' } }),
+    prisma.financeEntry.findMany({
+      where: { archivedAt: null, reversedAt: null, reversalOfId: null },
+      select: { id: true, type: true, amount: true, currency: true, obligation: true, obligationKind: true, accountId: true, toAccountId: true, settlesId: true, archivedAt: true },
+    }),
+  ]);
 
   const cols: Column[] = [
     { label: t('f.name') },
     { label: t('f.type') },
     { label: t('f.currency') },
-    { label: t('f.opening'), align: 'end' },
+    { label: t('f.balance'), align: 'end' },
     { label: '', align: 'end' },
   ];
   const rows = accounts.map((a) => [
     a.name,
     enumLabel(a.type, locale),
     a.currency,
-    formatMoney(a.openingBalance, a.currency, locale),
+    formatMoney(accountBalance(a, entries.filter((entry) => entry.currency === a.currency)), a.currency, locale),
     <Link key="o" href={`/finance/accounts/${a.id}`} className="font-medium text-primary hover:underline">
       {tr('open')}
     </Link>,

@@ -40,13 +40,27 @@ export async function recomputeProductsForItem(itemId: string, newCost: number):
  */
 export async function syncActiveCost(itemId: string): Promise<number | null> {
   const layers = await prisma.inventoryCostLayer.findMany({
-    where: { inventoryItemId: itemId },
+    where: {
+      inventoryItemId: itemId,
+      OR: [
+        { financeEntryId: null },
+        { financeEntry: { archivedAt: null, reversedAt: null, reversalOfId: null } },
+      ],
+    },
     orderBy: { receivedAt: 'asc' },
     select: { id: true, qtyReceived: true, unitCost: true, receivedAt: true },
   });
   if (!layers.length) return null;
   const out = await prisma.stockMovement.aggregate({
-    where: { inventoryItemId: itemId, quantity: { lt: 0 }, occurredAt: { gte: layers[0].receivedAt } },
+    where: {
+      inventoryItemId: itemId,
+      quantity: { lt: 0 },
+      occurredAt: { gte: layers[0].receivedAt },
+      OR: [
+        { financeEntryId: null },
+        { financeEntry: { archivedAt: null, reversedAt: null, reversalOfId: null } },
+      ],
+    },
     _sum: { quantity: true },
   });
   const consumed = -decimalNumber(out._sum.quantity);

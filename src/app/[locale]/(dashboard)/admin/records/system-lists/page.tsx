@@ -77,6 +77,14 @@ export default async function SystemListsPage({
                 <span className="w-28 shrink-0 truncate font-mono text-[11px] text-muted-foreground" title={e.code}>{e.code}</span>
                 <input name="labelEn" defaultValue={e.labelEn} dir="ltr" className={`${input} max-w-[12rem]`} aria-label="EN" />
                 <input name="labelAr" defaultValue={e.labelAr} dir="rtl" className={`${input} max-w-[12rem]`} aria-label="AR" />
+                {selectedKey === 'orderStatus' ? (
+                  <select name="metricRole" defaultValue={e.metricRole ?? 'OPEN'} className={`${input} max-w-[10rem]`} aria-label={t('lists.metricRole')}>
+                    <option value="OPEN">{t('lists.metricRoles.OPEN')}</option>
+                    <option value="SALE">{t('lists.metricRoles.SALE')}</option>
+                    <option value="RETURN">{t('lists.metricRoles.RETURN')}</option>
+                    <option value="CANCELED">{t('lists.metricRoles.CANCELED')}</option>
+                  </select>
+                ) : null}
                 <button type="submit" className="rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-muted">{t('save')}</button>
               </form>
             ) : (
@@ -117,6 +125,14 @@ export default async function SystemListsPage({
               <div className="grid gap-2 sm:grid-cols-2">
                 <input name="labelEn" required placeholder={t('lists.labelEn')} dir="ltr" className={input} />
                 <input name="labelAr" placeholder={t('lists.labelAr')} dir="rtl" className={input} />
+                {selectedKey === 'orderStatus' ? (
+                  <select name="metricRole" defaultValue="OPEN" className={input} aria-label={t('lists.metricRole')}>
+                    <option value="OPEN">{t('lists.metricRoles.OPEN')}</option>
+                    <option value="SALE">{t('lists.metricRoles.SALE')}</option>
+                    <option value="RETURN">{t('lists.metricRoles.RETURN')}</option>
+                    <option value="CANCELED">{t('lists.metricRoles.CANCELED')}</option>
+                  </select>
+                ) : null}
               </div>
               <button type="submit" className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground hover:opacity-95">
                 <Plus className="size-4" />{t('lists.add')}

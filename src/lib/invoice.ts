@@ -52,7 +52,8 @@ export function invoicePaymentSnapshot(
     .filter((entry) => entry.orderId === order.id && !entry.obligation && entry.type === 'INCOME' && !entry.settlesId)
     .reduce((sum, entry) => sum + entry.amount, 0);
   const paid = Math.min(total, paidDirectly + paidFromSettlements);
-  const remaining = Math.max(0, total - paid);
+  const terminal = order.status === 'CANCELLED' || order.status === 'RETURNED' || order.status === 'REFUNDED';
+  const remaining = terminal ? 0 : Math.max(0, total - paid);
   return {
     total,
     paid,

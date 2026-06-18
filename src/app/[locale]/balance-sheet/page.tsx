@@ -5,6 +5,7 @@ import { prisma } from '@/server/db/client';
 import { formatMoney, convertToIqd, type AppLocale } from '@/lib/money';
 import { formatDate } from '@/lib/dates';
 import { accountBalance, netCash, unassignedCash, financeTotals, type FinanceEntryLike } from '@/lib/metrics/finance';
+import { stockRow } from '@/lib/metrics/inventory';
 import { decimalNumber } from '@/lib/decimal';
 import { can } from '@/lib/rbac';
 import { getUsdToIqd } from '@/server/settings';
@@ -27,7 +28,7 @@ export default async function BalanceSheetPage({ params }: { params: Promise<{ l
   const loc = locale as AppLocale;
   const canExport = can(user.role, 'export:financial');
 
-  const [accounts, entriesRaw, inventoryItems] = await Promise.all([
+  const [accounts, entriesRaw, inventoryItems, fixedAssets] = await Promise.all([
     prisma.financeAccount.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }),
     prisma.financeEntry.findMany({
       where: { archivedAt: null, reversedAt: null, reversalOfId: null },
@@ -38,9 +39,21 @@ export default async function BalanceSheetPage({ params }: { params: Promise<{ l
     }),
     prisma.inventoryItem.findMany({
       select: {
-        unitCost: true,
-        movements: { select: { quantity: true } },
+        id: true, category: true, nameEn: true, nameAr: true, unit: true,
+        reorderPoint: true, avgDailyUsage: true, unitCost: true,
+        movements: {
+          where: { OR: [{ financeEntryId: null }, { financeEntry: { archivedAt: null, reversedAt: null, reversalOfId: null } }] },
+          select: { occurredAt: true, reason: true, quantity: true, expiryDate: true },
+        },
+        costLayers: {
+          where: { OR: [{ financeEntryId: null }, { financeEntry: { archivedAt: null, reversedAt: null, reversalOfId: null } }] },
+          select: { id: true, qtyReceived: true, unitCost: true, receivedAt: true },
+        },
       },
+    }),
+    prisma.fixedAsset.findMany({
+      where: { isActive: true, archivedAt: null, OR: [{ financeEntryId: null }, { financeEntry: { archivedAt: null, reversedAt: null, reversalOfId: null } }] },
+      select: { totalCost: true },
     }),
   ]);
   const entries = entriesRaw as FinanceEntryLike[];
@@ -49,10 +62,17 @@ export default async function BalanceSheetPage({ params }: { params: Promise<{ l
 
   const rate = await getUsdToIqd();
   const inventoryValue = inventoryItems.reduce(
-    (s, item) => s + decimalNumber(item.unitCost) * item.movements.reduce((sum, m) => sum + decimalNumber(m.quantity), 0),
+    (sum, item) => sum + stockRow({
+      ...item,
+      reorderPoint: item.reorderPoint == null ? null : decimalNumber(item.reorderPoint),
+      unitCost: item.unitCost == null ? null : decimalNumber(item.unitCost),
+      movements: item.movements.map((movement) => ({ ...movement, quantity: decimalNumber(movement.quantity) })),
+      costLayers: item.costLayers.map((layer) => ({ ...layer, qtyReceived: decimalNumber(layer.qtyReceived), unitCost: decimalNumber(layer.unitCost) })),
+    }).value,
     0,
   );
-  const comb = { cashBank: 0, receivables: 0, payables: 0, capital: 0, inventory: inventoryValue };
+  const fixedAssetValue = fixedAssets.reduce((sum, asset) => sum + asset.totalCost, 0);
+  const comb = { cashBank: 0, receivables: 0, payables: 0, capital: 0, inventory: inventoryValue, fixedAssets: fixedAssetValue };
   for (const cur of currencies) {
     const ce = entries.filter((e) => e.currency === cur);
     const ca = accounts.filter((a) => a.currency === cur);
@@ -63,7 +83,7 @@ export default async function BalanceSheetPage({ params }: { params: Promise<{ l
     comb.payables += convertToIqd(tot.outstandingPayable, cur, rate);
     comb.capital += convertToIqd(tot.capitalIn, cur, rate);
   }
-  const combAssets = comb.cashBank + comb.receivables + comb.inventory;
+  const combAssets = comb.cashBank + comb.receivables + comb.inventory + comb.fixedAssets;
   const combRetained = combAssets - comb.payables - comb.capital;
   const showCombined = currencies.length > 1;
   const iqd = (n: number) => formatMoney(n, 'IQD', loc);
@@ -117,6 +137,7 @@ export default async function BalanceSheetPage({ params }: { params: Promise<{ l
                 <BalanceRow label={t('cashBank')} value={iqd(comb.cashBank)} />
                 <BalanceRow label={t('receivables')} value={iqd(comb.receivables)} />
                 <BalanceRow label={t('inventoryValue')} value={iqd(comb.inventory)} />
+                <BalanceRow label={t('fixedAssets')} value={iqd(comb.fixedAssets)} />
                 <BalanceRow label={t('totalAssets')} value={iqd(combAssets)} strong />
               </div>
               <div>
@@ -137,7 +158,7 @@ export default async function BalanceSheetPage({ params }: { params: Promise<{ l
           const tot = financeTotals(ce);
           const cashBank = netCash(ca, ce);
           const unassigned = unassignedCash(ce);
-          const totalAssets = cashBank + tot.outstandingReceivable + (cur === 'IQD' ? inventoryValue : 0);
+          const totalAssets = cashBank + tot.outstandingReceivable + (cur === 'IQD' ? inventoryValue + fixedAssetValue : 0);
           const retained = totalAssets - tot.outstandingPayable - tot.capitalIn;
           const m = (n: number) => formatMoney(n, cur, loc);
           return (
@@ -149,6 +170,7 @@ export default async function BalanceSheetPage({ params }: { params: Promise<{ l
                   <BalanceRow label={t('cashBank')} value={m(cashBank)} />
                   <BalanceRow label={t('receivables')} value={m(tot.outstandingReceivable)} />
                   {cur === 'IQD' ? <BalanceRow label={t('inventoryValue')} value={m(inventoryValue)} /> : null}
+                  {cur === 'IQD' ? <BalanceRow label={t('fixedAssets')} value={m(fixedAssetValue)} /> : null}
                   <BalanceRow label={t('totalAssets')} value={m(totalAssets)} strong />
                   {ca.length || unassigned ? (
                     <div className="mt-3 space-y-0.5 text-xs text-muted-foreground">

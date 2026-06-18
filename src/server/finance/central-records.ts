@@ -65,6 +65,7 @@ type ParsedLedgerLine = {
   unit: string;
   quantity: number;
   unitCost: string;
+  landedUnitCost: string;
   discountAmount: number;
   extraAmount: number;
   lineTotal: number;
@@ -206,7 +207,8 @@ async function parseLedgerLines(fd: FormData): Promise<{ lines: ParsedLedgerLine
       newItemCategory: reqField(fd, `${prefix}newItemCategory`),
       unit,
       quantity,
-      unitCost: ledgerUnitCostMinor(lineTotal, quantity),
+      unitCost: inputMajorToIqdMinor(unitCostMajor, currencyShape.currency, currencyShape.fxRate).toFixed(3),
+      landedUnitCost: ledgerUnitCostMinor(lineTotal, quantity),
       discountAmount,
       extraAmount,
       lineTotal,
@@ -377,7 +379,7 @@ async function resolveLineInventoryItem(
       category,
       unit: line.unit,
       branchId: line.branchId,
-      unitCost: line.unitCost,
+      unitCost: line.landedUnitCost,
     },
     select: { id: true, category: true, branchId: true, nameEn: true, nameAr: true, unit: true },
   });
@@ -549,7 +551,7 @@ export async function createCentralRecord(_prev: ActionState, fd: FormData): Pro
               inventoryItemId: item.id,
               financeEntryId: entry.id,
               qtyReceived: decimalData(line.quantity),
-              unitCost: line.unitCost,
+              unitCost: line.landedUnitCost,
               receivedAt: date,
             },
           });
@@ -580,6 +582,7 @@ export async function createCentralRecord(_prev: ActionState, fd: FormData): Pro
             unit: line.unit,
             quantity: decimalData(line.quantity),
             unitCost: line.unitCost,
+            landedUnitCost: line.landedUnitCost,
             discountAmount: line.discountAmount,
             extraAmount: line.extraAmount,
             lineTotal: line.lineTotal,

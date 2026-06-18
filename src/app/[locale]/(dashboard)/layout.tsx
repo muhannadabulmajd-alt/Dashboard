@@ -1,6 +1,6 @@
 import { requireUser } from '@/server/auth/rbac';
 import { buildBranchScope } from '@/server/filters/where-builder';
-import { getLatestOrderDate } from '@/server/db/repositories/sales.repo';
+import { getLatestActivityDate } from '@/server/db/repositories/sales.repo';
 import { prisma } from '@/server/db/client';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { TopBar } from '@/components/layout/TopBar';
@@ -20,7 +20,7 @@ export default async function DashboardLayout({
   const { locale } = await params;
   const user = await requireUser(locale);
   const scope = buildBranchScope(user);
-  const lastUpdated = await getLatestOrderDate(scope);
+  const lastUpdated = await getLatestActivityDate(scope);
   const navGroups = await getNavGroups(user.role);
 
   // Branch filter is shown only to non-scoped roles (others are locked to their branch).

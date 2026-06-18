@@ -1,6 +1,7 @@
 import 'server-only';
 import type { Prisma } from '@prisma/client';
 import { roundMoney } from '@/lib/decimal';
+import type { OrderMetricRole } from '@/lib/metrics/status';
 
 type Tx = Prisma.TransactionClient;
 
@@ -27,7 +28,10 @@ async function closeOrDeleteAutoEntry(tx: Tx, importKey: string, description: st
     });
     return settled;
   }
-  await tx.financeEntry.delete({ where: { id: row.id } });
+  await tx.financeEntry.update({
+    where: { id: row.id },
+    data: { archivedAt: new Date(), archiveReason: description, description },
+  });
   return 0;
 }
 
@@ -87,6 +91,7 @@ export async function syncOrderFinance(
     paidAmount?: number | null;
     paymentMethod?: string | null;
     paymentDate?: Date | null;
+    statusRole: OrderMetricRole;
   },
 ) {
   const order = await tx.order.findUnique({
@@ -110,7 +115,7 @@ export async function syncOrderFinance(
     0,
     order.grossAmount - order.discountAmount - order.refundAmount + order.deliveryFee + order.extraCharges,
   );
-  const canSync = amount > 0 && order.status !== 'CANCELLED' && order.status !== 'RETURNED' && order.status !== 'REFUNDED';
+  const canSync = amount > 0 && (input.statusRole === 'OPEN' || input.statusRole === 'SALE');
   const arKey = ORDER_KEY(order.id, 'AR');
   const paidKey = ORDER_KEY(order.id, 'PAY');
 
@@ -150,6 +155,8 @@ export async function syncOrderFinance(
         orderId: order.id,
         reference: order.orderNumber,
         description: `Order paid: ${order.orderNumber}`,
+        archivedAt: null,
+        archiveReason: null,
         createdById: input.createdById ?? null,
       },
       update: {
@@ -167,6 +174,8 @@ export async function syncOrderFinance(
         orderId: order.id,
         reference: order.orderNumber,
         description: `Order paid: ${order.orderNumber}`,
+        archivedAt: null,
+        archiveReason: null,
       },
     });
     return;
@@ -192,6 +201,8 @@ export async function syncOrderFinance(
       orderId: order.id,
       reference: order.orderNumber,
       description: `Order receivable: ${order.orderNumber}`,
+      archivedAt: null,
+      archiveReason: null,
       createdById: input.createdById ?? null,
     },
     update: {
@@ -208,6 +219,8 @@ export async function syncOrderFinance(
       orderId: order.id,
       reference: order.orderNumber,
       description: `Order receivable: ${order.orderNumber}`,
+      archivedAt: null,
+      archiveReason: null,
     },
     select: { id: true },
   });
@@ -240,6 +253,8 @@ export async function syncOrderFinance(
       orderId: order.id,
       reference: order.orderNumber,
       description: `Partial payment: ${order.orderNumber}`,
+      archivedAt: null,
+      archiveReason: null,
       createdById: input.createdById ?? null,
     },
     update: {
@@ -258,6 +273,8 @@ export async function syncOrderFinance(
       orderId: order.id,
       reference: order.orderNumber,
       description: `Partial payment: ${order.orderNumber}`,
+      archivedAt: null,
+      archiveReason: null,
     },
   });
 }
@@ -289,20 +306,20 @@ export async function syncInventoryReceiptFinance(
     reference?: string | null;
     createdById?: string | null;
   },
-) {
+): Promise<string | null> {
   const amount = roundMoney(input.quantity * input.unitCost);
-  if (amount <= 0) return;
-  if (input.paymentMode === 'PAID' && !input.accountId) return;
+  if (amount <= 0) return null;
+  if (input.paymentMode === 'PAID' && !input.accountId) return null;
 
   const item = await tx.inventoryItem.findUnique({
     where: { id: input.inventoryItemId },
     select: { nameEn: true, nameAr: true, category: true, branchId: true },
   });
-  if (!item) return;
+  if (!item) return null;
 
   const isPaid = input.paymentMode === 'PAID';
   const importKey = RECEIPT_KEY(input.movementId);
-  await tx.financeEntry.upsert({
+  const entry = await tx.financeEntry.upsert({
     where: { importKey },
     create: {
       importKey,
@@ -336,5 +353,7 @@ export async function syncInventoryReceiptFinance(
       reference: input.reference ?? null,
       description: `Inventory purchase: ${item.nameEn || item.nameAr}`,
     },
+    select: { id: true },
   });
+  return entry.id;
 }

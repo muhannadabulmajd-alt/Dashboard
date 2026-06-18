@@ -586,7 +586,8 @@ model LedgerEntryLine {
   inventoryItemId String?
   unit            String               @default("unit")
   quantity        Decimal              @db.Decimal(14, 3)
-  unitCost        Decimal              @db.Decimal(14, 3) // minor units IQD per unit
+  unitCost        Decimal              @db.Decimal(14, 3) // entered base price in minor IQD per unit
+  landedUnitCost  Decimal              @db.Decimal(14, 3) // final line total / quantity after discount and extras
   discountAmount  Int                  @default(0)
   extraAmount     Int                  @default(0)
   lineTotal       Int
@@ -597,6 +598,7 @@ model LedgerEntryLine {
   financeEntry  FinanceEntry   @relation(fields: [financeEntryId], references: [id], onDelete: Cascade)
   inventoryItem InventoryItem? @relation(fields: [inventoryItemId], references: [id], onDelete: SetNull)
 
+  @@unique([financeEntryId, lineNo])
   @@index([financeEntryId])
   @@index([inventoryItemId])
   @@index([categoryType])
@@ -689,16 +691,17 @@ model Offer {
 /// value. `isSystem` rows have a locked code (rename label / reorder / hide,
 /// but never delete or recode) so metric logic keyed on codes stays intact.
 model ListOption {
-  id        String   @id @default(cuid())
-  listKey   String // 'channel','governorate','grind','roastLevel','orderStatus','fulfillment','customerSource', etc.
-  code      String // stored value / stable identifier
-  labelEn   String
-  labelAr   String
-  sortOrder Int      @default(0)
-  isActive  Boolean  @default(true)
-  isSystem  Boolean  @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         String   @id @default(cuid())
+  listKey    String // 'channel','governorate','grind','roastLevel','orderStatus','fulfillment','customerSource', etc.
+  code       String // stored value / stable identifier
+  labelEn    String
+  labelAr    String
+  sortOrder  Int      @default(0)
+  isActive   Boolean  @default(true)
+  isSystem   Boolean  @default(false)
+  metricRole String? // orderStatus only: OPEN | SALE | RETURN | CANCELED
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   @@unique([listKey, code])
   @@index([listKey, isActive, sortOrder])

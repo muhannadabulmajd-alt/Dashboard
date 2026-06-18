@@ -1,7 +1,6 @@
 import 'server-only';
 import type { Currency, PartyType, Prisma } from '@prisma/client';
 import { prisma } from '@/server/db/client';
-import { buildExpenseWhere, buildOrderLineWhere, buildOrderWhere } from '@/server/filters/where-builder';
 import { getExpenses } from '@/server/db/repositories/finance.repo';
 import { getOrders, getOrderLines } from '@/server/db/repositories/sales.repo';
 import { getUsdToIqd } from '@/server/settings';
@@ -9,6 +8,7 @@ import type { DashboardFilters } from '@/lib/filters';
 import { convertToIqd } from '@/lib/money';
 import type { ResolvedRange } from '@/lib/dates';
 import * as M from '@/lib/metrics';
+import { allocationTotal, classifyPurchase, type PurchaseAllocation } from '@/lib/metrics/purchases';
 
 type Scope = { branchId?: string };
 type LocalizedName = { en: string; ar: string };
@@ -54,6 +54,7 @@ export interface PnlReport {
   cogs: number;
   grossProfit: number;
   grossMarginPct: number;
+  directDeliveryCost: number;
   operatingExpenses: number;
   operatingProfit: number;
 }
@@ -75,6 +76,7 @@ export async function getPnlReport(
   const netSales = M.netSales(orders);
   const cogs = M.cogs(lines);
   const gross = M.grossMargin(netSales, cogs);
+  const directDeliveryCost = M.deliveryCostTotal(orders);
   const operatingExpenses = expenses.reduce((sum, e) => sum + toIqd(e.amount, e.currency, rate), 0);
   return {
     grossRevenue,
@@ -84,8 +86,9 @@ export async function getPnlReport(
     cogs,
     grossProfit: gross.amount,
     grossMarginPct: gross.pct,
+    directDeliveryCost,
     operatingExpenses,
-    operatingProfit: gross.amount - operatingExpenses,
+    operatingProfit: gross.amount - directDeliveryCost - operatingExpenses,
   };
 }
 
@@ -97,6 +100,7 @@ export type CashFlowBucketKey =
   | 'supplierPayments'
   | 'expensesPaid'
   | 'inventoryPurchasesPaid'
+  | 'fixedAssetPurchasesPaid'
   | 'ownerWithdrawals'
   | 'otherPayments'
   | 'transfersIn'
@@ -127,6 +131,27 @@ function addBucket(rows: CashFlowBucket[], key: CashFlowBucketKey, amount: numbe
   row.count += 1;
 }
 
+function addPurchaseCash(rows: CashFlowBucket[], paidAmount: number, allocation: PurchaseAllocation): void {
+  const total = allocationTotal(allocation);
+  if (total <= 0) {
+    addBucket(rows, 'otherPayments', paidAmount);
+    return;
+  }
+  const portions: [CashFlowBucketKey, number][] = [
+    ['expensesPaid', allocation.operatingExpense],
+    ['inventoryPurchasesPaid', allocation.inventory],
+    ['fixedAssetPurchasesPaid', allocation.fixedAsset],
+    ['otherPayments', allocation.unclassified],
+  ];
+  let assigned = 0;
+  const populated = portions.filter(([, value]) => value > 0);
+  populated.forEach(([key, value], index) => {
+    const amount = index === populated.length - 1 ? paidAmount - assigned : Math.round(paidAmount * value / total);
+    assigned += amount;
+    addBucket(rows, key, amount);
+  });
+}
+
 export async function getCashFlowReport(
   filters: DashboardFilters,
   scope: Scope,
@@ -155,6 +180,20 @@ export async function getCashFlowReport(
         accountId: true,
         toAccountId: true,
         settlesId: true,
+        categoryType: true,
+        ledgerLines: { select: { itemType: true, lineTotal: true, categoryType: true } },
+        fixedAsset: { select: { id: true } },
+        costLayers: { take: 1, select: { id: true } },
+        settles: {
+          select: {
+            type: true,
+            amount: true,
+            categoryType: true,
+            ledgerLines: { select: { itemType: true, lineTotal: true, categoryType: true } },
+            fixedAsset: { select: { id: true } },
+            costLayers: { take: 1, select: { id: true } },
+          },
+        },
       },
     }),
     getUsdToIqd(),
@@ -171,6 +210,7 @@ export async function getCashFlowReport(
     bucket('supplierPayments'),
     bucket('expensesPaid'),
     bucket('inventoryPurchasesPaid'),
+    bucket('fixedAssetPurchasesPaid'),
     bucket('ownerWithdrawals'),
     bucket('otherPayments'),
     bucket('transfersOut'),
@@ -187,8 +227,23 @@ export async function getCashFlowReport(
     else if (e.type === 'PAYMENT_IN') addBucket(cashIn, e.settlesId ? 'receivablesCollected' : 'otherIncome', amount);
     else if (e.type === 'CAPITAL_IN') addBucket(cashIn, 'capitalContributions', amount);
     else if (e.type === 'EXPENSE') addBucket(cashOut, 'expensesPaid', amount);
-    else if (e.type === 'PURCHASE') addBucket(cashOut, 'inventoryPurchasesPaid', amount);
-    else if (e.type === 'PAYMENT_OUT') addBucket(cashOut, e.settlesId ? 'supplierPayments' : 'otherPayments', amount);
+    else if (e.type === 'PURCHASE') {
+      addPurchaseCash(cashOut, amount, classifyPurchase({
+        amount: e.amount,
+        categoryType: e.categoryType,
+        ledgerLines: e.ledgerLines,
+        hasFixedAsset: Boolean(e.fixedAsset),
+        hasInventoryLayer: e.costLayers.length > 0,
+      }));
+    } else if (e.type === 'PAYMENT_OUT' && e.settles?.type === 'PURCHASE') {
+      addPurchaseCash(cashOut, amount, classifyPurchase({
+        amount: e.settles.amount,
+        categoryType: e.settles.categoryType,
+        ledgerLines: e.settles.ledgerLines,
+        hasFixedAsset: Boolean(e.settles.fixedAsset),
+        hasInventoryLayer: e.settles.costLayers.length > 0,
+      }));
+    } else if (e.type === 'PAYMENT_OUT') addBucket(cashOut, e.settlesId ? 'supplierPayments' : 'otherPayments', amount);
     else if (e.type === 'DRAWING') addBucket(cashOut, 'ownerWithdrawals', amount);
   }
 
@@ -278,6 +333,7 @@ export interface BranchProfitabilityRow {
   grossRevenue: number;
   discounts: number;
   refunds: number;
+  directDeliveryCost: number;
   netSales: number;
   cogs: number;
   grossProfit: number;
@@ -294,6 +350,7 @@ function makeBranchRow(branchId: string | null, branchName: LocalizedName): Bran
     grossRevenue: 0,
     discounts: 0,
     refunds: 0,
+    directDeliveryCost: 0,
     netSales: 0,
     cogs: 0,
     grossProfit: 0,
@@ -308,41 +365,11 @@ export async function getBranchProfitabilityReport(
   scope: Scope,
   range: ResolvedRange,
 ): Promise<BranchProfitabilityRow[]> {
-  const [branches, orders, lines, expenseRows, financeRows, rate] = await Promise.all([
+  const [branches, orders, lines, expenses, rate] = await Promise.all([
     prisma.branch.findMany({ where: branchEntityWhere(filters, scope), select: { id: true, nameEn: true, nameAr: true } }),
-    prisma.order.findMany({
-      where: buildOrderWhere(filters, scope, range),
-      select: {
-        branchId: true,
-        status: true,
-        grossAmount: true,
-        discountAmount: true,
-        refundAmount: true,
-      },
-    }),
-    prisma.orderLine.findMany({
-      where: buildOrderLineWhere(filters, scope, range),
-      select: {
-        quantity: true,
-        unitCogsSnapshot: true,
-        order: { select: { branchId: true } },
-      },
-    }),
-    prisma.expense.findMany({
-      where: buildExpenseWhere(filters, scope, range),
-      select: { amount: true, currency: true, branchId: true },
-    }),
-    prisma.financeEntry.findMany({
-      where: {
-        type: { in: ['EXPENSE', 'PURCHASE'] },
-        date: { gte: range.start, lte: range.end },
-        archivedAt: null,
-        reversedAt: null,
-        reversalOfId: null,
-        ...branchEntryWhere(filters, scope),
-      },
-      select: { amount: true, currency: true, branchId: true },
-    }),
+    getOrders(filters, scope, range),
+    getOrderLines(filters, scope, range),
+    getExpenses(filters, scope, range),
     getUsdToIqd(),
   ]);
 
@@ -360,29 +387,27 @@ export async function getBranchProfitabilityReport(
 
   for (const order of orders) {
     if (!M.isSalesOrder(order)) continue;
-    const row = ensureRow(order.branchId);
+    const row = ensureRow(order.branchId ?? null);
     row.orders += 1;
     row.grossRevenue += order.grossAmount;
     row.discounts += order.discountAmount;
     row.refunds += order.refundAmount;
+    row.directDeliveryCost += order.deliveryCost;
     row.netSales += order.grossAmount - order.discountAmount - order.refundAmount;
   }
 
   for (const line of lines) {
-    ensureRow(line.order.branchId).cogs += line.unitCogsSnapshot * line.quantity;
+    ensureRow(line.branchId ?? null).cogs += line.unitCogsSnapshot * line.quantity;
   }
 
-  for (const expense of expenseRows) {
-    ensureRow(expense.branchId).operatingExpenses += toIqd(expense.amount, expense.currency, rate);
-  }
-  for (const entry of financeRows) {
-    ensureRow(entry.branchId).operatingExpenses += toIqd(entry.amount, entry.currency, rate);
+  for (const expense of expenses) {
+    ensureRow(expense.branchId ?? null).operatingExpenses += toIqd(expense.amount, expense.currency, rate);
   }
 
   return [...rows.values()]
     .map((row) => {
       const grossProfit = row.netSales - row.cogs;
-      const operatingProfit = grossProfit - row.operatingExpenses;
+      const operatingProfit = grossProfit - row.directDeliveryCost - row.operatingExpenses;
       return {
         ...row,
         grossProfit,
@@ -454,6 +479,7 @@ export async function getPartyStatementsReport(
         entries: {
           where: {
             date: { lte: range.end },
+            archivedAt: null,
             reversedAt: null,
             reversalOfId: null,
             ...branchEntryWhere(filters, scope),

@@ -29,11 +29,11 @@ export function expensesByCategory(
  * Operating profit / cash position = gross margin - operating expenses.
  * Negative values represent cash burn.
  */
-export function operatingProfit(grossMarginValue: number, operatingExpensesValue: number): number {
-  return grossMarginValue - operatingExpensesValue;
+export function operatingProfit(grossMarginValue: number, operatingExpensesValue: number, directCosts = 0): number {
+  return grossMarginValue - operatingExpensesValue - directCosts;
 }
 
 /** Cash burn as a positive number when the business is consuming cash. */
-export function cashBurn(grossMarginValue: number, operatingExpensesValue: number): number {
-  return operatingExpensesValue - grossMarginValue;
+export function cashBurn(grossMarginValue: number, operatingExpensesValue: number, directCosts = 0): number {
+  return operatingExpensesValue + directCosts - grossMarginValue;
 }

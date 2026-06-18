@@ -51,7 +51,9 @@ export async function buildDeckData(
   const showFinancial = can(user.role, 'view:financial');
   const L = 'en' as const;
 
-  const [orders, prevOrders, lines, items, expenses, shipments, customers] = await Promise.all([
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const [orders, prevOrders, lines, items, expenses, shipments, customers, mtdOrders] = await Promise.all([
     getOrders(filters, scope, range),
     getPrevOrders(filters, scope, range),
     getOrderLines(filters, scope, range),
@@ -59,6 +61,7 @@ export async function buildDeckData(
     showFinancial ? getExpenses(filters, scope, range) : Promise.resolve([]),
     getShipments(filters, scope, range),
     getCustomers(scope),
+    getOrders(filters, scope, { start: monthStart, end: now }),
   ]);
 
   const net = M.netSales(orders);
@@ -68,7 +71,7 @@ export async function buildDeckData(
   const cogs = M.cogs(lines);
   const margin = M.grossMargin(net, cogs);
   const opex = M.operatingExpenses(expenses, 'IQD');
-  const profit = M.operatingProfit(margin.amount, opex);
+  const profit = M.operatingProfit(margin.amount, opex, M.deliveryCostTotal(orders));
   const { dayOfMonth, daysInMonth } = monthProgress();
 
   const pct = (n: number, p: number) => {
@@ -85,8 +88,8 @@ export async function buildDeckData(
   if (showFinancial) {
     executive.push(
       { label: 'Gross margin', value: formatPercent(margin.pct, L) },
-      { label: 'Net cash', value: formatMoney(profit, 'IQD', L) },
-      { label: 'Run rate', value: formatMoney(M.runRate(net, dayOfMonth, daysInMonth), 'IQD', L) },
+      { label: 'Operating profit', value: formatMoney(profit, 'IQD', L) },
+      { label: 'Projected month sales', value: formatMoney(M.runRate(M.netSales(mtdOrders), dayOfMonth, daysInMonth), 'IQD', L) },
     );
   }
 

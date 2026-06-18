@@ -84,12 +84,13 @@ export function buildOrderLineWhere(
   filters: DashboardFilters,
   scope: { branchId?: string },
   range = rangeFor(filters),
+  saleStatuses: string[] = ['COMPLETED'],
 ): Prisma.OrderLineWhereInput {
   return {
     ...productLineConstraint(filters),
     order: {
       ...orderScalarWhere(filters, range, scope),
-      status: { notIn: ['CANCELLED', 'PENDING'] },
+      status: { in: saleStatuses },
     },
   };
 }

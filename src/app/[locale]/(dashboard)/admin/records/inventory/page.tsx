@@ -29,7 +29,7 @@ export default async function InventoryRecordsPage({
 
   const currentStock = (it: (typeof items)[number]) => it.movements.reduce((s, m) => s + decimalNumber(m.quantity), 0);
   const stockValue = items.reduce((s, it) => s + currentStock(it) * decimalNumber(it.unitCost), 0);
-  const reorderCount = items.filter((it) => it.reorderPoint != null && currentStock(it) < decimalNumber(it.reorderPoint)).length;
+  const reorderCount = items.filter((it) => it.reorderPoint != null && currentStock(it) <= decimalNumber(it.reorderPoint)).length;
   const stats: SummaryStat[] = [
     { label: t('k.total'), value: formatNumber(items.length, locale) },
     { label: t('k.stockValue'), value: formatMoney(stockValue, 'IQD', locale) },

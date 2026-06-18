@@ -1,4 +1,5 @@
 import type { OfferOrderLike } from './types';
+import { isSalesOrder } from './sales';
 
 export interface OfferStat {
   offerId: string;
@@ -21,7 +22,7 @@ export function offerPerformance(
     { orders: number; revenue: number; discount: number; newCusts: Set<string> }
   >();
   for (const o of orders) {
-    if (!o.offerId || o.status === 'CANCELLED' || o.status === 'PENDING') continue;
+    if (!o.offerId || !isSalesOrder(o)) continue;
     const e = map.get(o.offerId) ?? { orders: 0, revenue: 0, discount: 0, newCusts: new Set<string>() };
     e.orders += 1;
     e.revenue += o.grossAmount - o.discountAmount - o.refundAmount;

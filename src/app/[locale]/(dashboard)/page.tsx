@@ -30,13 +30,16 @@ export default async function ExecutiveOverviewPage({
   const tc = await getTranslations('common');
   const ta = await getTranslations('alerts');
 
-  const [orders, prevOrders, lines, items, expenses, catalog] = await Promise.all([
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const [orders, prevOrders, lines, items, expenses, catalog, mtdOrders] = await Promise.all([
     getOrders(filters, scope, range),
     getPrevOrders(filters, scope, range),
     getOrderLines(filters, scope, range),
     getInventoryItems(filters, scope, range),
     getExpenses(filters, scope, range),
     getCatalogForAlerts(),
+    getOrders(filters, scope, { start: monthStart, end: now }),
   ]);
 
   const showFinancial = can(user.role, 'view:financial');
@@ -50,9 +53,9 @@ export default async function ExecutiveOverviewPage({
   const margin = M.grossMargin(net, cogs);
   const aov = M.aov(net, orderCount);
   const opex = M.operatingExpenses(expenses, 'IQD');
-  const cash = M.operatingProfit(margin.amount, opex);
+  const cash = M.operatingProfit(margin.amount, opex, M.deliveryCostTotal(orders));
   const { dayOfMonth, daysInMonth } = monthProgress();
-  const runRate = M.runRate(net, dayOfMonth, daysInMonth);
+  const runRate = M.runRate(M.netSales(mtdOrders), dayOfMonth, daysInMonth);
 
   const trend = M.salesTimeSeries(orders, 'day').map((p) => ({ label: p.label.slice(5), value: p.netSales }));
   const byChannel = M.salesByDimension(orders, 'channel').map((b) => ({

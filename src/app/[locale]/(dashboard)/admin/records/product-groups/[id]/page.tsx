@@ -6,7 +6,7 @@ import { prisma } from '@/server/db/client';
 import { enumLabel } from '@/lib/enums';
 import { formatMoney, formatNumber, formatPercent } from '@/lib/money';
 import { formatDateTime } from '@/lib/dates';
-import { grossMargin } from '@/lib/metrics';
+import { allocateInteger, grossMargin } from '@/lib/metrics';
 import { Badge, PageHeader } from '@/components/ui/primitives';
 import { KpiCard } from '@/components/kpi/KpiCard';
 import { BackLink, DetailGrid, type DetailField } from '@/components/records/parts';
@@ -15,6 +15,7 @@ import { RecordActions } from '@/components/records/RecordActions';
 import { RecordTabs } from '@/components/records/RecordTabs';
 import { archiveProductGroup, deleteProductGroup } from '@/server/records/product-groups';
 import { Link } from '@/i18n/navigation';
+import { getOrderStatusRoleMap } from '@/server/lists/resolver';
 
 type Tab = 'overview' | 'variations' | 'reports' | 'activity';
 
@@ -40,12 +41,27 @@ export default async function ProductGroupDetailPage({
 
   const name = locale === 'ar' ? g.nameAr : g.nameEn;
   const variationIds = g.products.map((p) => p.id);
+  const statusRoles = await getOrderStatusRoleMap();
+  const saleStatuses = [...statusRoles].filter(([, role]) => role === 'SALE').map(([code]) => code);
 
   // Sales rollup across this main product's variations (overview + reports).
   const lines = variationIds.length
     ? await prisma.orderLine.findMany({
-        where: { productId: { in: variationIds } },
-        select: { productId: true, quantity: true, lineNet: true, unitCogsSnapshot: true },
+        where: { productId: { in: variationIds }, order: { status: { in: saleStatuses } } },
+        select: {
+          id: true,
+          productId: true,
+          quantity: true,
+          unitCogsSnapshot: true,
+          order: {
+            select: {
+              grossAmount: true,
+              discountAmount: true,
+              refundAmount: true,
+              lines: { select: { id: true, lineNet: true }, orderBy: { id: 'asc' } },
+            },
+          },
+        },
         take: 20_000,
       })
     : [];
@@ -54,13 +70,16 @@ export default async function ProductGroupDetailPage({
   let totalRevenue = 0;
   let totalCogs = 0;
   for (const l of lines) {
+    const net = Math.max(0, l.order.grossAmount - l.order.discountAmount - l.order.refundAmount);
+    const allocations = allocateInteger(net, l.order.lines.map((line) => line.lineNet));
+    const lineRevenue = allocations[l.order.lines.findIndex((line) => line.id === l.id)] ?? 0;
     const row = byVar.get(l.productId) ?? { units: 0, revenue: 0, cogs: 0 };
     row.units += l.quantity;
-    row.revenue += l.lineNet;
+    row.revenue += lineRevenue;
     row.cogs += l.unitCogsSnapshot * l.quantity;
     byVar.set(l.productId, row);
     totalUnits += l.quantity;
-    totalRevenue += l.lineNet;
+    totalRevenue += lineRevenue;
     totalCogs += l.unitCogsSnapshot * l.quantity;
   }
   const gm = grossMargin(totalRevenue, totalCogs);

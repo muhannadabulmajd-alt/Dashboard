@@ -114,12 +114,26 @@ export interface StockRow {
 /** Compute a stock row (current level, coverage, reorder flag, value) per item. */
 export function stockRow(item: InventoryItemLike): StockRow {
   const current = currentStock(item.movements);
+  const layers = item.costLayers ?? [];
+  const firstLayerAt = layers.length
+    ? Math.min(...layers.map((layer) => layer.receivedAt.getTime()))
+    : null;
+  const consumedSinceLayers = firstLayerAt == null
+    ? 0
+    : -item.movements
+        .filter((movement) => movement.quantity < 0 && movement.occurredAt.getTime() >= firstLayerAt)
+        .reduce((sum, movement) => sum + movement.quantity, 0);
+  const fifo = fifoStatus(layers, consumedSinceLayers);
+  const preFifoRemaining = Math.max(0, current - fifo.totalRemaining);
+  const value = layers.length
+    ? fifo.value + preFifoRemaining * (item.unitCost ?? fifo.activeCost ?? 0)
+    : (item.unitCost ?? 0) * current;
   return {
     item,
     current,
     coverageDays: coverageDays(current, item.avgDailyUsage),
     belowReorder: item.reorderPoint != null && current <= item.reorderPoint,
-    value: (item.unitCost ?? 0) * current,
+    value,
   };
 }
 
@@ -146,14 +160,20 @@ export function nearExpiry(
   const rows: ExpiryRow[] = [];
   const horizon = now.getTime() + withinDays * 86_400_000;
   for (const item of items) {
-    for (const m of item.movements) {
-      if (m.quantity > 0 && m.expiryDate) {
+    const ordered = [...item.movements].sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime());
+    let consumed = -ordered.filter((movement) => movement.quantity < 0).reduce((sum, movement) => sum + movement.quantity, 0);
+    for (const m of ordered) {
+      if (m.quantity > 0) {
+        const used = Math.min(m.quantity, consumed);
+        consumed -= used;
+        const remaining = m.quantity - used;
+        if (remaining <= 0 || !m.expiryDate) continue;
         const t = m.expiryDate.getTime();
         if (t <= horizon) {
           rows.push({
             item,
             expiryDate: m.expiryDate,
-            quantity: m.quantity,
+            quantity: remaining,
             daysToExpiry: Math.round((t - now.getTime()) / 86_400_000),
           });
         }
@@ -168,7 +188,7 @@ export function stockValueByCategory(
 ): { category: InventoryCategory; value: number }[] {
   const map = new Map<InventoryCategory, number>();
   for (const item of items) {
-    const value = (item.unitCost ?? 0) * currentStock(item.movements);
+    const value = stockRow(item).value;
     map.set(item.category, (map.get(item.category) ?? 0) + value);
   }
   return [...map.entries()]

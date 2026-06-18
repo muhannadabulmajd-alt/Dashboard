@@ -8,10 +8,27 @@ import type {
   ProductRank,
   OrderStatus,
 } from './types';
+import { isCompletedSaleStatus } from './status';
 
 /** Orders that represent real sales (placed & paid). Cancelled/pending excluded. */
-export function isSalesOrder(o: { status: OrderStatus }): boolean {
-  return o.status !== 'CANCELLED' && o.status !== 'PENDING';
+export function isSalesOrder(o: { status: OrderStatus; metricRole?: string }): boolean {
+  return o.metricRole ? o.metricRole === 'SALE' : isCompletedSaleStatus(o.status);
+}
+
+/** Largest-remainder integer allocation. Output always sums exactly to total. */
+export function allocateInteger(total: number, weights: number[]): number[] {
+  if (!weights.length) return [];
+  const clean = weights.map((weight) => Math.max(0, weight));
+  const weightTotal = clean.reduce((sum, weight) => sum + weight, 0);
+  if (weightTotal <= 0) return clean.map((_, index) => (index === clean.length - 1 ? total : 0));
+  const exact = clean.map((weight) => total * weight / weightTotal);
+  const result = exact.map(Math.floor);
+  const remainder = total - result.reduce((sum, value) => sum + value, 0);
+  const order = exact
+    .map((value, index) => ({ index, fraction: value - Math.floor(value) }))
+    .sort((a, b) => b.fraction - a.fraction || a.index - b.index);
+  for (let i = 0; i < remainder; i++) result[order[i % order.length].index] += 1;
+  return result;
 }
 
 export function grossSales(orders: OrderLike[]): number {
@@ -37,9 +54,9 @@ export function deliveryCostTotal(orders: OrderLike[]): number {
   return orders.filter(isSalesOrder).reduce((s, o) => s + o.deliveryCost, 0);
 }
 
-/** Completed (paid) order count. */
+/** Count of statuses explicitly mapped as completed sales. */
 export function completedOrderCount(orders: OrderLike[]): number {
-  return orders.filter((o) => o.status === 'COMPLETED').length;
+  return orders.filter(isSalesOrder).length;
 }
 
 /**

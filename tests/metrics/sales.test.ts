@@ -16,6 +16,7 @@ import {
   topProducts,
   slowMovers,
   preferenceBy,
+  allocateInteger,
 } from '@/lib/metrics/sales';
 import { makeOrder, makeLine, makeProduct } from '../fixtures/builders';
 
@@ -27,28 +28,29 @@ describe('sales metrics', () => {
     makeOrder({ grossAmount: 40_000, refundAmount: 40_000, status: 'RETURNED', channel: 'ONLINE_STORE' }),
   ];
 
-  it('grossSales excludes cancelled orders', () => {
-    expect(grossSales(orders)).toBe(190_000); // 100k + 50k + 40k
+  it('grossSales includes completed sales only', () => {
+    expect(grossSales(orders)).toBe(150_000);
   });
 
   it('netSales subtracts discounts and refunds', () => {
-    expect(netSales(orders)).toBe(140_000); // 90k + 50k + 0
+    expect(netSales(orders)).toBe(140_000);
   });
 
   it('discountTotal sums discounts of sales orders', () => {
     expect(discountTotal(orders)).toBe(10_000);
   });
 
-  it('completedOrderCount counts only COMPLETED', () => {
+  it('completedOrderCount counts statuses mapped as sales', () => {
     expect(completedOrderCount(orders)).toBe(2);
+    expect(completedOrderCount([...orders, makeOrder({ status: 'CUSTOM', metricRole: 'SALE' })])).toBe(3);
   });
 
-  it('salesOrderCount counts all real sales orders (incl. returned), excludes cancelled', () => {
-    expect(salesOrderCount(orders)).toBe(3); // 2 completed + 1 returned; cancelled excluded
+  it('salesOrderCount counts completed sales only', () => {
+    expect(salesOrderCount(orders)).toBe(2);
   });
 
   it('orderCompletionRate = completed / sales orders', () => {
-    expect(orderCompletionRate(orders)).toBeCloseTo(2 / 3, 6);
+    expect(orderCompletionRate(orders)).toBe(1);
   });
 
   it('aov and avgUnitPrice handle zero denominators', () => {
@@ -70,11 +72,22 @@ describe('sales metrics', () => {
     const byChannel = salesByDimension(orders, 'channel');
     const online = byChannel.find((b) => b.key === 'ONLINE_STORE')!;
     const pos = byChannel.find((b) => b.key === 'POS')!;
-    expect(online.netSales).toBe(90_000); // 90k + 0
-    expect(online.orders).toBe(2);
+    expect(online.netSales).toBe(90_000);
+    expect(online.orders).toBe(1);
     expect(pos.netSales).toBe(50_000);
     // sorted descending by net sales
     expect(byChannel[0].key).toBe('ONLINE_STORE');
+  });
+
+  it('allocates integer totals exactly and deterministically', () => {
+    const allocated = allocateInteger(100, [1, 1, 1]);
+    expect(allocated).toEqual([34, 33, 33]);
+    expect(allocated.reduce((sum, value) => sum + value, 0)).toBe(100);
+  });
+
+  it('excludes unknown managed statuses until they receive a metric role', () => {
+    expect(netSales([makeOrder({ status: 'CUSTOM_STATUS', grossAmount: 99_000 })])).toBe(0);
+    expect(netSales([makeOrder({ status: 'CUSTOM_STATUS', metricRole: 'SALE', grossAmount: 99_000 })])).toBe(99_000);
   });
 
   it('salesByGroup rolls variations up to their parent group', () => {

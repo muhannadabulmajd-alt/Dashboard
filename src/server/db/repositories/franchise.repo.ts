@@ -1,6 +1,6 @@
 import 'server-only';
 import { prisma } from '../client';
-import { buildOrderLineWhere } from '@/server/filters/where-builder';
+import { getOrderLines } from './sales.repo';
 import type { DashboardFilters } from '@/lib/filters';
 import type { ResolvedRange } from '@/lib/dates';
 
@@ -27,33 +27,32 @@ export async function getBranchPerformance(
   range: ResolvedRange,
 ): Promise<BranchPerf[]> {
   const branches = await prisma.branch.findMany({
-    where: { isActive: true, ...(scope.branchId ? { id: scope.branchId } : {}) },
+    where: {
+      isActive: true,
+      ...(scope.branchId
+        ? { id: scope.branchId }
+        : filters.branchId?.length
+          ? { id: { in: filters.branchId } }
+          : {}),
+    },
     select: { id: true, code: true, nameEn: true, nameAr: true, isFranchise: true },
   });
 
-  const lines = await prisma.orderLine.findMany({
-    where: buildOrderLineWhere(filters, scope, range),
-    select: {
-      quantity: true,
-      lineNet: true,
-      unitCogsSnapshot: true,
-      order: { select: { id: true, branchId: true, customerId: true } },
-    },
-  });
+  const lines = await getOrderLines(filters, scope, range);
 
   const agg = new Map<
     string,
     { net: number; cogs: number; units: number; orders: Set<string>; customers: Set<string> }
   >();
   for (const l of lines) {
-    const bId = l.order.branchId;
+    const bId = l.branchId;
     if (!bId) continue;
     const e = agg.get(bId) ?? { net: 0, cogs: 0, units: 0, orders: new Set(), customers: new Set() };
     e.net += l.lineNet;
     e.cogs += l.unitCogsSnapshot * l.quantity;
     e.units += l.quantity;
-    e.orders.add(l.order.id);
-    if (l.order.customerId) e.customers.add(l.order.customerId);
+    if (l.orderId) e.orders.add(l.orderId);
+    if (l.customerId) e.customers.add(l.customerId);
     agg.set(bId, e);
   }
 

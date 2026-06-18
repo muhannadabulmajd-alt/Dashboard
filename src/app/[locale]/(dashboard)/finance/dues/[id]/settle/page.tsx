@@ -23,7 +23,7 @@ export default async function SettlePage({
 
   const ob = await prisma.financeEntry.findUnique({
     where: { id },
-    include: { party: true, settlements: { where: { reversedAt: null, reversalOfId: null }, select: { amount: true } } },
+    include: { party: true, settlements: { where: { archivedAt: null, reversedAt: null, reversalOfId: null }, select: { amount: true } } },
   });
   if (!ob || ob.reversedAt || ob.reversalOfId || !ob.obligation) notFound();
 

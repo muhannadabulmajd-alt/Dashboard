@@ -22,8 +22,11 @@ export type RoastLevel = string;
 
 export interface OrderLike {
   id: string;
+  branchId?: string | null;
+  offerId?: string | null;
   placedAt: Date;
   status: OrderStatus;
+  metricRole?: 'OPEN' | 'SALE' | 'RETURN' | 'CANCELED' | 'UNKNOWN';
   channel: Channel;
   governorate: Governorate;
   customerId: string | null;
@@ -58,6 +61,9 @@ export interface OrderLineLike {
 }
 
 export interface OrderLineWithProduct extends OrderLineLike {
+  orderId?: string;
+  branchId?: string | null;
+  customerId?: string | null;
   product: ProductLite;
 }
 
@@ -78,6 +84,7 @@ export interface InventoryItemLike {
   avgDailyUsage: number | null;
   unitCost: number | null;
   movements: MovementLike[];
+  costLayers?: { id: string; qtyReceived: number; unitCost: number; receivedAt: Date }[];
 }
 
 export interface BatchLike {
@@ -92,6 +99,7 @@ export interface ExpenseLike {
   currency: Currency;
   incurredAt: Date;
   categoryType: ExpenseCategoryType;
+  branchId?: string | null;
 }
 
 export interface CustomerLike {
@@ -117,6 +125,7 @@ export interface OfferOrderLike {
   offerId: string | null;
   customerId: string | null;
   status: OrderStatus;
+  metricRole?: 'OPEN' | 'SALE' | 'RETURN' | 'CANCELED' | 'UNKNOWN';
   grossAmount: number;
   discountAmount: number;
   refundAmount: number;
