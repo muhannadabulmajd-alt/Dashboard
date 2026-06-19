@@ -15,6 +15,7 @@ import { monthProgress, resolveRange } from '@/lib/dates';
 import { KpiCard } from '@/components/kpi/KpiCard';
 import { LineChartCard, BarChartCard } from '@/components/charts/Charts';
 import { Card, CardContent, CardHeader, CardTitle, Badge, PageHeader } from '@/components/ui/primitives';
+import { ShareholderReportMenu } from '@/components/reports/ShareholderReportMenu';
 
 export default async function ExecutiveOverviewPage({
   params,
@@ -110,15 +111,15 @@ export default async function ExecutiveOverviewPage({
     <>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <PageHeader title={t('title')} subtitle={t('subtitle')} />
-        {can(user.role, 'export:data') ? (
-          <a
-            href={`/api/reports/deck?${deckQuery}`}
-            className="inline-flex items-center gap-1.5 rounded-lg border bg-card px-3 py-1.5 text-xs font-medium hover:bg-muted"
-          >
+        {can(user.role, 'export:data') ? <div className="flex flex-wrap items-center gap-2">
+          {['OWNER', 'ADMIN'].includes(user.role) && can(user.role, 'export:financial') ? (
+            <ShareholderReportMenu locale={locale} label={tc('shareholderReport')} />
+          ) : null}
+          <a href={`/api/reports/deck?${deckQuery}`} className="inline-flex items-center gap-1.5 rounded-lg border bg-card px-3 py-1.5 text-xs font-medium hover:bg-muted">
             <FileDown className="size-3.5" />
             {tc('downloadDeck')}
           </a>
-        ) : null}
+        </div> : null}
       </div>
 
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">

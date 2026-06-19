@@ -756,7 +756,8 @@
     "arabic": "العربية",
     "english": "English",
     "selected": "{count} محدد",
-    "downloadDeck": "تنزيل العرض (PDF)"
+    "downloadDeck": "تنزيل العرض (PDF)",
+    "shareholderReport": "إنشاء تقرير المساهمين"
   },
   "login": {
     "title": "تسجيل الدخول",

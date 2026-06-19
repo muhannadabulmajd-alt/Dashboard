@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import { buildShareholderReportData } from '../src/server/reports/shareholder-data';
 
 const prisma = new PrismaClient();
 
@@ -24,6 +25,18 @@ async function main(): Promise<void> {
       ) mismatches
     `,
   });
+
+  const report = await buildShareholderReportData({ db: prisma });
+  for (const result of report.checks) {
+    if (result.status === 'WARNING') continue;
+    checks.push({
+      name: `shareholder report: ${result.key}`,
+      failures: result.status === 'PASS' ? 0 : result.affectedRecords.length || 1,
+    });
+  }
+
+  console.log(`SNAPSHOT shareholder report: ${report.snapshotHash}`);
+  console.log(`BASELINE ${JSON.stringify(report.baseline)}`);
 
   checks.push({
     name: 'ledger record classifications',

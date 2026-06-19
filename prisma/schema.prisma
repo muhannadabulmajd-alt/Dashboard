@@ -913,6 +913,7 @@ model Party {
 
 model FinanceEntry {
   id             String               @id @default(cuid())
+  recordKey      String?              @unique // immutable Atlas spending key, e.g. DOC000169
   date           DateTime
   type           FinanceType
   recordClass    LedgerRecordClass?

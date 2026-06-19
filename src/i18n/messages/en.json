@@ -756,7 +756,8 @@
     "arabic": "العربية",
     "english": "English",
     "selected": "{count} selected",
-    "downloadDeck": "Download deck (PDF)"
+    "downloadDeck": "Download deck (PDF)",
+    "shareholderReport": "Generate shareholder report"
   },
   "login": {
     "title": "Sign in",
