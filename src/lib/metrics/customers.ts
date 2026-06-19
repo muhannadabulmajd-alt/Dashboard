@@ -1,9 +1,10 @@
 import type { CustomerSegment } from '@prisma/client';
 import type { OrderLike, CustomerLike, OrderStatus } from './types';
 import { isSalesOrder } from './sales';
+import { monthBucketKey } from '@/lib/dates';
 
 function monthKey(d: Date): string {
-  return d.toISOString().slice(0, 7);
+  return monthBucketKey(d);
 }
 function addMonthKey(key: string, offset: number): string {
   const [y, m] = key.split('-').map(Number);
@@ -56,7 +57,7 @@ export function frequencySegmentCounts(
 
 /** Share of customers whose first order is in the window who reorder within `windowDays`. */
 export function firstToSecondConversion(
-  orders: { customerId: string | null; placedAt: Date; status: OrderStatus }[],
+  orders: { customerId: string | null; placedAt: Date; status: OrderStatus; metricRole?: string }[],
   start: Date,
   end: Date,
   windowDays: number,
@@ -90,7 +91,7 @@ export interface CohortRow {
 
 /** Monthly cohort retention from full order history (ignores the date filter). */
 export function cohortRetention(
-  orders: { customerId: string | null; placedAt: Date; status: OrderStatus }[],
+  orders: { customerId: string | null; placedAt: Date; status: OrderStatus; metricRole?: string }[],
   maxMonths = 6,
 ): CohortRow[] {
   const firstByCust = new Map<string, Date>();

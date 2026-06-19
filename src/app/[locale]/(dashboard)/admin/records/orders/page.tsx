@@ -3,7 +3,7 @@ import type { Prisma } from '@prisma/client';
 import { getPageContext } from '@/server/page-context';
 import { prisma } from '@/server/db/client';
 import { enumLabel } from '@/lib/enums';
-import { getListOptions } from '@/server/lists/resolver';
+import { getListOptions, getOrderStatusRoleMap } from '@/server/lists/resolver';
 import { formatMoney, formatNumber } from '@/lib/money';
 import { invoicePaymentSnapshot, type InvoicePaymentStatus } from '@/lib/invoice';
 import { Badge, PageHeader } from '@/components/ui/primitives';
@@ -100,11 +100,14 @@ export default async function OrdersRecordsPage({
     ],
   };
 
-  // Summary covers ALL orders (independent of the table filter) via aggregates.
+  const statusRoles = await getOrderStatusRoleMap();
+  const saleStatuses = [...statusRoles].filter(([, role]) => role === 'SALE').map(([code]) => code);
+
+  // Summary covers all orders and follows the managed status-role contract.
   const [grouped, revenueAgg, total, orders] = await Promise.all([
     prisma.order.groupBy({ by: ['status'], _count: { _all: true } }),
     prisma.order.aggregate({
-      where: { status: { notIn: ['CANCELLED', 'PENDING'] } },
+      where: { status: { in: saleStatuses } },
       _sum: { grossAmount: true, discountAmount: true, refundAmount: true },
     }),
     prisma.order.count(),
@@ -135,14 +138,17 @@ export default async function OrdersRecordsPage({
   const customerName = (c: typeof orders[number]['customer']) =>
     (locale === 'ar' ? c?.nameAr : c?.nameEn) || c?.nameEn || c?.nameAr || c?.externalId || '—';
 
-  const statusCount = (s: string) => grouped.find((g) => g.status === s)?._count._all ?? 0;
+  const roleCount = (role: 'OPEN' | 'SALE' | 'RETURN' | 'CANCELED') => grouped.reduce(
+    (sum, group) => sum + (statusRoles.get(group.status) === role ? group._count._all : 0),
+    0,
+  );
   const netRevenue =
     (revenueAgg._sum.grossAmount ?? 0) - (revenueAgg._sum.discountAmount ?? 0) - (revenueAgg._sum.refundAmount ?? 0);
   const stats: SummaryStat[] = [
     { label: t('k.total'), value: formatNumber(total, locale) },
-    { label: enumLabel('COMPLETED', locale), value: formatNumber(statusCount('COMPLETED'), locale), tone: 'success' },
-    { label: enumLabel('PENDING', locale), value: formatNumber(statusCount('PENDING'), locale), tone: 'warning' },
-    { label: enumLabel('CANCELLED', locale), value: formatNumber(statusCount('CANCELLED'), locale), tone: 'danger' },
+    { label: enumLabel('COMPLETED', locale), value: formatNumber(roleCount('SALE'), locale), tone: 'success' },
+    { label: enumLabel('PENDING', locale), value: formatNumber(roleCount('OPEN'), locale), tone: 'warning' },
+    { label: enumLabel('CANCELLED', locale), value: formatNumber(roleCount('CANCELED'), locale), tone: 'danger' },
     { label: t('k.revenue'), value: formatMoney(netRevenue, 'IQD', locale) },
   ];
 

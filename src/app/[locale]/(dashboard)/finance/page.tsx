@@ -23,10 +23,10 @@ import { enumLabel } from '@/lib/enums';
 import { formatMoney, convertToIqd } from '@/lib/money';
 import { can } from '@/lib/rbac';
 import { accountBalance, netCash, unassignedCash, financeTotals, type FinanceEntryLike } from '@/lib/metrics/finance';
-import { cogs, grossMargin, netSales } from '@/lib/metrics';
+import { buildOperatingExpenseBreakdown, buildPnlSnapshot } from '@/lib/metrics';
 import { getUsdToIqd } from '@/server/settings';
 import { getOrders, getOrderLines } from '@/server/db/repositories/sales.repo';
-import { getExpenses } from '@/server/db/repositories/finance.repo';
+import { getOperatingExpenseFacts } from '@/server/db/repositories/finance.repo';
 import { getInventoryItems } from '@/server/db/repositories/inventory.repo';
 import { stockRow } from '@/lib/metrics/inventory';
 import { setUsdToIqd } from '@/server/finance/settings';
@@ -40,9 +40,6 @@ import type { ExpenseCategoryType } from '@prisma/client';
 
 type Vals = {
   cash: number;
-  capitalIn: number;
-  expenses: number;
-  received: number;
   cashIn: number;
   cashOut: number;
   payable: number;
@@ -78,7 +75,7 @@ export default async function FinancePage({
       ? { branchId: { in: filters.branchId } }
       : {};
   const [accounts, entriesRaw, orders, lines, inventoryItems, expenseRows] = await Promise.all([
-    prisma.financeAccount.findMany({ where: { isActive: true }, orderBy: { createdAt: 'asc' } }),
+    prisma.financeAccount.findMany({ where: { isActive: true, ...branchWhere }, orderBy: { createdAt: 'asc' } }),
     prisma.financeEntry.findMany({
       where: { archivedAt: null, reversedAt: null, reversalOfId: null, date: { lte: range.end }, ...branchWhere },
       select: {
@@ -90,7 +87,7 @@ export default async function FinancePage({
     getOrders(filters, scope, range),
     getOrderLines(filters, scope, range),
     getInventoryItems(filters, scope, range),
-    getExpenses(filters, scope, range),
+    getOperatingExpenseFacts(filters, scope, range),
   ]);
   const entries = entriesRaw as ChartEntry[];
 
@@ -105,9 +102,6 @@ export default async function FinancePage({
     const cash = netCash(ca, ce);
     const vals: Vals = {
       cash,
-      capitalIn: tot.capitalIn,
-      expenses: tot.expenses,
-      received: tot.received,
       cashIn: tot.cashIn,
       cashOut: tot.cashOut,
       payable: tot.outstandingPayable,
@@ -122,7 +116,7 @@ export default async function FinancePage({
       });
       return acc;
     },
-    { cash: 0, capitalIn: 0, expenses: 0, received: 0, cashIn: 0, cashOut: 0, payable: 0, receivable: 0 },
+    { cash: 0, cashIn: 0, cashOut: 0, payable: 0, receivable: 0 },
   );
   const iqd = (e: ChartEntry) => convertToIqd(e.amount, e.currency, rate);
   const accountBalanceIqd = (account: (typeof accounts)[number]) =>
@@ -134,11 +128,12 @@ export default async function FinancePage({
   const cashAccounts = accounts.filter((a) => a.type === 'CASH').reduce((s, a) => s + accountBalanceIqd(a), 0);
   const bankAccounts = accounts.filter((a) => a.type !== 'CASH').reduce((s, a) => s + accountBalanceIqd(a), 0);
   const totalAvailable = combined.cash;
-  const revenue = netSales(orders);
-  const costOfGoods = cogs(lines);
-  const gross = grossMargin(revenue, costOfGoods);
-  const operatingExpenses = expenseRows.reduce((sum, expense) => sum + convertToIqd(expense.amount, expense.currency, rate), 0);
-  const netProfit = gross.amount - operatingExpenses - orders.reduce((sum, order) => sum + order.deliveryCost, 0);
+  const pnl = buildPnlSnapshot(orders, lines, expenseRows);
+  const revenue = pnl.netSales;
+  const gross = { amount: pnl.grossProfit, pct: pnl.grossMarginPct };
+  const expenseBreakdown = buildOperatingExpenseBreakdown(expenseRows);
+  const operatingExpenses = pnl.operatingExpenses;
+  const netProfit = pnl.operatingProfit;
   const inventoryValue = inventoryItems.reduce((sum, item) => sum + stockRow(item).value, 0);
   const netCashMovement = combined.cashIn - combined.cashOut;
   const now = new Date();
@@ -161,7 +156,7 @@ export default async function FinancePage({
     .map((e) => Math.max(0, iqd(e) - (paidByObligation.get(e.id) ?? 0)))
     .filter((amount) => amount > 0);
   const largeExpenses = expenseRows
-    .map((expense) => convertToIqd(expense.amount, expense.currency, rate))
+    .map((expense) => expense.amount)
     .filter((amount) => amount >= 1_000_000)
     .sort((a, b) => b - a)
     .slice(0, 3);
@@ -223,32 +218,11 @@ export default async function FinancePage({
       : []),
   ];
 
-  // Charts (all converted to IQD at the rate).
-  const isSpend = (e: ChartEntry) => e.type === 'EXPENSE' || e.type === 'PURCHASE';
-  const spendByMonth = (() => {
-    const map = new Map<string, number>();
-    for (const e of entries.filter(isSpend)) {
-      const k = e.date.toISOString().slice(0, 7);
-      map.set(k, (map.get(k) ?? 0) + iqd(e));
-    }
-    return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([label, value]) => ({ label, value }));
-  })();
-  const spendByCategory = (() => {
-    const map = new Map<string, number>();
-    for (const e of entries.filter(isSpend)) {
-      const key = e.categoryType ? enumLabel(e.categoryType, locale) : '—';
-      map.set(key, (map.get(key) ?? 0) + iqd(e));
-    }
-    return [...map.entries()].map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
-  })();
-  const topParties = (() => {
-    const map = new Map<string, number>();
-    for (const e of entries.filter(isSpend)) {
-      if (!e.party?.name) continue;
-      map.set(e.party.name, (map.get(e.party.name) ?? 0) + iqd(e));
-    }
-    return [...map.entries()].map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value).slice(0, 8);
-  })();
+  // P&L charts use the same classified operating-expense facts as the KPI and
+  // reports. Inventory and fixed-asset purchases remain balance-sheet items.
+  const spendByMonth = expenseBreakdown.byMonth.map((row) => ({ label: row.key, value: row.amount }));
+  const spendByCategory = expenseBreakdown.byCategory.map((row) => ({ label: enumLabel(row.key, locale), value: row.amount }));
+  const topParties = expenseBreakdown.byParty.slice(0, 8).map((row) => ({ label: row.key, value: row.amount }));
 
   const overdueRisk = overdue.receivables + overdue.payables;
   const cockpitCards = [

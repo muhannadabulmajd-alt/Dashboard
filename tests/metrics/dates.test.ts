@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveRange, bucketKey, monthProgress } from '@/lib/dates';
+import { resolveRange, bucketKey, monthBucketKey, monthProgress } from '@/lib/dates';
 
 // Baghdad is UTC+3 (no DST). 10:00Z == 13:00 Baghdad on the same day.
 const NOW = new Date('2026-05-15T10:00:00.000Z');
@@ -48,5 +48,11 @@ describe('monthProgress', () => {
     const { dayOfMonth, daysInMonth } = monthProgress(NOW);
     expect(dayOfMonth).toBe(15);
     expect(daysInMonth).toBe(31);
+  });
+});
+
+describe('monthBucketKey', () => {
+  it('uses the Baghdad month at the UTC boundary', () => {
+    expect(monthBucketKey(new Date('2026-05-31T22:00:00Z'))).toBe('2026-06');
   });
 });

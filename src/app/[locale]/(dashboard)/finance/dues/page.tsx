@@ -2,7 +2,7 @@ import { getTranslations } from 'next-intl/server';
 import { getPageContext } from '@/server/page-context';
 import { prisma } from '@/server/db/client';
 import { enumLabel } from '@/lib/enums';
-import { formatMoney } from '@/lib/money';
+import { convertToIqd, formatMoney } from '@/lib/money';
 import { formatDate } from '@/lib/dates';
 import { agingBuckets, type AgingBuckets } from '@/lib/metrics/finance';
 import { can } from '@/lib/rbac';
@@ -12,6 +12,7 @@ import { RecordsSummary, type SummaryStat } from '@/components/records/Summary';
 import { BackLink } from '@/components/records/parts';
 import { SectionGuide } from '@/components/records/SectionGuide';
 import { Link } from '@/i18n/navigation';
+import { getUsdToIqd } from '@/server/settings';
 
 export default async function DuesPage({
   params,
@@ -20,26 +21,32 @@ export default async function DuesPage({
   params: Promise<{ locale: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { locale, user } = await getPageContext(params, searchParams, 'view:finance');
+  const { locale, user, filters, scope, range } = await getPageContext(params, searchParams, 'view:finance');
   const t = await getTranslations('finance');
   const tr = await getTranslations('records');
   const tc = await getTranslations('common');
   const canManage = can(user.role, 'manage:finance');
   const canExport = can(user.role, 'export:financial');
 
-  const obligations = await prisma.financeEntry.findMany({
-    where: { obligation: true, archivedAt: null, reversedAt: null, reversalOfId: null },
-    include: { party: { select: { name: true } }, settlements: { where: { archivedAt: null, reversedAt: null, reversalOfId: null }, select: { amount: true } } },
+  const branchWhere = scope.branchId
+    ? { branchId: scope.branchId }
+    : filters.branchId?.length
+      ? { branchId: { in: filters.branchId } }
+      : {};
+  const [obligations, rate] = await Promise.all([prisma.financeEntry.findMany({
+    where: { obligation: true, date: { lte: range.end }, archivedAt: null, reversedAt: null, reversalOfId: null, ...branchWhere },
+    include: { party: { select: { name: true } }, settlements: { where: { archivedAt: null, reversedAt: null, reversalOfId: null }, select: { amount: true, currency: true } } },
     orderBy: { dueDate: 'asc' },
-  });
+  }), getUsdToIqd()]);
   const now = new Date();
 
   const open = (kind: 'PAYABLE' | 'RECEIVABLE') =>
     obligations
       .filter((o) => o.obligationKind === kind)
       .map((o) => {
-        const paid = o.settlements.reduce((s, x) => s + x.amount, 0);
-        return { o, paid, outstanding: Math.max(0, o.amount - paid) };
+        const amount = convertToIqd(o.amount, o.currency, rate);
+        const paid = o.settlements.reduce((s, x) => s + convertToIqd(x.amount, x.currency, rate), 0);
+        return { o, amount, paid, outstanding: Math.max(0, amount - paid) };
       })
       .filter((x) => x.outstanding > 0);
 
@@ -68,14 +75,14 @@ export default async function DuesPage({
     { label: '', align: 'end' },
   ];
   const toRows = (items: ReturnType<typeof open>) =>
-    items.map(({ o, paid, outstanding }) => {
+    items.map(({ o, amount, paid, outstanding }) => {
       const overdue = o.dueDate ? o.dueDate < now : false;
       return [
         o.party?.name ?? '—',
         o.description ?? enumLabel(o.type, locale),
-        formatMoney(o.amount, o.currency, locale),
-        formatMoney(paid, o.currency, locale),
-        formatMoney(outstanding, o.currency, locale),
+        formatMoney(amount, 'IQD', locale),
+        formatMoney(paid, 'IQD', locale),
+        formatMoney(outstanding, 'IQD', locale),
         o.dueDate ? (
           <span key="d" className={overdue ? 'font-medium text-danger' : undefined}>
             {formatDate(o.dueDate, locale)}

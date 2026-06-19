@@ -9,6 +9,7 @@ import { KpiCard } from '@/components/kpi/KpiCard';
 import { DonutChartCard, BarChartCard } from '@/components/charts/Charts';
 import { DataTable } from '@/components/data-table/DataTable';
 import { PageHeader } from '@/components/ui/primitives';
+import { monthBucketKey } from '@/lib/dates';
 
 function monthIndex(key: string): number {
   const [y, m] = key.split('-').map(Number);
@@ -46,7 +47,7 @@ export default async function CustomersPage({
   const preferred = M.topProducts(lines, 10);
 
   // Cohort grid, blanking months that have not yet elapsed.
-  const nowIdx = monthIndex(new Date().toISOString().slice(0, 7));
+  const nowIdx = monthIndex(monthBucketKey(new Date()));
   const cohorts = M.cohortRetention(history, 6);
   const cohortCols = [
     { label: t('cohortMonth') },

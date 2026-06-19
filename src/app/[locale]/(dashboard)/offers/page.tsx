@@ -32,7 +32,13 @@ export default async function OffersPage({
 
   const revenue = stats.reduce((s, x) => s + x.revenue, 0);
   const discount = stats.reduce((s, x) => s + x.discountSpend, 0);
-  const newCustomers = stats.reduce((s, x) => s + x.newCustomers, 0);
+  const now = new Date();
+  const activeOffers = offers.filter((offer) => (!offer.startsAt || offer.startsAt <= now) && (!offer.endsAt || offer.endsAt >= now)).length;
+  const newCustomers = new Set(offerOrders.flatMap((order) => {
+    if (!M.isSalesOrder(order) || !order.customerId) return [];
+    const first = firstOrderById.get(order.customerId);
+    return first && first >= range.start && first <= range.end ? [order.customerId] : [];
+  })).size;
 
   const revBar = stats.map((s) => ({ label: offersById.get(s.offerId)?.name ?? s.offerId, value: s.revenue }));
 
@@ -63,7 +69,7 @@ export default async function OffersPage({
       <PageHeader title={t('title')} subtitle={t('subtitle')} />
 
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <KpiCard label={t('activeOffers')} value={formatNumber(stats.length, locale)} locale={locale} />
+        <KpiCard label={t('activeOffers')} value={formatNumber(activeOffers, locale)} locale={locale} />
         <KpiCard label={t('revenue')} value={formatMoney(revenue, 'IQD', locale)} locale={locale} />
         <KpiCard label={t('discountSpend')} value={formatMoney(discount, 'IQD', locale)} locale={locale} invertDelta />
         <KpiCard label={t('newCustomers')} value={formatNumber(newCustomers, locale)} locale={locale} />

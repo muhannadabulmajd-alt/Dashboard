@@ -11,7 +11,7 @@ import { Link } from '@/i18n/navigation';
 import { can } from '@/lib/rbac';
 import { enumLabel } from '@/lib/enums';
 import { formatMoney, formatNumber, formatPercent } from '@/lib/money';
-import { monthProgress } from '@/lib/dates';
+import { monthProgress, resolveRange } from '@/lib/dates';
 import { KpiCard } from '@/components/kpi/KpiCard';
 import { LineChartCard, BarChartCard } from '@/components/charts/Charts';
 import { Card, CardContent, CardHeader, CardTitle, Badge, PageHeader } from '@/components/ui/primitives';
@@ -31,7 +31,7 @@ export default async function ExecutiveOverviewPage({
   const ta = await getTranslations('alerts');
 
   const now = new Date();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const mtdRange = resolveRange({ range: 'this_month' }, now);
   const [orders, prevOrders, lines, items, expenses, catalog, mtdOrders] = await Promise.all([
     getOrders(filters, scope, range),
     getPrevOrders(filters, scope, range),
@@ -39,7 +39,7 @@ export default async function ExecutiveOverviewPage({
     getInventoryItems(filters, scope, range),
     getExpenses(filters, scope, range),
     getCatalogForAlerts(),
-    getOrders(filters, scope, { start: monthStart, end: now }),
+    getOrders(filters, scope, { start: mtdRange.start, end: mtdRange.end }),
   ]);
 
   const showFinancial = can(user.role, 'view:financial');
@@ -49,11 +49,10 @@ export default async function ExecutiveOverviewPage({
   const orderCount = M.salesOrderCount(orders);
   const prevOrderCount = M.salesOrderCount(prevOrders);
   const units = M.unitsSold(lines);
-  const cogs = M.cogs(lines);
-  const margin = M.grossMargin(net, cogs);
+  const pnl = M.buildPnlSnapshot(orders, lines, expenses);
+  const margin = { amount: pnl.grossProfit, pct: pnl.grossMarginPct };
   const aov = M.aov(net, orderCount);
-  const opex = M.operatingExpenses(expenses, 'IQD');
-  const cash = M.operatingProfit(margin.amount, opex, M.deliveryCostTotal(orders));
+  const operatingProfit = pnl.operatingProfit;
   const { dayOfMonth, daysInMonth } = monthProgress();
   const runRate = M.runRate(M.netSales(mtdOrders), dayOfMonth, daysInMonth);
 
@@ -130,7 +129,7 @@ export default async function ExecutiveOverviewPage({
         {showFinancial ? (
           <>
             <KpiCard label={tk('grossMargin')} value={formatPercent(margin.pct, locale)} sub={formatMoney(margin.amount, 'IQD', locale)} locale={locale} />
-            <KpiCard label={tk('cashBurn')} value={formatMoney(cash, 'IQD', locale)} locale={locale} invertDelta />
+            <KpiCard label={tk('operatingProfit')} value={formatMoney(operatingProfit, 'IQD', locale)} locale={locale} />
             <KpiCard label={tk('runRate')} value={formatMoney(runRate, 'IQD', locale)} sub={tk('netSales')} locale={locale} />
           </>
         ) : null}

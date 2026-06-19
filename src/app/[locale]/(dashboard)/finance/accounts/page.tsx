@@ -19,14 +19,19 @@ export default async function FinanceAccountsPage({
   params: Promise<{ locale: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { locale, user } = await getPageContext(params, searchParams, 'view:finance');
+  const { locale, user, filters, scope, range } = await getPageContext(params, searchParams, 'view:finance');
   const t = await getTranslations('finance');
   const tr = await getTranslations('records');
   const canManage = can(user.role, 'manage:finance');
+  const branchWhere = scope.branchId
+    ? { branchId: scope.branchId }
+    : filters.branchId?.length
+      ? { branchId: { in: filters.branchId } }
+      : {};
   const [accounts, entries] = await Promise.all([
-    prisma.financeAccount.findMany({ orderBy: { createdAt: 'asc' } }),
+    prisma.financeAccount.findMany({ where: branchWhere, orderBy: { createdAt: 'asc' } }),
     prisma.financeEntry.findMany({
-      where: { archivedAt: null, reversedAt: null, reversalOfId: null },
+      where: { date: { lte: range.end }, archivedAt: null, reversedAt: null, reversalOfId: null, ...branchWhere },
       select: { id: true, type: true, amount: true, currency: true, obligation: true, obligationKind: true, accountId: true, toAccountId: true, settlesId: true, archivedAt: true },
     }),
   ]);

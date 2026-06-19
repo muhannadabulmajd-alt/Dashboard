@@ -10,11 +10,15 @@ import { convertToIqd } from '@/lib/money';
 
 type Scope = { branchId?: string };
 
-export async function getExpenses(
+export interface OperatingExpenseFact extends ExpenseLike {
+  partyName: string | null;
+}
+
+export async function getOperatingExpenseFacts(
   filters: DashboardFilters,
   scope: Scope,
   range: ResolvedRange,
-): Promise<ExpenseLike[]> {
+): Promise<OperatingExpenseFact[]> {
   const [expenseRows, financeRows, rate] = await Promise.all([
     prisma.expense.findMany({
       where: buildExpenseWhere(filters, scope, range),
@@ -23,6 +27,7 @@ export async function getExpenses(
         currency: true,
         incurredAt: true,
         branchId: true,
+        vendor: true,
         category: { select: { type: true } },
       },
     }),
@@ -46,6 +51,7 @@ export async function getExpenses(
         currency: true,
         date: true,
         branchId: true,
+        party: { select: { name: true } },
         type: true,
         categoryType: true,
         ledgerLines: { select: { itemType: true, lineTotal: true, categoryType: true, branchId: true } },
@@ -62,10 +68,11 @@ export async function getExpenses(
       incurredAt: r.incurredAt,
       categoryType: r.category.type,
       branchId: r.branchId,
+      partyName: r.vendor,
     })),
     ...financeRows.flatMap((r) => {
       if (r.type === 'EXPENSE') {
-        return [{ amount: convertToIqd(r.amount, r.currency, rate), currency: 'IQD' as const, incurredAt: r.date, categoryType: r.categoryType ?? 'OVERHEAD', branchId: r.branchId }];
+        return [{ amount: convertToIqd(r.amount, r.currency, rate), currency: 'IQD' as const, incurredAt: r.date, categoryType: r.categoryType ?? 'OVERHEAD', branchId: r.branchId, partyName: r.party?.name ?? null }];
       }
       const allocation = classifyPurchase({
         amount: r.amount,
@@ -82,9 +89,17 @@ export async function getExpenses(
       const categoryType = categories.length && categories.every((value) => value === categories[0])
         ? categories[0]
         : r.categoryType ?? 'OVERHEAD';
-      return [{ amount: convertToIqd(allocation.operatingExpense, r.currency, rate), currency: 'IQD' as const, incurredAt: r.date, categoryType, branchId: r.branchId }];
+      return [{ amount: convertToIqd(allocation.operatingExpense, r.currency, rate), currency: 'IQD' as const, incurredAt: r.date, categoryType, branchId: r.branchId, partyName: r.party?.name ?? null }];
     }),
   ];
+}
+
+export async function getExpenses(
+  filters: DashboardFilters,
+  scope: Scope,
+  range: ResolvedRange,
+): Promise<ExpenseLike[]> {
+  return getOperatingExpenseFacts(filters, scope, range);
 }
 
 export async function getBatches(

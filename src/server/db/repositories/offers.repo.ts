@@ -7,8 +7,8 @@ import type { OfferOrderLike } from '@/lib/metrics/types';
 
 type Scope = { branchId?: string };
 
-export async function getOffers(): Promise<{ id: string; name: string; code: string | null }[]> {
-  return prisma.offer.findMany({ select: { id: true, name: true, code: true } });
+export async function getOffers(): Promise<{ id: string; name: string; code: string | null; startsAt: Date | null; endsAt: Date | null }[]> {
+  return prisma.offer.findMany({ select: { id: true, name: true, code: true, startsAt: true, endsAt: true } });
 }
 
 export async function getOfferOrders(

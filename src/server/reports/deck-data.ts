@@ -1,7 +1,7 @@
 import 'server-only';
 import type { DashboardFilters } from '@/lib/filters';
 import type { ResolvedRange } from '@/lib/dates';
-import { monthProgress } from '@/lib/dates';
+import { monthProgress, resolveRange } from '@/lib/dates';
 import { formatMoney, formatNumber, formatPercent } from '@/lib/money';
 import { can } from '@/lib/rbac';
 import type { CurrentUser } from '@/server/auth/session';
@@ -52,7 +52,7 @@ export async function buildDeckData(
   const L = 'en' as const;
 
   const now = new Date();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const mtdRange = resolveRange({ range: 'this_month' }, now);
   const [orders, prevOrders, lines, items, expenses, shipments, customers, mtdOrders] = await Promise.all([
     getOrders(filters, scope, range),
     getPrevOrders(filters, scope, range),
@@ -61,17 +61,18 @@ export async function buildDeckData(
     showFinancial ? getExpenses(filters, scope, range) : Promise.resolve([]),
     getShipments(filters, scope, range),
     getCustomers(scope),
-    getOrders(filters, scope, { start: monthStart, end: now }),
+    getOrders(filters, scope, { start: mtdRange.start, end: mtdRange.end }),
   ]);
 
   const net = M.netSales(orders);
   const prevNet = M.netSales(prevOrders);
   const orderCount = M.salesOrderCount(orders);
   const units = M.unitsSold(lines);
-  const cogs = M.cogs(lines);
-  const margin = M.grossMargin(net, cogs);
-  const opex = M.operatingExpenses(expenses, 'IQD');
-  const profit = M.operatingProfit(margin.amount, opex, M.deliveryCostTotal(orders));
+  const pnl = M.buildPnlSnapshot(orders, lines, expenses);
+  const cogs = pnl.cogs;
+  const margin = { amount: pnl.grossProfit, pct: pnl.grossMarginPct };
+  const opex = pnl.operatingExpenses;
+  const profit = pnl.operatingProfit;
   const { dayOfMonth, daysInMonth } = monthProgress();
 
   const pct = (n: number, p: number) => {
@@ -158,9 +159,9 @@ export async function buildDeckData(
     },
     pnl: showFinancial
       ? {
-          gross: M.grossSales(orders),
-          discounts: M.discountTotal(orders),
-          refunds: M.refundTotal(orders),
+          gross: pnl.grossRevenue,
+          discounts: pnl.discounts,
+          refunds: pnl.refunds,
           net,
           cogs,
           grossMargin: margin.amount,
