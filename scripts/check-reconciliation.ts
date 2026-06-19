@@ -247,6 +247,31 @@ async function main(): Promise<void> {
 
   const failed = checks.filter((check) => check.failures > 0);
   for (const check of checks) console.log(`${check.failures === 0 ? 'PASS' : 'FAIL'} ${check.name}: ${check.failures}`);
+  if (failed.some((check) => check.name === 'ledger record classifications')) {
+    const rows = await prisma.$queryRaw<Array<{
+      id: string;
+      type: string;
+      recordClass: string | null;
+      importKey: string | null;
+      lineTypes: string[];
+    }>>`
+      SELECT e.id, e.type::text AS type, e."recordClass"::text AS "recordClass",
+             e."importKey" AS "importKey",
+             COALESCE(array_agg(l."itemType" ORDER BY l."lineNo") FILTER (WHERE l.id IS NOT NULL), ARRAY[]::text[]) AS "lineTypes"
+      FROM "FinanceEntry" e
+      LEFT JOIN "LedgerEntryLine" l ON l."financeEntryId" = e.id
+      WHERE e.type IN ('EXPENSE', 'PURCHASE')
+      GROUP BY e.id
+      HAVING e."recordClass" IS DISTINCT FROM CASE
+        WHEN e.type = 'EXPENSE' THEN 'EXPENSE'::"LedgerRecordClass"
+        WHEN bool_or(l."itemType" IN ('INVENTORY', 'ASSET'))
+          AND bool_or(l."itemType" IN ('EXPENSE', 'SERVICE', 'OTHER')) THEN 'MIXED'::"LedgerRecordClass"
+        WHEN bool_or(l."itemType" IN ('EXPENSE', 'SERVICE', 'OTHER')) THEN 'EXPENSE'::"LedgerRecordClass"
+        ELSE 'PURCHASE'::"LedgerRecordClass"
+      END
+    `;
+    for (const row of rows) console.error(`DETAIL ledger classification: ${JSON.stringify(row)}`);
+  }
   if (failed.length) throw new Error(`Reconciliation failed: ${failed.map((check) => check.name).join(', ')}`);
 }
 

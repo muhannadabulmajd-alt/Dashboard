@@ -14,7 +14,7 @@ Target stack: **Vercel** (Next.js host) + **Neon** (free serverless PostgreSQL).
 ## 2. Import the repo into Vercel
 
 1. At <https://vercel.com/new>, import `muhannadabulmajd-alt/Dashboard` (or click the **Deploy with Vercel** button in the README).
-2. Framework preset: **Next.js** (auto-detected). Don't change the build settings — `vercel.json` already runs `prisma migrate deploy` before the build.
+2. Framework preset: **Next.js** (auto-detected). Don't change the build settings — `vercel.json` runs migrations and database reconciliation before the build.
 3. Add the environment variables below, then **Deploy**.
 
 ## 3. Environment variables (Vercel)
@@ -35,7 +35,7 @@ Target stack: **Vercel** (Next.js host) + **Neon** (free serverless PostgreSQL).
 
 ## 4. That's it — no terminal
 
-- On deploy, **`prisma migrate deploy` creates all tables automatically** (configured in `vercel.json`).
+- On deploy, **`prisma migrate deploy` creates all tables automatically**, then `pnpm check:reconciliation` blocks the build if linked finance, inventory, asset, due, order-status, or customer totals disagree.
 - The **first time you sign in** with `ADMIN_EMAIL` / `ADMIN_PASSWORD`, your **Owner account is created automatically**. This only happens once (when the database has no users); afterwards those env vars are ignored.
 
 ## 5. Access
