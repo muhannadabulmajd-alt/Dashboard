@@ -163,6 +163,27 @@ describe('historical finance import parsers', () => {
     expect(result.errors[0].message).toContain('does not equal invoice total');
   });
 
+  it('accepts ISO, Iraqi day/month, and Excel serial purchase dates', () => {
+    const rows = [
+      { ...purchaseRow, recordKey: 'ISO', reference: 'ISO', date: '2026-03-15', invoiceTotalIqd: '50000' },
+      { ...purchaseRow, recordKey: 'DMY', reference: 'DMY', date: '15/03/2026', invoiceTotalIqd: '50000' },
+      { ...purchaseRow, recordKey: 'XLS', reference: 'XLS', date: '46096', invoiceTotalIqd: '50000' },
+    ];
+    const result = parsePurchases(rows);
+    expect(result.errors).toHaveLength(0);
+    expect(result.valid.map((entry) => entry.date.toISOString().slice(0, 10))).toEqual([
+      '2026-03-15',
+      '2026-03-15',
+      '2026-03-15',
+    ]);
+  });
+
+  it('rejects impossible calendar dates before ingestion', () => {
+    const result = parsePurchases([{ ...purchaseRow, date: '31/02/2026', invoiceTotalIqd: '50000' }]);
+    expect(result.valid).toHaveLength(0);
+    expect(result.errors[0].message).toContain('invalid date');
+  });
+
   it('requires capital account and branch and creates a stable key', () => {
     const result = parseCapital([{
       shareholder: 'مهند منجد',

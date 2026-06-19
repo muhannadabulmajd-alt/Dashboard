@@ -583,6 +583,8 @@ model LedgerEntryLine {
   lineNo          Int
   itemType        String               @default("EXPENSE") // INVENTORY | EXPENSE | SERVICE | OTHER
   itemName        String
+  assetKey        String?
+  assetCategory   String?
   categoryType    ExpenseCategoryType?
   inventoryItemId String?
   unit            String               @default("unit")
@@ -604,6 +606,7 @@ model LedgerEntryLine {
   @@index([inventoryItemId])
   @@index([categoryType])
   @@index([itemType])
+  @@index([assetKey])
 }
 
 model FixedAsset {
@@ -857,6 +860,12 @@ enum FinanceType {
   TRANSFER
 }
 
+enum LedgerRecordClass {
+  PURCHASE
+  EXPENSE
+  MIXED
+}
+
 enum ObligationKind {
   PAYABLE
   RECEIVABLE
@@ -906,6 +915,7 @@ model FinanceEntry {
   id             String               @id @default(cuid())
   date           DateTime
   type           FinanceType
+  recordClass    LedgerRecordClass?
   amount         Int // minor units, positive — ALWAYS the IQD value
   currency       Currency             @default(IQD)
   // Original payment when made in a foreign currency (e.g. paid in USD).
@@ -953,6 +963,7 @@ model FinanceEntry {
 
   @@index([date])
   @@index([type])
+  @@index([recordClass])
   @@index([obligation])
   @@index([accountId])
   @@index([partyId])

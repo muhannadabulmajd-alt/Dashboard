@@ -52,12 +52,44 @@ const blank = (v: unknown) => (typeof v === 'string' && v.trim() === '' ? undefi
 const reqInt = z.preprocess(blank, z.coerce.number().int());
 const optInt = z.preprocess(blank, z.coerce.number().int().optional());
 const optStr = z.preprocess(blank, z.string().optional());
+
+function utcCalendarDate(year: number, month: number, day: number): Date {
+  const value = new Date(Date.UTC(year, month - 1, day));
+  if (value.getUTCFullYear() !== year || value.getUTCMonth() !== month - 1 || value.getUTCDate() !== day) {
+    return new Date(Number.NaN);
+  }
+  return value;
+}
+
+function parseDateValue(value: unknown): unknown {
+  if (value instanceof Date) return value;
+  if (typeof value !== 'string') return value;
+  const input = value.trim();
+  if (!input) return undefined;
+
+  const isoDate = input.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoDate) return utcCalendarDate(Number(isoDate[1]), Number(isoDate[2]), Number(isoDate[3]));
+
+  const iraqiDate = input.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (iraqiDate) return utcCalendarDate(Number(iraqiDate[3]), Number(iraqiDate[2]), Number(iraqiDate[1]));
+
+  if (/^\d+(?:\.\d+)?$/.test(input)) {
+    const serial = Number(input);
+    if (serial >= 1 && serial <= 100_000) {
+      return new Date(Date.UTC(1899, 11, 30) + Math.floor(serial) * 86_400_000);
+    }
+  }
+
+  const parsed = new Date(input);
+  return Number.isNaN(parsed.getTime()) ? new Date(Number.NaN) : parsed;
+}
+
 const dateField = z.preprocess(
-  (v) => (typeof v === 'string' && v.trim() ? new Date(v) : undefined),
+  parseDateValue,
   z.date({ message: 'invalid date' }),
 );
 const optDate = z.preprocess(
-  (v) => (typeof v === 'string' && v.trim() ? new Date(v) : undefined),
+  parseDateValue,
   z.date().optional(),
 );
 const optEnum = <T extends readonly [string, ...string[]]>(vals: T) =>

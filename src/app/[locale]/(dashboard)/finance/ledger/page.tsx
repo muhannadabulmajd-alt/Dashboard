@@ -6,6 +6,7 @@ import { enumLabel, FINANCE_TYPES, PAYMENT_METHODS } from '@/lib/enums';
 import { formatMoney } from '@/lib/money';
 import { formatDate } from '@/lib/dates';
 import { ledgerPaymentSnapshot, ledgerPaymentStatusLabel } from '@/lib/ledger-lines';
+import { ledgerRecordClassLabel } from '@/lib/ledger-record-class';
 import { can } from '@/lib/rbac';
 import { Badge, PageHeader } from '@/components/ui/primitives';
 import { DataTable, type Column } from '@/components/data-table/DataTable';
@@ -14,7 +15,7 @@ import { AssignAccountForm } from '@/components/finance/AssignAccountForm';
 import { SectionGuide } from '@/components/records/SectionGuide';
 import { assignImportedAccount } from '@/server/finance/entries';
 import { Link } from '@/i18n/navigation';
-import type { FinanceType, Prisma } from '@prisma/client';
+import type { FinanceType, LedgerRecordClass, Prisma } from '@prisma/client';
 
 const input = 'rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:border-primary';
 
@@ -38,6 +39,7 @@ export default async function LedgerPage({
   const canExport = can(user.role, 'export:financial');
   const q = one(rawParams.q).trim();
   const type = one(rawParams.type);
+  const recordClass = one(rawParams.recordClass);
   const status = one(rawParams.status);
   const accountId = one(rawParams.accountId);
   const partyId = one(rawParams.partyId);
@@ -50,7 +52,7 @@ export default async function LedgerPage({
   const maxAmount = one(rawParams.maxAmount);
   const sort = one(rawParams.sort) || 'date_desc';
   const currentParams = new URLSearchParams();
-  for (const [key, value] of Object.entries({ q, type, status, accountId, partyId, branchId, paymentStatus, paymentMethod, dateFrom, dateTo, minAmount, maxAmount, sort })) {
+  for (const [key, value] of Object.entries({ q, type, recordClass, status, accountId, partyId, branchId, paymentStatus, paymentMethod, dateFrom, dateTo, minAmount, maxAmount, sort })) {
     if (value) currentParams.set(key, value);
   }
 
@@ -70,6 +72,7 @@ export default async function LedgerPage({
     });
   }
   if (FINANCE_TYPES.includes(type as FinanceType)) and.push({ type: type as FinanceType });
+  if (['PURCHASE', 'EXPENSE', 'MIXED'].includes(recordClass)) and.push({ recordClass: recordClass as LedgerRecordClass });
   if (accountId) and.push({ OR: [{ accountId }, { toAccountId: accountId }] });
   if (partyId) and.push({ partyId });
   if (branchId) and.push({ branchId });
@@ -173,7 +176,7 @@ export default async function LedgerPage({
     return [
       <span key="id" className="font-mono text-xs">{e.id.slice(-8)}</span>,
       formatDate(e.date, locale),
-      enumLabel(e.type, locale),
+      e.recordClass ? ledgerRecordClassLabel(e.recordClass, locale) : enumLabel(e.type, locale),
       e.description ?? (e.ledgerLines.length ? `${e.ledgerLines.length} ${t('lineItems')}` : '—'),
       formatMoney(e.amount, e.currency, locale),
       formatMoney(snapshot.paid, e.currency, locale),
@@ -224,6 +227,12 @@ export default async function LedgerPage({
         <select name="type" defaultValue={type} className={input}>
           <option value="">{tc('all')}</option>
           {FINANCE_TYPES.map((v) => <option key={v} value={v}>{enumLabel(v, locale)}</option>)}
+        </select>
+        <select name="recordClass" defaultValue={recordClass} className={input}>
+          <option value="">{locale === 'ar' ? 'كل التصنيفات' : 'All classifications'}</option>
+          {(['PURCHASE', 'EXPENSE', 'MIXED'] as const).map((value) => (
+            <option key={value} value={value}>{ledgerRecordClassLabel(value, locale)}</option>
+          ))}
         </select>
         <select name="status" defaultValue={status} className={input}>
           <option value="">{tc('all')}</option>

@@ -6,6 +6,7 @@ import { toCsv } from '@/server/export/csv';
 import { parseFilters } from '@/lib/filters';
 import { enumLabel, FINANCE_TYPES } from '@/lib/enums';
 import { formatDate } from '@/lib/dates';
+import { ledgerRecordClassLabel } from '@/lib/ledger-record-class';
 import { toMajor, type AppLocale } from '@/lib/money';
 import { accountBalance, netCash, unassignedCash, financeTotals, signedEffect, type FinanceEntryLike } from '@/lib/metrics/finance';
 import { buildBranchScope, rangeFor } from '@/server/filters/where-builder';
@@ -17,7 +18,7 @@ import {
   getProductProfitabilityReport,
   type CashFlowBucketKey,
 } from '@/server/finance/reports';
-import type { ObligationKind, Currency, FinanceType, Prisma } from '@prisma/client';
+import type { ObligationKind, Currency, FinanceType, LedgerRecordClass, Prisma } from '@prisma/client';
 
 const CASH_FLOW_LABELS: Record<CashFlowBucketKey, string> = {
   salesCollected: 'Sales collected',
@@ -37,6 +38,7 @@ const CASH_FLOW_LABELS: Record<CashFlowBucketKey, string> = {
 function ledgerWhere(p: URLSearchParams): Prisma.FinanceEntryWhereInput {
   const q = (p.get('q') ?? '').trim();
   const type = p.get('type') ?? '';
+  const recordClass = p.get('recordClass') ?? '';
   const status = p.get('status') ?? '';
   const accountId = p.get('accountId') ?? '';
   const partyId = p.get('partyId') ?? '';
@@ -55,6 +57,7 @@ function ledgerWhere(p: URLSearchParams): Prisma.FinanceEntryWhereInput {
     });
   }
   if (FINANCE_TYPES.includes(type as FinanceType)) and.push({ type: type as FinanceType });
+  if (['PURCHASE', 'EXPENSE', 'MIXED'].includes(recordClass)) and.push({ recordClass: recordClass as LedgerRecordClass });
   if (accountId) and.push({ OR: [{ accountId }, { toAccountId: accountId }] });
   if (partyId) and.push({ partyId });
   if (branchId) and.push({ branchId });
@@ -241,7 +244,7 @@ export async function GET(req: NextRequest) {
     const branchName = new Map(branches.map((b) => [b.id, locale === 'ar' ? b.nameAr : b.nameEn]));
     const userName = new Map(users.map((u) => [u.id, u.name || u.email]));
     headers = [
-      'Transaction ID', 'Date', 'Type', 'Money in', 'Money out', 'Currency',
+      'Transaction ID', 'Date', 'Type', 'Record class', 'Money in', 'Money out', 'Currency',
       'Account', 'Party', 'Category', 'Branch', 'Related', 'Created by',
       'Status', 'Attachment', 'Reference', 'Description',
     ];
@@ -249,6 +252,7 @@ export async function GET(req: NextRequest) {
       e.id,
       formatDate(e.date, locale),
       enumLabel(e.type, locale),
+      e.recordClass ? ledgerRecordClassLabel(e.recordClass, locale) : '',
       !e.reversedAt && !e.reversalOfId && !e.obligation && (signedEffect(e) > 0 || e.type === 'TRANSFER') ? toMajor(e.amount, e.currency) : '',
       !e.reversedAt && !e.reversalOfId && !e.obligation && (signedEffect(e) < 0 || e.type === 'TRANSFER') ? toMajor(e.amount, e.currency) : '',
       e.currency,
