@@ -795,6 +795,7 @@
     "contributionMargin": "Contribution margin",
     "cogs": "COGS",
     "cashBurn": "Operating profit",
+    "operatingProfit": "Operating profit",
     "runRate": "Projected month sales",
     "stockValue": "Stock value",
     "reorderAlerts": "Reorder alerts",

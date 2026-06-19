@@ -7,8 +7,8 @@ import { parseFilters } from '@/lib/filters';
 import { enumLabel, FINANCE_TYPES } from '@/lib/enums';
 import { formatDate } from '@/lib/dates';
 import { ledgerRecordClassLabel } from '@/lib/ledger-record-class';
-import { toMajor, type AppLocale } from '@/lib/money';
-import { accountBalance, netCash, unassignedCash, financeTotals, signedEffect, type FinanceEntryLike } from '@/lib/metrics/finance';
+import { convertToIqd, toMajor, type AppLocale } from '@/lib/money';
+import { signedEffect } from '@/lib/metrics/finance';
 import { buildBranchScope, rangeFor } from '@/server/filters/where-builder';
 import {
   getBranchProfitabilityReport,
@@ -18,7 +18,9 @@ import {
   getProductProfitabilityReport,
   type CashFlowBucketKey,
 } from '@/server/finance/reports';
-import type { ObligationKind, Currency, FinanceType, LedgerRecordClass, Prisma } from '@prisma/client';
+import { getBalanceSheetSnapshot } from '@/server/finance/balance-sheet';
+import { getUsdToIqd } from '@/server/settings';
+import type { ObligationKind, FinanceType, LedgerRecordClass, Prisma } from '@prisma/client';
 
 const CASH_FLOW_LABELS: Record<CashFlowBucketKey, string> = {
   salesCollected: 'Sales collected',
@@ -97,60 +99,53 @@ export async function GET(req: NextRequest) {
 
   if (type === 'dues') {
     const kind = p.get('kind') as ObligationKind | null;
-    const obligations = await prisma.financeEntry.findMany({
-      where: { obligation: true, archivedAt: null, reversedAt: null, reversalOfId: null, ...(kind ? { obligationKind: kind } : {}) },
-      include: { party: { select: { name: true } }, settlements: { where: { archivedAt: null, reversedAt: null, reversalOfId: null }, select: { amount: true } } },
+    const branchWhere = scope.branchId
+      ? { branchId: scope.branchId }
+      : filters.branchId?.length
+        ? { branchId: { in: filters.branchId } }
+        : {};
+    const [obligations, rate] = await Promise.all([prisma.financeEntry.findMany({
+      where: { obligation: true, date: { lte: range.end }, archivedAt: null, reversedAt: null, reversalOfId: null, ...branchWhere, ...(kind ? { obligationKind: kind } : {}) },
+      include: { party: { select: { name: true } }, settlements: { where: { archivedAt: null, reversedAt: null, reversalOfId: null }, select: { amount: true, currency: true } } },
       orderBy: { dueDate: 'asc' },
-    });
+    }), getUsdToIqd()]);
     headers = ['Kind', 'Party', 'Description', 'Amount', 'Paid', 'Outstanding', 'Currency', 'DueDate'];
     rows = obligations
       .map((o) => {
-        const paid = o.settlements.reduce((s, x) => s + x.amount, 0);
-        const out = Math.max(0, o.amount - paid);
+        const amount = convertToIqd(o.amount, o.currency, rate);
+        const paid = o.settlements.reduce((s, x) => s + convertToIqd(x.amount, x.currency, rate), 0);
+        const out = Math.max(0, amount - paid);
         return [
           o.obligationKind ? enumLabel(o.obligationKind, locale) : '',
           o.party?.name ?? '',
           o.description ?? '',
-          toMajor(o.amount, o.currency),
-          toMajor(paid, o.currency),
-          toMajor(out, o.currency),
-          o.currency,
+          toMajor(amount, 'IQD'),
+          toMajor(paid, 'IQD'),
+          toMajor(out, 'IQD'),
+          'IQD',
           o.dueDate ? formatDate(o.dueDate, locale) : '',
         ];
       })
       .filter((r) => Number(r[5]) > 0);
     filename = 'dues';
   } else if (type === 'balances') {
-    const [accounts, entriesRaw] = await Promise.all([
-      prisma.financeAccount.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }),
-      prisma.financeEntry.findMany({
-        select: {
-          id: true, type: true, amount: true, currency: true, obligation: true,
-          obligationKind: true, accountId: true, toAccountId: true, settlesId: true,
-          archivedAt: true, reversedAt: true, reversalOfId: true,
-        },
-      }),
-    ]);
-    const entries = entriesRaw as FinanceEntryLike[];
+    const snapshot = await getBalanceSheetSnapshot({ filters, scope, asOf: range.end });
     headers = ['Section', 'Name', 'Currency', 'Amount'];
     rows = [];
-    const currencies = Array.from(new Set([...accounts.map((a) => a.currency), ...entries.map((e) => e.currency)]));
-    for (const cur of (currencies.length ? currencies : ['IQD']) as Currency[]) {
-      const ce = entries.filter((e) => e.currency === cur);
-      const ca = accounts.filter((a) => a.currency === cur);
-      for (const a of ca) rows.push(['Account', a.name, cur, toMajor(accountBalance(a, ce), cur)]);
-      const unassigned = unassignedCash(ce);
-      if (unassigned) rows.push(['Account', 'Unassigned', cur, toMajor(unassigned, cur)]);
-      const tot = financeTotals(ce);
-      const cashBank = netCash(ca, ce);
-      const totalAssets = cashBank + tot.outstandingReceivable;
-      const retained = totalAssets - tot.outstandingPayable - tot.capitalIn;
-      rows.push(['Assets', 'Cash & bank', cur, toMajor(cashBank, cur)]);
-      rows.push(['Assets', 'Receivables', cur, toMajor(tot.outstandingReceivable, cur)]);
-      rows.push(['Assets', 'Total assets', cur, toMajor(totalAssets, cur)]);
-      rows.push(['Liabilities', 'Payables', cur, toMajor(tot.outstandingPayable, cur)]);
-      rows.push(['Equity', 'Capital', cur, toMajor(tot.capitalIn, cur)]);
-      rows.push(['Equity', 'Retained', cur, toMajor(retained, cur)]);
+    for (const row of snapshot.currencies) {
+      for (const account of row.accounts) rows.push(['Account', account.name, row.currency, toMajor(account.balance, row.currency)]);
+      if (row.unassignedCash) rows.push(['Account', 'Unassigned', row.currency, toMajor(row.unassignedCash, row.currency)]);
+      rows.push(['Assets', 'Cash & bank', row.currency, toMajor(row.cashBank, row.currency)]);
+      rows.push(['Assets', 'Receivables', row.currency, toMajor(row.receivables, row.currency)]);
+      if (row.currency === 'IQD') {
+        rows.push(['Assets', 'Inventory', row.currency, toMajor(row.inventory, row.currency)]);
+        rows.push(['Assets', 'Fixed assets', row.currency, toMajor(row.fixedAssets, row.currency)]);
+      }
+      rows.push(['Assets', 'Total assets', row.currency, toMajor(row.totalAssets, row.currency)]);
+      rows.push(['Liabilities', 'Payables', row.currency, toMajor(row.payables, row.currency)]);
+      rows.push(['Equity', 'Capital', row.currency, toMajor(row.capital, row.currency)]);
+      rows.push(['Equity', 'Retained', row.currency, toMajor(row.retained, row.currency)]);
+      rows.push(['Equity', 'Total equity', row.currency, toMajor(row.totalEquity, row.currency)]);
     }
     filename = 'balance-sheet';
   } else if (type === 'pnl') {

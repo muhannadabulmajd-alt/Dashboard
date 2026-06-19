@@ -35,13 +35,14 @@ export default async function UploadsPage({
   // Imported-finance health: explains the "Unassigned (imported)" figure and
   // surfaces any exact-duplicate imported rows (e.g. manual entry + import).
   const IMP_TYPES: FinanceType[] = ['PURCHASE', 'CAPITAL_IN'];
+  const activeImport = { importKey: { not: null }, archivedAt: null, reversedAt: null, reversalOfId: null } as const;
   const [purch, cap, accountless, dupGroups] = await Promise.all([
-    prisma.financeEntry.aggregate({ where: { type: 'PURCHASE', importKey: { not: null } }, _count: { _all: true }, _sum: { amount: true } }),
-    prisma.financeEntry.aggregate({ where: { type: 'CAPITAL_IN', importKey: { not: null } }, _count: { _all: true }, _sum: { amount: true } }),
-    prisma.financeEntry.aggregate({ where: { type: { in: IMP_TYPES }, importKey: { not: null }, accountId: null }, _count: { _all: true }, _sum: { amount: true } }),
+    prisma.financeEntry.aggregate({ where: { type: 'PURCHASE', ...activeImport }, _count: { _all: true }, _sum: { amount: true } }),
+    prisma.financeEntry.aggregate({ where: { type: 'CAPITAL_IN', ...activeImport }, _count: { _all: true }, _sum: { amount: true } }),
+    prisma.financeEntry.aggregate({ where: { type: { in: IMP_TYPES }, ...activeImport, accountId: null }, _count: { _all: true }, _sum: { amount: true } }),
     prisma.financeEntry.groupBy({
       by: ['type', 'date', 'amount', 'partyId', 'reference', 'description', 'categoryType'],
-      where: { type: { in: IMP_TYPES }, importKey: { not: null } },
+      where: { type: { in: IMP_TYPES }, ...activeImport },
       _count: { _all: true },
     }),
   ]);

@@ -131,6 +131,10 @@ export function bucketLabel(key: string, bucket: 'day' | 'hour'): string {
   return key;
 }
 
+export function monthBucketKey(date: Date): string {
+  return formatInTimeZone(date, TZ, 'yyyy-MM');
+}
+
 /** Day-of-month and days-in-month for run-rate projection, in Baghdad time. */
 export function monthProgress(now: Date = new Date()): { dayOfMonth: number; daysInMonth: number } {
   const z = zoned(now);

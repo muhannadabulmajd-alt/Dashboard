@@ -64,32 +64,12 @@ export async function getPnlReport(
   scope: Scope,
   range: ResolvedRange,
 ): Promise<PnlReport> {
-  const [orders, lines, expenses, rate] = await Promise.all([
+  const [orders, lines, expenses] = await Promise.all([
     getOrders(filters, scope, range),
     getOrderLines(filters, scope, range),
     getExpenses(filters, scope, range),
-    getUsdToIqd(),
   ]);
-  const grossRevenue = M.grossSales(orders);
-  const discounts = M.discountTotal(orders);
-  const refunds = M.refundTotal(orders);
-  const netSales = M.netSales(orders);
-  const cogs = M.cogs(lines);
-  const gross = M.grossMargin(netSales, cogs);
-  const directDeliveryCost = M.deliveryCostTotal(orders);
-  const operatingExpenses = expenses.reduce((sum, e) => sum + toIqd(e.amount, e.currency, rate), 0);
-  return {
-    grossRevenue,
-    discounts,
-    refunds,
-    netSales,
-    cogs,
-    grossProfit: gross.amount,
-    grossMarginPct: gross.pct,
-    directDeliveryCost,
-    operatingExpenses,
-    operatingProfit: gross.amount - directDeliveryCost - operatingExpenses,
-  };
+  return M.buildPnlSnapshot(orders, lines, expenses);
 }
 
 export type CashFlowBucketKey =

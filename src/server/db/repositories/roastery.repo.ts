@@ -18,15 +18,24 @@ export interface BatchRow {
 }
 
 export async function getBatchRows(
-  _filters: DashboardFilters,
+  filters: DashboardFilters,
   scope: Scope,
-  _range: ResolvedRange,
+  range: ResolvedRange,
 ): Promise<BatchRow[]> {
-  void _range;
-  // Return every batch (branch-scoped), including green-only logged ones with no
-  // roast results yet. The page computes roast metrics from the roasted subset.
+  const branchWhere = scope.branchId
+    ? { branchId: scope.branchId }
+    : filters.branchId?.length
+      ? { branchId: { in: filters.branchId } }
+      : {};
   const rows = await prisma.roastBatch.findMany({
-    where: scope.branchId ? { branchId: scope.branchId } : {},
+    where: {
+      ...branchWhere,
+      ...(filters.roastLevel?.length ? { roastLevel: { in: filters.roastLevel } } : {}),
+      OR: [
+        { roastDate: { gte: range.start, lte: range.end } },
+        { roastDate: null, createdAt: { gte: range.start, lte: range.end } },
+      ],
+    },
     orderBy: [{ roastDate: { sort: 'desc', nulls: 'last' } }, { batchNumber: 'asc' }],
     select: {
       batchNumber: true,

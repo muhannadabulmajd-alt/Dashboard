@@ -50,6 +50,50 @@ async function main(): Promise<void> {
   });
 
   checks.push({
+    name: 'classified purchase allocation',
+    failures: await count`
+      SELECT COUNT(*) AS count
+      FROM "FinanceEntry" e
+      WHERE e.type = 'PURCHASE'
+        AND e."archivedAt" IS NULL
+        AND e."reversedAt" IS NULL
+        AND e."reversalOfId" IS NULL
+        AND (
+          EXISTS (
+            SELECT 1 FROM "LedgerEntryLine" l
+            WHERE l."financeEntryId" = e.id
+              AND l."itemType" NOT IN ('INVENTORY', 'ASSET', 'EXPENSE', 'SERVICE', 'OTHER')
+          )
+          OR (
+            NOT EXISTS (SELECT 1 FROM "LedgerEntryLine" l WHERE l."financeEntryId" = e.id)
+            AND NOT EXISTS (SELECT 1 FROM "FixedAsset" a WHERE a."financeEntryId" = e.id)
+            AND NOT EXISTS (SELECT 1 FROM "InventoryCostLayer" c WHERE c."financeEntryId" = e.id)
+            AND e."categoryType" IN ('GREEN_COFFEE', 'PACKAGING', 'EQUIPMENT')
+          )
+        )
+    `,
+  });
+
+  checks.push({
+    name: 'mapped order metric statuses',
+    failures: await count`
+      SELECT COUNT(*) AS count
+      FROM "Order" o
+      LEFT JOIN "ListOption" status_role
+        ON status_role."listKey" = 'orderStatus' AND status_role.code = o.status
+      WHERE COALESCE(
+        status_role."metricRole",
+        CASE
+          WHEN o.status = 'PENDING' THEN 'OPEN'
+          WHEN o.status = 'COMPLETED' THEN 'SALE'
+          WHEN o.status IN ('RETURNED', 'REFUNDED') THEN 'RETURN'
+          WHEN o.status IN ('CANCELLED', 'CANCELED') THEN 'CANCELED'
+        END
+      ) IS NULL
+    `,
+  });
+
+  checks.push({
     name: 'inventory line quantities',
     failures: await count`
       SELECT COUNT(*) AS count FROM (

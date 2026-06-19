@@ -1,9 +1,9 @@
 import { getTranslations } from 'next-intl/server';
 import { getPageContext } from '@/server/page-context';
-import { prisma } from '@/server/db/client';
 import { enumLabel, INVENTORY_CATEGORIES } from '@/lib/enums';
 import { formatNumber, formatMoney, formatQuantity } from '@/lib/money';
-import { decimalNumber } from '@/lib/decimal';
+import { getInventoryItems } from '@/server/db/repositories/inventory.repo';
+import { stockRow } from '@/lib/metrics/inventory';
 import { PageHeader } from '@/components/ui/primitives';
 import { DataTable, type Column } from '@/components/data-table/DataTable';
 import { RecordsSummary, type SummaryStat } from '@/components/records/Summary';
@@ -20,16 +20,14 @@ export default async function InventoryRecordsPage({
   params: Promise<{ locale: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { locale } = await getPageContext(params, searchParams, 'manage:inventory');
+  const { locale, filters, scope, range } = await getPageContext(params, searchParams, 'manage:inventory');
   const t = await getTranslations('records');
-  const items = await prisma.inventoryItem.findMany({
-    orderBy: { category: 'asc' },
-    include: { movements: { select: { quantity: true } } },
-  });
+  const items = await getInventoryItems(filters, scope, range);
 
-  const currentStock = (it: (typeof items)[number]) => it.movements.reduce((s, m) => s + decimalNumber(m.quantity), 0);
-  const stockValue = items.reduce((s, it) => s + currentStock(it) * decimalNumber(it.unitCost), 0);
-  const reorderCount = items.filter((it) => it.reorderPoint != null && currentStock(it) <= decimalNumber(it.reorderPoint)).length;
+  const rowsByItem = new Map(items.map((item) => [item.id, stockRow(item)]));
+  const currentStock = (item: (typeof items)[number]) => rowsByItem.get(item.id)?.current ?? 0;
+  const stockValue = [...rowsByItem.values()].reduce((sum, row) => sum + row.value, 0);
+  const reorderCount = [...rowsByItem.values()].filter((row) => row.belowReorder).length;
   const stats: SummaryStat[] = [
     { label: t('k.total'), value: formatNumber(items.length, locale) },
     { label: t('k.stockValue'), value: formatMoney(stockValue, 'IQD', locale) },

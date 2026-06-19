@@ -6,7 +6,7 @@ import * as M from '@/lib/metrics';
 import { enumLabel } from '@/lib/enums';
 import { buildExportHref, buildFinanceExportHref } from '@/lib/filters';
 import { formatMoney, formatNumber, formatPercent } from '@/lib/money';
-import { monthProgress } from '@/lib/dates';
+import { monthProgress, resolveRange } from '@/lib/dates';
 import { can } from '@/lib/rbac';
 import { prisma } from '@/server/db/client';
 import { Download } from 'lucide-react';
@@ -33,24 +33,18 @@ export default async function PnlPage({
   const canExport = can(user.role, 'export:financial');
 
   const now = new Date();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const mtdRange = resolveRange({ range: 'this_month' }, now);
   const [orders, lines, expenses, mtdOrders] = await Promise.all([
     getOrders(filters, scope, range),
     getOrderLines(filters, scope, range),
     getExpenses(filters, scope, range),
-    getOrders(filters, scope, { start: monthStart, end: now }),
+    getOrders(filters, scope, { start: mtdRange.start, end: mtdRange.end }),
   ]);
 
-  const gross = M.grossSales(orders);
-  const discounts = M.discountTotal(orders);
-  const refunds = M.refundTotal(orders);
-  const net = M.netSales(orders);
-  const cogs = M.cogs(lines);
-  const margin = M.grossMargin(net, cogs);
-  const opex = M.operatingExpenses(expenses, 'IQD');
-  const deliveryCosts = M.deliveryCostTotal(orders);
-  const profit = M.operatingProfit(margin.amount, opex, deliveryCosts);
-  const contribution = M.contributionMargin(net, cogs, { delivery: M.deliveryCostTotal(orders) });
+  const pnl = M.buildPnlSnapshot(orders, lines, expenses);
+  const { grossRevenue: gross, discounts, refunds, netSales: net, cogs, operatingExpenses: opex, directDeliveryCost: deliveryCosts, operatingProfit: profit } = pnl;
+  const margin = { amount: pnl.grossProfit, pct: pnl.grossMarginPct };
+  const contribution = M.contributionMargin(net, cogs, { delivery: deliveryCosts });
 
   // Cost/margin alerts (§9/§17): active products priced below cost or thin margin.
   const products = await prisma.product.findMany({
@@ -130,7 +124,7 @@ export default async function PnlPage({
         <KpiCard label={tk('cogs')} value={formatMoney(cogs, 'IQD', locale)} locale={locale} invertDelta />
         <KpiCard label={tk('grossMargin')} value={formatPercent(margin.pct, locale)} sub={formatMoney(margin.amount, 'IQD', locale)} locale={locale} />
         <KpiCard label={tk('contributionMargin')} value={formatMoney(contribution, 'IQD', locale)} locale={locale} />
-        <KpiCard label={tk('cashBurn')} value={formatMoney(profit, 'IQD', locale)} locale={locale} invertDelta />
+        <KpiCard label={tk('operatingProfit')} value={formatMoney(profit, 'IQD', locale)} locale={locale} />
         <KpiCard label={tk('runRate')} value={formatMoney(runRate, 'IQD', locale)} locale={locale} />
         <KpiCard label={t('operatingCosts')} value={formatMoney(opex, 'IQD', locale)} locale={locale} invertDelta />
         <KpiCard label={t('deliveryCosts')} value={formatMoney(deliveryCosts, 'IQD', locale)} locale={locale} invertDelta />

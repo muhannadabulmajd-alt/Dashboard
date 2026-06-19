@@ -30,7 +30,7 @@ export default async function FinancePartyDetailPage({
   const [p, entries, rate] = await Promise.all([
     prisma.party.findUnique({ where: { id } }),
     prisma.financeEntry.findMany({
-      where: { partyId: id, archivedAt: null },
+      where: { OR: [{ partyId: id }, { settles: { is: { partyId: id } } }], archivedAt: null },
       select: {
         id: true,
         date: true,
