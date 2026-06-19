@@ -7,6 +7,7 @@ import { formatMoney, formatQuantity } from '@/lib/money';
 import { formatDate } from '@/lib/dates';
 import { can } from '@/lib/rbac';
 import { ledgerPaymentSnapshot, ledgerPaymentStatusLabel } from '@/lib/ledger-lines';
+import { ledgerRecordClassLabel } from '@/lib/ledger-record-class';
 import { Badge, PageHeader } from '@/components/ui/primitives';
 import { BackLink, DetailGrid, type DetailField } from '@/components/records/parts';
 import { RecordActions } from '@/components/records/RecordActions';
@@ -81,6 +82,7 @@ export default async function EntryDetailPage({
   const items: DetailField[] = [
     { label: t('f.transactionId'), value: e.id },
     { label: t('f.type'), value: enumLabel(e.type, locale) },
+    ...(e.recordClass ? [{ label: locale === 'ar' ? 'التصنيف' : 'Classification', value: ledgerRecordClassLabel(e.recordClass, locale) }] : []),
     { label: t('f.amount'), value: formatMoney(e.amount, e.currency, locale) },
     { label: t('paidAmount'), value: formatMoney(paymentSnapshot.paid, e.currency, locale) },
     { label: t('remainingAmount'), value: formatMoney(paymentSnapshot.remaining, e.currency, locale) },
@@ -129,7 +131,7 @@ export default async function EntryDetailPage({
   return (
     <>
       <BackLink href="/finance/ledger" label={tr('back')} />
-      <PageHeader title={enumLabel(e.type, locale)} subtitle={formatMoney(e.amount, e.currency, locale)} />
+      <PageHeader title={e.recordClass ? ledgerRecordClassLabel(e.recordClass, locale) : enumLabel(e.type, locale)} subtitle={formatMoney(e.amount, e.currency, locale)} />
       <SectionGuide
         title={t('guide.audit.title')}
         intro={t('guide.audit.intro')}

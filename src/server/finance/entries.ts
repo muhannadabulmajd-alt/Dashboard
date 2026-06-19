@@ -16,6 +16,7 @@ const CAP = 'manage:finance' as const;
 const entryAuditSelect = {
   date: true,
   type: true,
+  recordClass: true,
   amount: true,
   currency: true,
   origCurrency: true,
@@ -98,6 +99,7 @@ function toData(p: Parsed, obligation: boolean, fallbackRate: number) {
   return {
     date: p.date,
     type: p.type,
+    recordClass: p.type === 'EXPENSE' ? ('EXPENSE' as const) : p.type === 'PURCHASE' ? ('PURCHASE' as const) : null,
     amount: usd ? convertToIqd(payMinor, 'USD', rate as number) : payMinor,
     currency: 'IQD' as const,
     origCurrency: usd ? ('USD' as const) : null,

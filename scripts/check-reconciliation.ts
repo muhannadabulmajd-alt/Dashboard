@@ -26,6 +26,30 @@ async function main(): Promise<void> {
   });
 
   checks.push({
+    name: 'ledger record classifications',
+    failures: await count`
+      SELECT COUNT(*) AS count
+      FROM "FinanceEntry" e
+      WHERE e.type IN ('EXPENSE', 'PURCHASE')
+        AND e."recordClass" IS DISTINCT FROM CASE
+          WHEN e.type = 'EXPENSE' THEN 'EXPENSE'::"LedgerRecordClass"
+          WHEN EXISTS (
+            SELECT 1 FROM "LedgerEntryLine" l
+            WHERE l."financeEntryId" = e.id AND l."itemType" IN ('INVENTORY', 'ASSET')
+          ) AND EXISTS (
+            SELECT 1 FROM "LedgerEntryLine" l
+            WHERE l."financeEntryId" = e.id AND l."itemType" IN ('EXPENSE', 'SERVICE', 'OTHER')
+          ) THEN 'MIXED'::"LedgerRecordClass"
+          WHEN EXISTS (
+            SELECT 1 FROM "LedgerEntryLine" l
+            WHERE l."financeEntryId" = e.id AND l."itemType" IN ('EXPENSE', 'SERVICE', 'OTHER')
+          ) THEN 'EXPENSE'::"LedgerRecordClass"
+          ELSE 'PURCHASE'::"LedgerRecordClass"
+        END
+    `,
+  });
+
+  checks.push({
     name: 'inventory line quantities',
     failures: await count`
       SELECT COUNT(*) AS count FROM (
@@ -57,8 +81,21 @@ async function main(): Promise<void> {
     failures: await count`
       SELECT COUNT(*) AS count
       FROM "FixedAsset" a
-      JOIN "FinanceEntry" e ON e.id = a."financeEntryId"
-      WHERE a."totalCost" <> e.amount
+      WHERE ABS((a."unitCost" * a.quantity) - a."totalCost") > 0.001
+         OR (a."importKey" IS NULL AND NOT EXISTS (
+           SELECT 1 FROM "FinanceEntry" e WHERE e.id = a."financeEntryId"
+         ))
+    `,
+  });
+
+  checks.push({
+    name: 'imported fixed asset allocation',
+    failures: await count`
+      SELECT CASE WHEN
+        COALESCE((SELECT SUM(a."totalCost") FROM "FixedAsset" a WHERE a."importKey" LIKE 'ASSET:HISTORICAL_SPEND:%'), 0)
+        =
+        COALESCE((SELECT SUM(l."lineTotal") FROM "LedgerEntryLine" l JOIN "FinanceEntry" e ON e.id = l."financeEntryId" WHERE l."itemType" = 'ASSET' AND e."importKey" LIKE 'PUR:HISTORICAL_SPEND:%'), 0)
+      THEN 0 ELSE 1 END AS count
     `,
   });
 

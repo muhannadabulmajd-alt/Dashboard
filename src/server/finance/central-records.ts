@@ -11,6 +11,7 @@ import { toMinor, convertToIqd } from '@/lib/money';
 import { parseDecimalInput } from '@/lib/decimal';
 import { CURRENCIES, EXPENSE_CATEGORY_TYPES, INVENTORY_CATEGORIES, PARTY_TYPES, PAYMENT_METHODS } from '@/lib/enums';
 import { ledgerUnitCostMinor } from '@/lib/ledger-lines';
+import { ledgerRecordClassForLines } from '@/lib/ledger-record-class';
 import { isMeasurementUnit } from '@/lib/units';
 import { syncActiveCost } from '@/server/inventory/fifo';
 import type { Currency, ExpenseCategoryType, FinanceType, ObligationKind, Prisma, Role } from '@prisma/client';
@@ -527,6 +528,7 @@ export async function createCentralRecord(_prev: ActionState, fd: FormData): Pro
       const entry = await tx.financeEntry.create({
         data: {
           ...baseEntryData(fd, date, money, 'PURCHASE', payable, payable ? 'PAYABLE' : null),
+          recordClass: ledgerRecordClassForLines(linePayload.lines),
           accountId: paidMode === 'PAID' ? optField(fd, 'accountId') ?? null : null,
           categoryType: overallCategory(linePayload.lines),
           paymentMethod: paidMode === 'CREDIT' ? 'CREDIT' : paymentMethod,
@@ -651,6 +653,7 @@ export async function createCentralRecord(_prev: ActionState, fd: FormData): Pro
       const entry = await tx.financeEntry.create({
         data: {
           ...baseEntryData(fd, date, money, 'PURCHASE', payable, payable ? 'PAYABLE' : null),
+          recordClass: 'PURCHASE',
           accountId: paidMode === 'PAID' ? optField(fd, 'accountId') ?? null : null,
           categoryType: categoryForInventory(item.category),
           paymentMethod: paidMode === 'CREDIT' ? 'CREDIT' : paymentMethod,
@@ -734,6 +737,7 @@ export async function createCentralRecord(_prev: ActionState, fd: FormData): Pro
       const entry = await tx.financeEntry.create({
         data: {
           ...baseEntryData(fd, date, money, 'PURCHASE', payable, payable ? 'PAYABLE' : null),
+          recordClass: 'PURCHASE',
           accountId: paidMode === 'PAID' ? optField(fd, 'accountId') ?? null : null,
           categoryType: 'EQUIPMENT',
           paymentMethod: paidMode === 'CREDIT' ? 'CREDIT' : paymentMethod,
@@ -814,6 +818,7 @@ export async function createCentralRecord(_prev: ActionState, fd: FormData): Pro
     const entry = await tx.financeEntry.create({
       data: {
         ...baseEntryData(fd, date, money, mapped.type, mapped.obligation, mapped.kind),
+        recordClass: mapped.type === 'EXPENSE' ? 'EXPENSE' : mapped.type === 'PURCHASE' ? 'PURCHASE' : null,
         createdById: user.id,
       },
       select: { id: true },

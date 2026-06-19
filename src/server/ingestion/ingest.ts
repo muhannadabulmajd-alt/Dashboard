@@ -13,12 +13,14 @@ import {
   parseShipments,
   type ImportDataset,
   type ProductInput,
+  type PurchaseInput,
   type RowError,
   type IngestSummary,
 } from './parsers';
 import { toMinor, convertToIqd } from '@/lib/money';
 import { getUsdToIqd } from '@/server/settings';
 import { syncActiveCost } from '@/server/inventory/fifo';
+import { ledgerRecordClassForLines } from '@/lib/ledger-record-class';
 
 const DATASET_TYPE: Record<ImportDataset, DatasetType> = {
   products: 'PRODUCTS',
@@ -31,13 +33,246 @@ const DATASET_TYPE: Record<ImportDataset, DatasetType> = {
   shipments: 'SHIPMENTS',
 };
 
-function csvToRows(csvText: string): Record<string, string>[] {
+function csvToRows(csvText: string): { rows: Record<string, string>[]; errors: RowError[] } {
   const parsed = Papa.parse<Record<string, string>>(csvText, {
     header: true,
-    skipEmptyLines: true,
-    transformHeader: (h) => h.trim(),
+    skipEmptyLines: 'greedy',
+    transformHeader: (h) => h.replace(/^\uFEFF/, '').trim(),
   });
-  return parsed.data;
+  return {
+    rows: parsed.data.filter((row) => Object.values(row).some((value) => value?.trim())),
+    errors: parsed.errors.map((error) => ({
+      row: (error.row ?? 0) + 2,
+      message: `CSV: ${error.message}`,
+    })),
+  };
+}
+type Tx = Prisma.TransactionClient;
+
+async function resolveImportParty(tx: Tx, name: string, type: 'SUPPLIER' | 'SHAREHOLDER'): Promise<string> {
+  const key = name.trim();
+  const found = await tx.party.findFirst({ where: { name: key }, select: { id: true } });
+  return (found ?? await tx.party.create({ data: { name: key, type }, select: { id: true } })).id;
+}
+
+async function resolveImportBranch(tx: Tx, code: string): Promise<string> {
+  const branch = await tx.branch.findUnique({ where: { code: code.trim().toUpperCase() }, select: { id: true } });
+  if (!branch) throw new Error(`unknown branch ${code}`);
+  return branch.id;
+}
+
+async function resolveImportAccount(tx: Tx, name: string, branchId: string): Promise<{ id: string; type: string }> {
+  let account = await tx.financeAccount.findFirst({
+    where: { name: { equals: name.trim(), mode: 'insensitive' }, branchId, isActive: true },
+    select: { id: true, type: true },
+  });
+  if (!account && name.trim().toLowerCase() === 'cash on hands') {
+    account = await tx.financeAccount.create({
+      data: { name: 'Cash on Hands', type: 'CASH', currency: 'IQD', branchId, openingBalance: 0 },
+      select: { id: true, type: true },
+    });
+  }
+  if (!account) throw new Error(`unknown payment account ${name}`);
+  return account;
+}
+
+async function ingestPurchaseRecord(
+  tx: Tx,
+  purchase: PurchaseInput,
+  uploadBatchId: string,
+  userId: string | null,
+): Promise<{ inserted: boolean; touchedItems: string[] }> {
+  const branchId = await resolveImportBranch(tx, purchase.branchCode);
+  const account = purchase.paymentMode === 'PAID'
+    ? await resolveImportAccount(tx, purchase.paymentAccount, branchId)
+    : null;
+  const supplierId = await resolveImportParty(tx, purchase.supplier, 'SUPPLIER');
+  const existing = await tx.financeEntry.findUnique({
+    where: { importKey: purchase.importKey },
+    select: { id: true, costLayers: { select: { inventoryItemId: true } } },
+  });
+  const touchedItems = new Set(existing?.costLayers.map((layer) => layer.inventoryItemId) ?? []);
+  if (existing) {
+    await tx.fixedAsset.deleteMany({ where: { financeEntryId: existing.id } });
+    await tx.inventoryCostLayer.deleteMany({ where: { financeEntryId: existing.id } });
+    await tx.stockMovement.deleteMany({ where: { financeEntryId: existing.id } });
+    await tx.financeEntry.deleteMany({ where: { settlesId: existing.id } });
+    await tx.financeEntry.delete({ where: { id: existing.id } });
+  }
+
+  const categories = purchase.lines.map((line) => line.categoryType).filter(Boolean);
+  const categoryType = categories.length && categories.every((value) => value === categories[0])
+    ? categories[0]
+    : null;
+  const usd = purchase.sourceCurrency === 'USD' && purchase.sourceAmount != null;
+  const entry = await tx.financeEntry.create({
+    data: {
+      date: purchase.date,
+      type: 'PURCHASE',
+      recordClass: ledgerRecordClassForLines(purchase.lines),
+      amount: purchase.amountIqd,
+      currency: 'IQD',
+      origCurrency: usd ? 'USD' : null,
+      origAmount: usd ? toMinor(purchase.sourceAmount as number, 'USD') : null,
+      fxRate: usd ? Math.round(purchase.rate ?? purchase.amountIqd / (purchase.sourceAmount as number)) : null,
+      obligation: purchase.paymentMode === 'CREDIT',
+      obligationKind: purchase.paymentMode === 'CREDIT' ? 'PAYABLE' : null,
+      dueDate: purchase.paymentMode === 'CREDIT' ? purchase.date : null,
+      accountId: account?.id ?? null,
+      partyId: supplierId,
+      categoryType,
+      paymentMethod: purchase.paymentMode === 'CREDIT' ? 'CREDIT' : account?.type === 'CASH' ? 'CASH' : 'OTHER',
+      description: purchase.description,
+      reference: purchase.reference,
+      branchId,
+      importKey: purchase.importKey,
+      createdById: userId,
+    },
+    select: { id: true },
+  });
+
+  for (const line of purchase.lines) {
+    const unitCost = (line.lineAmountIqd / line.quantity).toFixed(3);
+    let inventoryItemId: string | null = null;
+    let lineCategory = line.categoryType ?? null;
+    if (line.itemType === 'INVENTORY') {
+      const inventoryCategory = line.inventoryCategory;
+      if (!inventoryCategory) throw new Error(`${purchase.recordKey}: missing inventory category`);
+      const existingItem = await tx.inventoryItem.findFirst({
+        where: { nameAr: line.itemName, branchId },
+        select: { id: true },
+      });
+      const item = existingItem
+        ? await tx.inventoryItem.update({
+            where: { id: existingItem.id },
+            data: { category: inventoryCategory, unit: line.unit, isActive: true },
+            select: { id: true },
+          })
+        : await tx.inventoryItem.create({
+            data: {
+              nameEn: line.itemName,
+              nameAr: line.itemName,
+              category: inventoryCategory,
+              unit: line.unit,
+              unitCost,
+              branchId,
+            },
+            select: { id: true },
+          });
+      inventoryItemId = item.id;
+      touchedItems.add(item.id);
+      lineCategory = inventoryCategory === 'GREEN_COFFEE'
+        ? 'GREEN_COFFEE'
+        : inventoryCategory === 'PACKAGING' || inventoryCategory === 'DRIP_BAGS'
+          ? 'PACKAGING'
+          : null;
+      await tx.inventoryCostLayer.create({
+        data: {
+          inventoryItemId: item.id,
+          financeEntryId: entry.id,
+          qtyReceived: line.quantity.toFixed(3),
+          unitCost,
+          receivedAt: purchase.date,
+        },
+      });
+      await tx.stockMovement.create({
+        data: {
+          inventoryItemId: item.id,
+          financeEntryId: entry.id,
+          occurredAt: purchase.date,
+          reason: 'PURCHASE',
+          quantity: line.quantity.toFixed(3),
+          reference: purchase.reference,
+          externalId: `${purchase.importKey}:${line.lineNo}`,
+          branchId,
+          uploadBatchId,
+        },
+      });
+    }
+
+    await tx.ledgerEntryLine.create({
+      data: {
+        financeEntryId: entry.id,
+        lineNo: line.lineNo,
+        itemType: line.itemType,
+        itemName: line.itemName,
+        assetKey: line.assetKey ?? null,
+        assetCategory: line.assetCategory ?? null,
+        categoryType: line.itemType === 'ASSET' ? 'EQUIPMENT' : lineCategory,
+        inventoryItemId,
+        unit: line.unit,
+        quantity: line.quantity.toFixed(3),
+        unitCost,
+        landedUnitCost: unitCost,
+        lineTotal: line.lineAmountIqd,
+        branchId,
+        notes: line.notes ?? null,
+      },
+    });
+  }
+
+  return { inserted: !existing, touchedItems: [...touchedItems] };
+}
+
+async function syncImportedAssets(purchases: PurchaseInput[], userId: string | null): Promise<void> {
+  const assetKeys = new Set(
+    purchases.flatMap((purchase) => purchase.lines.map((line) => line.assetKey).filter(Boolean) as string[]),
+  );
+
+  for (const assetKey of assetKeys) {
+    await prisma.$transaction(async (tx) => {
+      const lines = await tx.ledgerEntryLine.findMany({
+        where: { assetKey, itemType: 'ASSET' },
+        include: {
+          financeEntry: {
+            select: { id: true, date: true, partyId: true, branchId: true, reference: true },
+          },
+        },
+        orderBy: [{ financeEntry: { date: 'asc' } }, { lineNo: 'asc' }],
+      });
+      if (!lines.length) return;
+      const first = lines[0];
+      const linked = lines[lines.length - 1].financeEntry;
+      const totalCost = lines.reduce((sum, line) => sum + line.lineTotal, 0);
+      const quantity = Math.max(...lines.map((line) => Number(line.quantity)));
+      const references = lines.map((line) => line.financeEntry.reference).filter(Boolean) as string[];
+      await tx.fixedAsset.upsert({
+        where: { importKey: `ASSET:HISTORICAL_SPEND:${assetKey}` },
+        create: {
+          importKey: `ASSET:HISTORICAL_SPEND:${assetKey}`,
+          name: first.itemName,
+          category: first.assetCategory ?? 'Equipment',
+          quantity: quantity.toFixed(3),
+          unit: first.unit,
+          totalCost,
+          unitCost: (totalCost / quantity).toFixed(3),
+          purchaseDate: first.financeEntry.date,
+          partyId: linked.partyId,
+          branchId: linked.branchId,
+          financeEntryId: linked.id,
+          notes: `Historical purchase references: ${[...new Set(references)].join(', ')}`,
+          createdById: userId,
+        },
+        update: {
+          name: first.itemName,
+          category: first.assetCategory ?? 'Equipment',
+          quantity: quantity.toFixed(3),
+          unit: first.unit,
+          totalCost,
+          unitCost: (totalCost / quantity).toFixed(3),
+          purchaseDate: first.financeEntry.date,
+          partyId: linked.partyId,
+          branchId: linked.branchId,
+          financeEntryId: linked.id,
+          notes: `Historical purchase references: ${[...new Set(references)].join(', ')}`,
+          isActive: true,
+          archivedAt: null,
+          archivedById: null,
+          archiveReason: null,
+        },
+      });
+    }, { timeout: 60_000 });
+  }
 }
 
 async function defaultBranchId(uploaderBranchId: string | null): Promise<string | null> {
@@ -51,7 +286,8 @@ export async function ingestCsv(
   csvText: string,
   opts: { userId: string | null; branchId: string | null; fileName: string },
 ): Promise<IngestSummary> {
-  const rows = csvToRows(csvText);
+  const csv = csvToRows(csvText);
+  const rows = csv.rows;
   const upload = await prisma.uploadBatch.create({
     data: {
       dataset: DATASET_TYPE[dataset],
@@ -65,7 +301,7 @@ export async function ingestCsv(
   let inserted = 0;
   let updated = 0;
   let skipped = 0;
-  const errors: RowError[] = [];
+  const errors: RowError[] = [...csv.errors];
 
   try {
     if (dataset === 'products') {
@@ -207,281 +443,72 @@ export async function ingestCsv(
           });
         }
       }
-    } else if (dataset === 'purchases' || dataset === 'capital') {
-      const parsed = dataset === 'purchases' ? parsePurchases(rows) : parseCapital(rows);
+    } else if (dataset === 'purchases') {
+      const parsed = parsePurchases(rows);
       errors.push(...parsed.errors);
-      if (parsed.errors.length) {
+      if (errors.length) {
         skipped = rows.length;
       } else {
-        const fallbackRate = dataset === 'capital' ? await getUsdToIqd() : null;
-        const touchedItems = new Set<string>();
-        let txInserted = 0;
-        let txUpdated = 0;
-        await prisma.$transaction(async (tx) => {
-          const partyCache = new Map<string, string>();
-          const branchCache = new Map<string, string>();
-          const accountCache = new Map<string, { id: string; type: string }>();
-
-          const resolveParty = async (name: string, type: 'SUPPLIER' | 'SHAREHOLDER') => {
-            const key = name.trim();
-            const cached = partyCache.get(key);
-            if (cached) return cached;
-            const found = await tx.party.findFirst({ where: { name: key }, select: { id: true } });
-            const party = found ?? (await tx.party.create({ data: { name: key, type }, select: { id: true } }));
-            partyCache.set(key, party.id);
-            return party.id;
-          };
-          const resolveBranch = async (code: string) => {
-            const key = code.trim().toUpperCase();
-            const cached = branchCache.get(key);
-            if (cached) return cached;
-            const branch = await tx.branch.findUnique({ where: { code: key }, select: { id: true } });
-            if (!branch) throw new Error(`unknown branch ${code}`);
-            branchCache.set(key, branch.id);
-            return branch.id;
-          };
-          const resolveAccount = async (name: string, branchId: string) => {
-            const key = `${branchId}:${name.trim().toLowerCase()}`;
-            const cached = accountCache.get(key);
-            if (cached) return cached;
-            let account = await tx.financeAccount.findFirst({
-              where: { name: { equals: name.trim(), mode: 'insensitive' }, branchId, isActive: true },
-              select: { id: true, type: true },
+        const successful: PurchaseInput[] = [];
+        for (const purchase of parsed.valid) {
+          let result: Awaited<ReturnType<typeof ingestPurchaseRecord>>;
+          try {
+            result = await prisma.$transaction(
+              (tx) => ingestPurchaseRecord(tx, purchase, upload.id, opts.userId),
+              { timeout: 60_000 },
+            );
+          } catch (error) {
+            skipped += purchase.lines.length;
+            errors.push({
+              row: 0,
+              message: `${purchase.recordKey}: ${error instanceof Error ? error.message : 'import failed'}`,
             });
-            if (!account && name.trim().toLowerCase() === 'cash on hands') {
-              account = await tx.financeAccount.create({
-                data: { name: 'Cash on Hands', type: 'CASH', currency: 'IQD', branchId, openingBalance: 0 },
-                select: { id: true, type: true },
-              });
-            }
-            if (!account) throw new Error(`unknown payment account ${name}`);
-            accountCache.set(key, account);
-            return account;
-          };
-
-          if (dataset === 'purchases') {
-            const purchases = parsed.valid as ReturnType<typeof parsePurchases>['valid'];
-            const assetGroups = new Map<string, {
-              name: string;
-              category: string;
-              totalCost: number;
-              quantity: number;
-              unit: string;
-              purchaseDate: Date;
-              partyId: string;
-              branchId: string;
-              financeEntryId: string;
-              references: string[];
-            }>();
-
-            for (const purchase of purchases) {
-              const branchId = await resolveBranch(purchase.branchCode);
-              const account = purchase.paymentMode === 'PAID'
-                ? await resolveAccount(purchase.paymentAccount, branchId)
-                : null;
-              const supplierId = await resolveParty(purchase.supplier, 'SUPPLIER');
+            continue;
+          }
+          if (result.inserted) inserted += 1;
+          else updated += 1;
+          successful.push(purchase);
+          try {
+            for (const itemId of result.touchedItems) await syncActiveCost(itemId);
+          } catch (error) {
+            errors.push({
+              row: 0,
+              message: `${purchase.recordKey} inventory cost refresh: ${error instanceof Error ? error.message : 'failed'}`,
+            });
+          }
+        }
+        if (successful.length) {
+          try {
+            await syncImportedAssets(successful, opts.userId);
+          } catch (error) {
+            errors.push({
+              row: 0,
+              message: `asset sync: ${error instanceof Error ? error.message : 'import failed'}`,
+            });
+          }
+        }
+      }
+    } else if (dataset === 'capital') {
+      const parsed = parseCapital(rows);
+      errors.push(...parsed.errors);
+      if (errors.length) {
+        skipped = rows.length;
+      } else {
+        const fallbackRate = await getUsdToIqd();
+        for (const contribution of parsed.valid) {
+          try {
+            const wasInserted = await prisma.$transaction(async (tx) => {
+              const branchId = await resolveImportBranch(tx, contribution.branchCode);
+              const account = await resolveImportAccount(tx, contribution.account, branchId);
+              const shareholderId = await resolveImportParty(tx, contribution.shareholder, 'SHAREHOLDER');
               const existing = await tx.financeEntry.findUnique({
-                where: { importKey: purchase.importKey },
-                select: { id: true, costLayers: { select: { inventoryItemId: true } } },
-              });
-              if (existing) {
-                existing.costLayers.forEach((layer) => touchedItems.add(layer.inventoryItemId));
-                await tx.fixedAsset.deleteMany({ where: { financeEntryId: existing.id } });
-                await tx.inventoryCostLayer.deleteMany({ where: { financeEntryId: existing.id } });
-                await tx.stockMovement.deleteMany({ where: { financeEntryId: existing.id } });
-                await tx.financeEntry.deleteMany({ where: { settlesId: existing.id } });
-                await tx.financeEntry.delete({ where: { id: existing.id } });
-                txUpdated += 1;
-              } else {
-                txInserted += 1;
-              }
-
-              const categories = purchase.lines.map((line) => line.categoryType).filter(Boolean);
-              const categoryType = categories.length && categories.every((value) => value === categories[0])
-                ? categories[0]
-                : null;
-              const usd = purchase.sourceCurrency === 'USD' && purchase.sourceAmount != null;
-              const entry = await tx.financeEntry.create({
-                data: {
-                  date: purchase.date,
-                  type: 'PURCHASE',
-                  amount: purchase.amountIqd,
-                  currency: 'IQD',
-                  origCurrency: usd ? 'USD' : null,
-                  origAmount: usd ? toMinor(purchase.sourceAmount as number, 'USD') : null,
-                  fxRate: usd ? Math.round(purchase.rate ?? purchase.amountIqd / (purchase.sourceAmount as number)) : null,
-                  obligation: purchase.paymentMode === 'CREDIT',
-                  obligationKind: purchase.paymentMode === 'CREDIT' ? 'PAYABLE' : null,
-                  dueDate: purchase.paymentMode === 'CREDIT' ? purchase.date : null,
-                  accountId: account?.id ?? null,
-                  partyId: supplierId,
-                  categoryType,
-                  paymentMethod: purchase.paymentMode === 'CREDIT' ? 'CREDIT' : account?.type === 'CASH' ? 'CASH' : 'OTHER',
-                  description: purchase.description,
-                  reference: purchase.reference,
-                  branchId,
-                  importKey: purchase.importKey,
-                  createdById: opts.userId,
-                },
+                where: { importKey: contribution.importKey },
                 select: { id: true },
               });
-
-              for (const line of purchase.lines) {
-                const unitCost = (line.lineAmountIqd / line.quantity).toFixed(3);
-                let inventoryItemId: string | null = null;
-                let lineCategory = line.categoryType ?? null;
-                if (line.itemType === 'INVENTORY') {
-                  const inventoryCategory = line.inventoryCategory;
-                  if (!inventoryCategory) throw new Error(`${purchase.recordKey}: missing inventory category`);
-                  const existingItem = await tx.inventoryItem.findFirst({
-                    where: { nameAr: line.itemName, branchId },
-                    select: { id: true },
-                  });
-                  const item = existingItem
-                    ? await tx.inventoryItem.update({
-                        where: { id: existingItem.id },
-                        data: { category: inventoryCategory, unit: line.unit, isActive: true },
-                        select: { id: true },
-                      })
-                    : await tx.inventoryItem.create({
-                        data: {
-                          nameEn: line.itemName,
-                          nameAr: line.itemName,
-                          category: inventoryCategory,
-                          unit: line.unit,
-                          unitCost,
-                          branchId,
-                        },
-                        select: { id: true },
-                      });
-                  inventoryItemId = item.id;
-                  touchedItems.add(item.id);
-                  lineCategory = inventoryCategory === 'GREEN_COFFEE'
-                    ? 'GREEN_COFFEE'
-                    : inventoryCategory === 'PACKAGING' || inventoryCategory === 'DRIP_BAGS'
-                      ? 'PACKAGING'
-                      : null;
-                  await tx.inventoryCostLayer.create({
-                    data: {
-                      inventoryItemId: item.id,
-                      financeEntryId: entry.id,
-                      qtyReceived: line.quantity.toFixed(3),
-                      unitCost,
-                      receivedAt: purchase.date,
-                    },
-                  });
-                  await tx.stockMovement.create({
-                    data: {
-                      inventoryItemId: item.id,
-                      financeEntryId: entry.id,
-                      occurredAt: purchase.date,
-                      reason: 'PURCHASE',
-                      quantity: line.quantity.toFixed(3),
-                      reference: purchase.reference,
-                      externalId: `${purchase.importKey}:${line.lineNo}`,
-                      branchId,
-                      uploadBatchId: upload.id,
-                    },
-                  });
-                }
-
-                await tx.ledgerEntryLine.create({
-                  data: {
-                    financeEntryId: entry.id,
-                    lineNo: line.lineNo,
-                    itemType: line.itemType,
-                    itemName: line.itemName,
-                    categoryType: line.itemType === 'ASSET' ? 'EQUIPMENT' : lineCategory,
-                    inventoryItemId,
-                    unit: line.unit,
-                    quantity: line.quantity.toFixed(3),
-                    unitCost,
-                    landedUnitCost: unitCost,
-                    lineTotal: line.lineAmountIqd,
-                    branchId,
-                    notes: line.notes ?? null,
-                  },
-                });
-
-                if (line.itemType === 'ASSET' && line.assetKey && line.assetCategory) {
-                  const current = assetGroups.get(line.assetKey);
-                  if (current) {
-                    current.totalCost += line.lineAmountIqd;
-                    current.quantity = Math.max(current.quantity, line.quantity);
-                    current.purchaseDate = current.purchaseDate < purchase.date ? current.purchaseDate : purchase.date;
-                    current.financeEntryId = entry.id;
-                    current.references.push(purchase.reference);
-                  } else {
-                    assetGroups.set(line.assetKey, {
-                      name: line.itemName,
-                      category: line.assetCategory,
-                      totalCost: line.lineAmountIqd,
-                      quantity: line.quantity,
-                      unit: line.unit,
-                      purchaseDate: purchase.date,
-                      partyId: supplierId,
-                      branchId,
-                      financeEntryId: entry.id,
-                      references: [purchase.reference],
-                    });
-                  }
-                }
-              }
-            }
-
-            for (const [assetKey, asset] of assetGroups) {
-              await tx.fixedAsset.upsert({
-                where: { importKey: `ASSET:HISTORICAL_SPEND:${assetKey}` },
-                create: {
-                  importKey: `ASSET:HISTORICAL_SPEND:${assetKey}`,
-                  name: asset.name,
-                  category: asset.category,
-                  quantity: asset.quantity.toFixed(3),
-                  unit: asset.unit,
-                  totalCost: asset.totalCost,
-                  unitCost: (asset.totalCost / asset.quantity).toFixed(3),
-                  purchaseDate: asset.purchaseDate,
-                  partyId: asset.partyId,
-                  branchId: asset.branchId,
-                  financeEntryId: asset.financeEntryId,
-                  notes: `Historical purchase references: ${[...new Set(asset.references)].join(', ')}`,
-                  createdById: opts.userId,
-                },
-                update: {
-                  name: asset.name,
-                  category: asset.category,
-                  quantity: asset.quantity.toFixed(3),
-                  unit: asset.unit,
-                  totalCost: asset.totalCost,
-                  unitCost: (asset.totalCost / asset.quantity).toFixed(3),
-                  purchaseDate: asset.purchaseDate,
-                  partyId: asset.partyId,
-                  branchId: asset.branchId,
-                  financeEntryId: asset.financeEntryId,
-                  notes: `Historical purchase references: ${[...new Set(asset.references)].join(', ')}`,
-                  isActive: true,
-                  archivedAt: null,
-                  archivedById: null,
-                  archiveReason: null,
-                },
-              });
-            }
-          } else {
-            const capital = parsed.valid as ReturnType<typeof parseCapital>['valid'];
-            for (const contribution of capital) {
-              const branchId = await resolveBranch(contribution.branchCode);
-              const account = await resolveAccount(contribution.account, branchId);
-              const shareholderId = await resolveParty(contribution.shareholder, 'SHAREHOLDER');
-              const existing = await tx.financeEntry.findUnique({ where: { importKey: contribution.importKey }, select: { id: true } });
-              if (existing) {
-                await tx.financeEntry.delete({ where: { id: existing.id } });
-                txUpdated += 1;
-              } else {
-                txInserted += 1;
-              }
+              if (existing) await tx.financeEntry.delete({ where: { id: existing.id } });
               const payMinor = toMinor(contribution.amount, contribution.currency);
               const usd = contribution.currency === 'USD';
-              const rate = usd ? Math.round(fallbackRate as number) : null;
+              const rate = usd ? Math.round(fallbackRate) : null;
               await tx.financeEntry.create({
                 data: {
                   date: contribution.date,
@@ -502,12 +529,18 @@ export async function ingestCsv(
                   createdById: opts.userId,
                 },
               });
-            }
+              return !existing;
+            }, { timeout: 60_000 });
+            if (wasInserted) inserted += 1;
+            else updated += 1;
+          } catch (error) {
+            skipped += 1;
+            errors.push({
+              row: 0,
+              message: `${contribution.importKey}: ${error instanceof Error ? error.message : 'import failed'}`,
+            });
           }
-        }, { timeout: 30_000 });
-        inserted += txInserted;
-        updated += txUpdated;
-        for (const itemId of touchedItems) await syncActiveCost(itemId);
+        }
       }
     } else if (dataset === 'shipments') {
       // Courier delivery report → one Shipment per order. Matched to our orders
