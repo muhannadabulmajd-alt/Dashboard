@@ -22,7 +22,7 @@ const s = StyleSheet.create({
   rtl: { textAlign: 'right' },
   header: { position: 'absolute', top: 16, left: 34, right: 34, flexDirection: 'row', justifyContent: 'space-between', color: C.muted, fontSize: 7 },
   footer: { position: 'absolute', bottom: 16, left: 34, right: 34, flexDirection: 'row', justifyContent: 'space-between', color: C.muted, fontSize: 7 },
-  cover: { height: '100%', justifyContent: 'center' },
+  cover: { flex: 1, justifyContent: 'center' },
   eyebrow: { color: C.amber, fontSize: 10, marginBottom: 8 },
   title: { color: C.grove, fontSize: 27, lineHeight: 1.25, marginBottom: 10 },
   subtitle: { color: C.muted, fontSize: 12, lineHeight: 1.5, marginBottom: 24 },
