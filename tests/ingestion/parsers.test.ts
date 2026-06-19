@@ -7,6 +7,7 @@ import {
   parseInventory,
   parsePurchases,
   parseCapital,
+  parseShipments,
 } from '@/server/ingestion/parsers';
 
 describe('product parser', () => {
@@ -221,6 +222,19 @@ describe('batch parser', () => {
     ]);
     expect(bad.errors).toHaveLength(1);
   });
+
+  it('preserves stable inventory keys for linked production', () => {
+    const result = parseBatches([{
+      batchNumber: 'LH-2026-GUJI', roastDate: '2026-05-01', origin: 'Guji', roastLevel: 'MEDIUM',
+      greenInputGrams: '21850', roastedOutputGrams: '19380', greenInventoryKey: 'GREEN_GUJI',
+      roastedInventoryKey: 'ROASTED_GUJI_BULK',
+    }]);
+    expect(result.errors).toHaveLength(0);
+    expect(result.valid[0]).toMatchObject({
+      greenInventoryKey: 'GREEN_GUJI',
+      roastedInventoryKey: 'ROASTED_GUJI_BULK',
+    });
+  });
 });
 
 describe('order parser', () => {
@@ -249,6 +263,22 @@ describe('order parser', () => {
     expect(valid[0].lines[1]).toMatchObject({ sku: 'LH-B', quantity: 2 });
   });
 
+  it('rejects conflicting headers for the same order number', () => {
+    const result = parseOrders([row({ sku: 'LH-A' }), row({ sku: 'LH-B', customerExternalId: 'C-2' })]);
+    expect(result.errors.some((error) => error.message.includes('conflicting order header'))).toBe(true);
+  });
+
+  it('parses provider finance and historical stock controls', () => {
+    const result = parseOrders([row({
+      paymentMode: 'PROVIDER_RECEIVABLE', paymentMethod: 'CASH', paymentPartyKey: 'HI_EXPRESS',
+      inventorySyncMode: 'SKIP_HISTORICAL',
+    })]);
+    expect(result.errors).toHaveLength(0);
+    expect(result.valid[0]).toMatchObject({
+      paymentMode: 'CREDIT', paymentPartyKey: 'HI_EXPRESS', inventorySyncMode: 'SKIP_HISTORICAL',
+    });
+  });
+
   it('reports invalid line rows and excludes them', () => {
     const { valid, errors } = parseOrders([row({ sku: 'LH-A' }), row({ orderNumber: 'O-2', quantity: '0' })]);
     expect(errors).toHaveLength(1); // quantity must be positive
@@ -267,5 +297,16 @@ describe('order parser', () => {
     expect(byNum['O-B'].status).toBe('PENDING');
     expect(byNum['O-B'].lines[0].unitGrossPrice).toBe(9667);
     expect(byNum['O-C'].status).toBe('COMPLETED');
+  });
+});
+
+describe('shipment parser', () => {
+  it('normalizes pending courier rows and keeps payable controls', () => {
+    const result = parseShipments([{
+      orderNumber: 'O-1', courier: 'Hi-Express', status: 'PENDING', governorate: 'BAGHDAD',
+      shippingCost: '5000', dispatchedAt: '2026-06-18', courierPartyKey: 'HI_EXPRESS', financeMode: 'NONE',
+    }]);
+    expect(result.errors).toHaveLength(0);
+    expect(result.valid[0]).toMatchObject({ status: 'IN_TRANSIT', courierPartyKey: 'HI_EXPRESS', financeMode: 'NONE' });
   });
 });

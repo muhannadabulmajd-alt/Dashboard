@@ -3,7 +3,6 @@
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
-import { Prisma } from '@prisma/client';
 import { prisma } from '@/server/db/client';
 import { FULFILLMENT_METHODS } from '@/lib/enums';
 import { invoicePaymentSnapshot, invoiceTotal } from '@/lib/invoice';
@@ -11,6 +10,7 @@ import { toMinor } from '@/lib/money';
 import { syncActiveCostForProducts } from '@/server/inventory/fifo';
 import { closeOrderFinance, syncOrderFinance, type FinanceSyncMode } from '@/server/finance/sync';
 import { getOrderStatusRoleMap } from '@/server/lists/resolver';
+import { applySoldMovements, syncCustomerStats } from '@/server/orders/sync';
 import { requireCap, audit, reqField, optField, type ActionState } from './shared';
 
 const LIST = '/[locale]/(dashboard)/admin/records/orders';
@@ -29,35 +29,6 @@ type LineData = {
   lineNet: number;
   unitCogsSnapshot: number;
 };
-
-/**
- * Deduct sold quantities from each variation's linked finished-goods inventory
- * item (variations module §18). Only products that have a linked InventoryItem
- * deduct; others are untracked. Forward-only — existing orders aren't backfilled.
- */
-async function applySoldMovements(
-  tx: Prisma.TransactionClient,
-  orderId: string,
-  occurredAt: Date,
-  lines: { productId: string; quantity: number }[],
-): Promise<void> {
-  const ids = lines.map((l) => l.productId);
-  const [items, prods] = await Promise.all([
-    tx.inventoryItem.findMany({ where: { productId: { in: ids } }, select: { id: true, productId: true } }),
-    tx.product.findMany({ where: { id: { in: ids } }, select: { id: true, trackInventory: true } }),
-  ]);
-  const byProduct = new Map<string, string>();
-  for (const i of items) if (i.productId) byProduct.set(i.productId, i.id);
-  // Variations with stock tracking turned off (§6, made-to-order) don't deduct.
-  const noTrack = new Set(prods.filter((p) => !p.trackInventory).map((p) => p.id));
-  const data = lines.flatMap((l) => {
-    const inventoryItemId = byProduct.get(l.productId);
-    return inventoryItemId && !noTrack.has(l.productId)
-      ? [{ inventoryItemId, orderId, occurredAt, reason: 'SOLD' as const, quantity: -l.quantity }]
-      : [];
-  });
-  if (data.length) await tx.stockMovement.createMany({ data });
-}
 
 const headerSchema = z.object({
   orderNumber: z.string().min(1),
@@ -118,28 +89,6 @@ const refundFor = (isReturn: boolean, gross: number, discount: number, deliveryF
   isReturn
     ? Math.max(0, gross - discount + deliveryFee + extraCharges)
     : 0;
-
-async function syncCustomerStats(
-  tx: Prisma.TransactionClient,
-  customerId: string | null | undefined,
-  saleStatuses: string[],
-): Promise<void> {
-  if (!customerId) return;
-  const stats = await tx.order.aggregate({
-    where: { customerId, status: { in: saleStatuses } },
-    _count: { _all: true },
-    _min: { placedAt: true },
-    _max: { placedAt: true },
-  });
-  await tx.customer.update({
-    where: { id: customerId },
-    data: {
-      ordersCount: stats._count._all,
-      firstOrderAt: stats._min.placedAt,
-      lastOrderAt: stats._max.placedAt,
-    },
-  });
-}
 
 export async function createOrder(_prev: ActionState, fd: FormData): Promise<ActionState> {
   const user = await requireCap(CAP);
@@ -271,7 +220,7 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
 
   const existing = await prisma.order.findUnique({
     where: { id },
-    select: { id: true, customerId: true, lines: { select: { productId: true } } },
+    select: { id: true, customerId: true, inventorySyncMode: true, lines: { select: { productId: true } } },
   });
   if (!existing) return { error: 'notfound' };
   const oldProductIds = existing.lines.map((l) => l.productId);
@@ -327,7 +276,9 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
       },
     });
     // Prior deductions were cleared above; re-apply only for a completed-sale role.
-    if (statusRole === 'SALE') await applySoldMovements(tx, id, h.data.placedAt, lineData);
+    if (statusRole === 'SALE' && existing.inventorySyncMode === 'NORMAL') {
+      await applySoldMovements(tx, id, h.data.placedAt, lineData);
+    }
     await syncOrderFinance(tx, id, {
       mode: h.data.financeMode as FinanceSyncMode,
       accountId: h.data.financeAccountId,

@@ -21,6 +21,11 @@ import { toMinor, convertToIqd } from '@/lib/money';
 import { getUsdToIqd } from '@/server/settings';
 import { syncActiveCost } from '@/server/inventory/fifo';
 import { ledgerRecordClassForLines } from '@/lib/ledger-record-class';
+import { preflightImport } from './preflight';
+import { upsertImportedOrder } from '@/server/orders/import-sync';
+import { upsertImportedShipment } from '@/server/shipments/import-sync';
+import { upsertImportedRoastBatch } from '@/server/roastery/import-sync';
+import { getOrderStatusRoleMap } from '@/server/lists/resolver';
 
 const DATASET_TYPE: Record<ImportDataset, DatasetType> = {
   products: 'PRODUCTS',
@@ -284,24 +289,51 @@ async function defaultBranchId(uploaderBranchId: string | null): Promise<string 
 export async function ingestCsv(
   dataset: ImportDataset,
   csvText: string,
-  opts: { userId: string | null; branchId: string | null; fileName: string },
+  opts: { userId: string | null; branchId: string | null; fileName: string; dryRun?: boolean },
 ): Promise<IngestSummary> {
   const csv = csvToRows(csvText);
   const rows = csv.rows;
+  const preflightErrors = [...csv.errors, ...await preflightImport(dataset, rows)];
+  if (opts.dryRun) {
+    return {
+      dataset,
+      rowsTotal: rows.length,
+      inserted: 0,
+      updated: 0,
+      skipped: preflightErrors.length ? rows.length : 0,
+      errors: preflightErrors,
+      uploadBatchId: 'dry-run',
+      dryRun: true,
+    };
+  }
   const upload = await prisma.uploadBatch.create({
     data: {
       dataset: DATASET_TYPE[dataset],
       fileName: opts.fileName,
       uploadedById: opts.userId,
-      status: 'PROCESSING',
+      status: preflightErrors.length ? 'FAILED' : 'PROCESSING',
       rowsTotal: rows.length,
+      rowsSkipped: preflightErrors.length ? rows.length : 0,
+      errorReport: preflightErrors.slice(0, 50) as unknown as Prisma.InputJsonValue,
     },
   });
+
+  if (preflightErrors.length) {
+    return {
+      dataset,
+      rowsTotal: rows.length,
+      inserted: 0,
+      updated: 0,
+      skipped: rows.length,
+      errors: preflightErrors,
+      uploadBatchId: upload.id,
+    };
+  }
 
   let inserted = 0;
   let updated = 0;
   let skipped = 0;
-  const errors: RowError[] = [...csv.errors];
+  const errors: RowError[] = [];
 
   try {
     if (dataset === 'products') {
@@ -364,18 +396,24 @@ export async function ingestCsv(
       const { valid, errors: e } = parseBatches(rows);
       errors.push(...e);
       for (const b of valid) {
-        const { batchNumber, ...rest } = b;
-        const data = { ...rest, branchId, uploadBatchId: upload.id };
-        const existing = await prisma.roastBatch.findUnique({
-          where: { batchNumber },
-          select: { id: true },
-        });
-        if (existing) {
-          await prisma.roastBatch.update({ where: { batchNumber }, data });
-          updated += 1;
-        } else {
-          await prisma.roastBatch.create({ data: { batchNumber, ...data } });
-          inserted += 1;
+        try {
+          const result = await prisma.$transaction(
+            (tx) => upsertImportedRoastBatch(tx, b, {
+              branchId,
+              uploadBatchId: upload.id,
+              userId: opts.userId,
+            }),
+            { timeout: 60_000 },
+          );
+          if (result.inserted) inserted += 1;
+          else updated += 1;
+          for (const itemId of result.touchedItemIds) await syncActiveCost(itemId);
+        } catch (error) {
+          skipped += 1;
+          errors.push({
+            row: 0,
+            message: `${b.batchNumber}: ${error instanceof Error ? error.message : 'import failed'}`,
+          });
         }
       }
     } else if (dataset === 'inventory') {
@@ -543,39 +581,22 @@ export async function ingestCsv(
         }
       }
     } else if (dataset === 'shipments') {
-      // Courier delivery report → one Shipment per order. Matched to our orders
-      // by orderNumber; idempotent via the order's unique shipment relation.
       const { valid, errors: e } = parseShipments(rows);
       errors.push(...e);
       for (const s of valid) {
-        const order = await prisma.order.findUnique({
-          where: { orderNumber: s.orderNumber },
-          select: { id: true, governorate: true },
-        });
-        if (!order) {
-          errors.push({ row: 0, message: `unknown order ${s.orderNumber}` });
+        try {
+          const wasInserted = await prisma.$transaction(
+            (tx) => upsertImportedShipment(tx, s, { userId: opts.userId }),
+            { timeout: 60_000 },
+          );
+          if (wasInserted) inserted += 1;
+          else updated += 1;
+        } catch (error) {
           skipped += 1;
-          continue;
-        }
-        const data = {
-          courier: s.courier ?? 'Courier',
-          status: s.status,
-          governorate: s.governorate ?? order.governorate,
-          shippingCost: s.shippingCost,
-          dispatchedAt: s.dispatchedAt ?? null,
-          deliveredAt: s.deliveredAt ?? null,
-          failureReason: s.failureReason ?? null,
-        };
-        const existing = await prisma.shipment.findUnique({
-          where: { orderId: order.id },
-          select: { id: true },
-        });
-        if (existing) {
-          await prisma.shipment.update({ where: { orderId: order.id }, data });
-          updated += 1;
-        } else {
-          await prisma.shipment.create({ data: { orderId: order.id, ...data } });
-          inserted += 1;
+          errors.push({
+            row: 0,
+            message: `${s.orderNumber}: ${error instanceof Error ? error.message : 'import failed'}`,
+          });
         }
       }
     } else {
@@ -583,110 +604,34 @@ export async function ingestCsv(
       const branchId = await defaultBranchId(opts.branchId);
       const { valid, errors: e } = parseOrders(rows);
       errors.push(...e);
-
+      const roles = await getOrderStatusRoleMap();
+      const saleStatuses = [...roles].filter(([, role]) => role === 'SALE').map(([code]) => code);
       for (const order of valid) {
-        // resolve customer + products
-        const customer = order.customerExternalId
-          ? await prisma.customer.findUnique({
-              where: { externalId: order.customerExternalId },
-              select: { id: true },
-            })
-          : null;
-
-        const lineData: {
-          productId: string;
-          sku: string;
-          quantity: number;
-          unitLabel: string;
-          unitGrossPrice: number;
-          lineDiscount: number;
-          lineNet: number;
-          unitCogsSnapshot: number;
-        }[] = [];
-        for (const l of order.lines) {
-          const product = await prisma.product.findUnique({
-            where: { sku: l.sku },
-            select: { id: true, cogsPerUnit: true, sellUnit: true },
-          });
-          if (!product) {
-            errors.push({ row: 0, message: `${order.orderNumber}: unknown SKU ${l.sku}` });
-            continue;
-          }
-          lineData.push({
-            productId: product.id,
-            sku: l.sku,
-            quantity: l.quantity,
-            unitLabel: product.sellUnit,
-            unitGrossPrice: l.unitGrossPrice,
-            lineDiscount: l.lineDiscount,
-            lineNet: l.unitGrossPrice * l.quantity - l.lineDiscount,
-            unitCogsSnapshot: product.cogsPerUnit,
-          });
-        }
-        if (lineData.length === 0) {
-          skipped += 1;
-          continue;
-        }
-
-        const gross = lineData.reduce((s, l) => s + l.unitGrossPrice * l.quantity, 0);
-        const discount = lineData.reduce((s, l) => s + l.lineDiscount, 0);
-        const refund = order.status === 'RETURNED' || order.status === 'REFUNDED' ? gross - discount : 0;
-        const orderData = {
-          placedAt: order.placedAt,
-          customerId: customer?.id ?? null,
-          branchId,
-          createdById: opts.userId,
-          channel: order.channel,
-          governorate: order.governorate,
-          fulfillmentMethod: order.fulfillmentMethod,
-          status: order.status,
-          grossAmount: gross,
-          discountAmount: discount,
-          refundAmount: refund,
-          deliveryFee: order.deliveryFee,
-          deliveryCost: order.deliveryCost,
-          uploadBatchId: upload.id,
-        };
-
-        await prisma.$transaction(async (tx) => {
-          const existing = await tx.order.findUnique({
-            where: { orderNumber: order.orderNumber },
+        try {
+          const result = await prisma.$transaction(
+            (tx) => upsertImportedOrder(tx, order, {
+              branchId,
+              uploadBatchId: upload.id,
+              userId: opts.userId,
+              statusRole: roles.get(order.status) ?? 'UNKNOWN',
+              saleStatuses,
+            }),
+            { timeout: 60_000 },
+          );
+          if (result.inserted) inserted += 1;
+          else updated += 1;
+          const touchedItems = await prisma.inventoryItem.findMany({
+            where: { productId: { in: result.productIds } },
             select: { id: true },
           });
-          if (existing) {
-            await tx.orderLine.deleteMany({ where: { orderId: existing.id } });
-            await tx.order.update({ where: { id: existing.id }, data: orderData });
-            await tx.orderLine.createMany({ data: lineData.map((l) => ({ ...l, orderId: existing.id })) });
-            updated += 1;
-          } else {
-            const created = await tx.order.create({
-              data: { orderNumber: order.orderNumber, ...orderData },
-            });
-            await tx.orderLine.createMany({ data: lineData.map((l) => ({ ...l, orderId: created.id })) });
-            inserted += 1;
-          }
-        });
-      }
-
-      // Refresh each customer's order aggregates so CRM metrics (segments,
-      // by-city, first/last order) reflect the imported orders.
-      const agg = await prisma.order.groupBy({
-        by: ['customerId'],
-        where: { customerId: { not: null } },
-        _count: { _all: true },
-        _min: { placedAt: true },
-        _max: { placedAt: true },
-      });
-      for (const a of agg) {
-        if (!a.customerId) continue;
-        await prisma.customer.update({
-          where: { id: a.customerId },
-          data: {
-            ordersCount: a._count._all,
-            firstOrderAt: a._min.placedAt,
-            lastOrderAt: a._max.placedAt,
-          },
-        });
+          for (const item of touchedItems) await syncActiveCost(item.id);
+        } catch (error) {
+          skipped += order.lines.length;
+          errors.push({
+            row: 0,
+            message: `${order.orderNumber}: ${error instanceof Error ? error.message : 'import failed'}`,
+          });
+        }
       }
     }
   } catch (err) {

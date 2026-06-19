@@ -21,6 +21,7 @@ export async function POST(req: NextRequest) {
     userId: user.id,
     branchId: user.branchId,
     fileName: file.name,
+    dryRun: String(form.get('dryRun') ?? '') === 'true',
   });
   return NextResponse.json(summary);
 }

@@ -261,7 +261,25 @@ export async function buildShareholderReportData(
       : entry.amount;
     const outstanding = Math.max(0, entry.amount - paidAmount);
     const paymentStatus = outstanding === 0 ? 'PAID' : paidAmount > 0 ? 'PARTIAL' : 'UNPAID';
-    const lineWeights = entry.ledgerLines.map((line) => line.lineTotal);
+    const reportLines = entry.ledgerLines.length > 0
+      ? entry.ledgerLines
+      : [{
+          id: `${entry.id}:direct`,
+          lineNo: 1,
+          itemType: 'EXPENSE',
+          itemName: entry.description ?? 'Operating expense',
+          assetKey: null,
+          categoryType: entry.categoryType,
+          inventoryItemId: null,
+          quantity: 1,
+          unit: 'unit',
+          unitCost: entry.amount,
+          landedUnitCost: entry.amount,
+          discountAmount: 0,
+          extraAmount: 0,
+          lineTotal: entry.amount,
+        }];
+    const lineWeights = reportLines.map((line) => line.lineTotal);
     const paidByLine = allocateInteger(paidAmount, lineWeights);
     const outstandingByLine = allocateInteger(outstanding, lineWeights);
     const month = entry.date.toISOString().slice(0, 7);
@@ -271,10 +289,10 @@ export async function buildShareholderReportData(
     monthly.set(month, monthRow);
     supplierTotals.set(entry.party?.name ?? 'Unassigned', (supplierTotals.get(entry.party?.name ?? 'Unassigned') ?? 0) + entry.amount);
 
-    const lineTotal = sum(entry.ledgerLines.map((line) => line.lineTotal));
+    const lineTotal = sum(reportLines.map((line) => line.lineTotal));
     if (lineTotal !== entry.amount) parentMismatchIds.push(entry.id);
     let allocated = 0;
-    for (const [lineIndex, line] of entry.ledgerLines.entries()) {
+    for (const [lineIndex, line] of reportLines.entries()) {
       const quantity = decimalNumber(line.quantity);
       const unitCost = decimalNumber(line.unitCost);
       const landedUnitCost = decimalNumber(line.landedUnitCost);

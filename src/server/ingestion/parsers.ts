@@ -42,6 +42,7 @@ export interface IngestSummary {
   skipped: number;
   errors: RowError[];
   uploadBatchId: string;
+  dryRun?: boolean;
 }
 
 type Raw = Record<string, string>;
@@ -138,6 +139,7 @@ const statusField = z.preprocess((v) => {
 const FULFILLMENT_ALIASES: Record<string, (typeof FULFILLMENT_METHODS)[number]> = {
   HAND_DELIVERY: 'INTERNAL_DELIVERY', HAND: 'INTERNAL_DELIVERY', IN_HOUSE: 'INTERNAL_DELIVERY',
   DELIVERY: 'INTERNAL_DELIVERY', PICK_UP: 'PICKUP', STORE_PICKUP: 'PICKUP',
+  WALK_IN: 'PICKUP', WALKIN: 'PICKUP',
   WHOLESALE: 'B2B', BRANCH: 'BRANCH_SALE',
 };
 const fulfillmentField = z.preprocess((v) => {
@@ -310,6 +312,8 @@ export interface BatchInput {
   roastedOutputGrams?: number;
   qcScore?: number;
   qcNotes?: string;
+  greenInventoryKey?: string;
+  roastedInventoryKey?: string;
 }
 
 const batchSchema = z
@@ -323,6 +327,8 @@ const batchSchema = z
     roastedOutputGrams: z.preprocess(blank, z.coerce.number().int().positive().optional()),
     qcScore: z.preprocess(blank, z.coerce.number().optional()),
     qcNotes: optStr,
+    greenInventoryKey: optStr,
+    roastedInventoryKey: optStr,
   })
   .transform((r): BatchInput => ({ ...r, batchNumber: r.batchNumber.trim() }));
 
@@ -588,6 +594,8 @@ export interface ShipmentInput {
   dispatchedAt?: Date;
   deliveredAt?: Date;
   failureReason?: string;
+  courierPartyKey?: string;
+  financeMode: 'NONE' | 'PAYABLE';
 }
 
 // Courier reports describe the delivery lifecycle in their own words (Arabic and
@@ -596,7 +604,7 @@ export interface ShipmentInput {
 const SHIPMENT_STATUS_ALIASES: Record<string, (typeof SHIPMENT_STATUSES)[number]> = {
   DELIVERED: 'DELIVERED', DONE: 'DELIVERED', COMPLETED: 'DELIVERED', SUCCESS: 'DELIVERED',
   DISPATCHED: 'DISPATCHED', SENT: 'DISPATCHED', SHIPPED: 'DISPATCHED', PICKED_UP: 'DISPATCHED',
-  IN_TRANSIT: 'IN_TRANSIT', OUT_FOR_DELIVERY: 'IN_TRANSIT', ON_THE_WAY: 'IN_TRANSIT',
+  IN_TRANSIT: 'IN_TRANSIT', PENDING: 'IN_TRANSIT', OUT_FOR_DELIVERY: 'IN_TRANSIT', ON_THE_WAY: 'IN_TRANSIT',
   PROCESSING: 'IN_TRANSIT', AT_WAREHOUSE: 'IN_TRANSIT',
   FAILED: 'FAILED', CANCELLED: 'FAILED', CANCELED: 'FAILED', POSTPONED: 'FAILED', REJECTED: 'FAILED',
   RETURNED: 'RETURNED', RETURN: 'RETURNED',
@@ -617,6 +625,11 @@ const shipmentSchema = z
     dispatchedAt: optDate,
     deliveredAt: optDate,
     failureReason: optStr,
+    courierPartyKey: optStr,
+    financeMode: z.preprocess((value) => {
+      if (typeof value !== 'string' || value.trim() === '') return 'NONE';
+      return normEnum(value);
+    }, z.enum(['NONE', 'PAYABLE'])),
   })
   .transform((r): ShipmentInput => ({ ...r, orderNumber: r.orderNumber.trim() }));
 
@@ -640,6 +653,11 @@ export interface OrderInput {
   status: (typeof ORDER_STATUSES)[number];
   deliveryFee: number;
   deliveryCost: number;
+  paymentMode: 'NONE' | 'PAID' | 'CREDIT';
+  paymentMethod?: string;
+  paymentPartyKey?: string;
+  paymentAccountKey?: string;
+  inventorySyncMode: 'NORMAL' | 'SKIP_HISTORICAL';
   lines: OrderLineInput[];
 }
 
@@ -657,6 +675,18 @@ const orderRowSchema = z.object({
   lineDiscount: optMoney0,
   deliveryFee: optMoney0,
   deliveryCost: optMoney0,
+  paymentMode: z.preprocess((value) => {
+    if (typeof value !== 'string' || value.trim() === '') return 'NONE';
+    const code = normEnum(value);
+    return code === 'PROVIDER_RECEIVABLE' ? 'CREDIT' : code;
+  }, z.enum(['NONE', 'PAID', 'CREDIT'])),
+  paymentMethod: optStr,
+  paymentPartyKey: optStr,
+  paymentAccountKey: optStr,
+  inventorySyncMode: z.preprocess((value) => {
+    if (typeof value !== 'string' || value.trim() === '') return 'NORMAL';
+    return normEnum(value);
+  }, z.enum(['NORMAL', 'SKIP_HISTORICAL'])),
 });
 
 /** Validate order-line rows and group them into orders by order number. */
@@ -677,9 +707,32 @@ export function parseOrders(rows: Raw[]): ParseResult<OrderInput> {
         status: r.status,
         deliveryFee: r.deliveryFee,
         deliveryCost: r.deliveryCost,
+        paymentMode: r.paymentMode,
+        paymentMethod: r.paymentMethod,
+        paymentPartyKey: r.paymentPartyKey,
+        paymentAccountKey: r.paymentAccountKey,
+        inventorySyncMode: r.inventorySyncMode,
         lines: [],
       };
       byOrder.set(key, order);
+    } else {
+      const sameHeader = order.placedAt.getTime() === r.placedAt.getTime()
+        && order.customerExternalId === r.customerExternalId
+        && order.channel === r.channel
+        && order.governorate === r.governorate
+        && order.fulfillmentMethod === r.fulfillmentMethod
+        && order.status === r.status
+        && order.deliveryFee === r.deliveryFee
+        && order.deliveryCost === r.deliveryCost
+        && order.paymentMode === r.paymentMode
+        && order.paymentMethod === r.paymentMethod
+        && order.paymentPartyKey === r.paymentPartyKey
+        && order.paymentAccountKey === r.paymentAccountKey
+        && order.inventorySyncMode === r.inventorySyncMode;
+      if (!sameHeader) {
+        errors.push({ row: 0, message: `${key}: conflicting order header values` });
+        continue;
+      }
     }
     order.lines.push({
       sku: r.sku.trim(),
@@ -703,12 +756,12 @@ export const TEMPLATES: Record<ImportDataset, { headers: string[]; example: stri
     example: ['C-1001', '+9647700000000', '', 'Ahmed', 'أحمد', 'BAGHDAD', 'NEW', 'instagram'],
   },
   orders: {
-    headers: ['orderNumber', 'placedAt', 'customerExternalId', 'channel', 'governorate', 'fulfillmentMethod', 'status', 'sku', 'quantity', 'unitGrossPrice', 'lineDiscount', 'deliveryFee', 'deliveryCost'],
-    example: ['LH-O-90001', '2026-06-01 14:30', 'C-1001', 'ONLINE_STORE', 'BAGHDAD', 'COURIER', 'COMPLETED', 'LH-ESP-SPRING-250-WB', '2', '13000', '0', '4000', '5000'],
+    headers: ['orderNumber', 'placedAt', 'customerExternalId', 'channel', 'governorate', 'fulfillmentMethod', 'status', 'sku', 'quantity', 'unitGrossPrice', 'lineDiscount', 'deliveryFee', 'deliveryCost', 'paymentMode', 'paymentMethod', 'paymentPartyKey', 'paymentAccountKey', 'inventorySyncMode'],
+    example: ['LH-O-90001', '2026-06-01 14:30', 'C-1001', 'ONLINE_STORE', 'BAGHDAD', 'COURIER', 'COMPLETED', 'LH-ESP-SPRING-250-WB', '2', '13000', '0', '4000', '5000', 'CREDIT', 'CASH', 'HI_EXPRESS', '', 'NORMAL'],
   },
   batches: {
-    headers: ['batchNumber', 'roastDate', 'packagingDate', 'origin', 'roastLevel', 'greenInputGrams', 'roastedOutputGrams', 'qcScore', 'qcNotes'],
-    example: ['LH-2026-0100', '2026-06-01', '2026-06-02', 'Ethiopia', 'LIGHT', '30000', '25500', '86.5', 'Bright, floral'],
+    headers: ['batchNumber', 'roastDate', 'packagingDate', 'origin', 'roastLevel', 'greenInputGrams', 'roastedOutputGrams', 'qcScore', 'qcNotes', 'greenInventoryKey', 'roastedInventoryKey'],
+    example: ['LH-2026-0100', '2026-06-01', '2026-06-02', 'Ethiopia', 'LIGHT', '30000', '25500', '', '', 'GREEN_ETHIOPIA', 'ROASTED_ETHIOPIA_BULK'],
   },
   inventory: {
     headers: ['item', 'category', 'unit', 'opening', 'additions', 'deductions', 'unitCost', 'reorderPoint', 'avgDailyUsage'],
@@ -723,8 +776,8 @@ export const TEMPLATES: Record<ImportDataset, { headers: string[]; example: stri
     example: ['مهند منجد', '1000000', '2025-01-01', 'IQD', 'HISTORICAL-CAPITAL', 'Cash on Hands', 'HQ'],
   },
   shipments: {
-    headers: ['orderNumber', 'courier', 'status', 'governorate', 'shippingCost', 'dispatchedAt', 'deliveredAt', 'failureReason'],
-    example: ['LH-O-90001', 'سما السندباد', 'DELIVERED', 'BAGHDAD', '5000', '2026-06-01', '2026-06-03', ''],
+    headers: ['orderNumber', 'courier', 'status', 'governorate', 'shippingCost', 'dispatchedAt', 'deliveredAt', 'failureReason', 'courierPartyKey', 'financeMode'],
+    example: ['LH-O-90001', 'Hi-Express', 'DELIVERED', 'BAGHDAD', '5000', '2026-06-01', '2026-06-03', '', 'HI_EXPRESS', 'PAYABLE'],
   },
 };
 

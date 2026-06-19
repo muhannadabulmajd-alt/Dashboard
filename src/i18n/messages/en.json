@@ -232,6 +232,17 @@
     "contributions": "Contributions",
     "noDues": "No outstanding dues.",
     "settleTitle": "Record a payment",
+    "providerSettlement": {
+      "action": "Settle Hi-Express / Wayl",
+      "title": "Settle a payment provider",
+      "subtitle": "Clear all open provider dues in one audited transaction.",
+      "provider": "Provider",
+      "received": "Amount actually received",
+      "hint": "Hi-Express must equal receivables minus delivery costs. For Wayl, the difference is recorded as commission.",
+      "submit": "Record settlement",
+      "amountError": "The received amount does not match the provider's open balance.",
+      "providerError": "The provider setup is missing."
+    },
     "totalCapital": "Total capital",
     "assignAccount": "Set paying account for imported purchases",
     "assignHint": "Applies the chosen account to imported purchases of the same currency that don't have one yet, so cash balances reflect history.",
@@ -1138,6 +1149,8 @@
     "file": "CSV file",
     "import": "Import",
     "template": "Template",
+    "dryRun": "Validate only — do not import",
+    "dryRunResult": "Validation result (no data was changed)",
     "datasets": {
       "products": "Products",
       "customers": "Customers",

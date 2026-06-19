@@ -66,6 +66,28 @@ function fakeDb(missingRecordKey = false) {
   };
 }
 
+function fakeDbWithDirectExpense() {
+  const db = fakeDb() as ReturnType<typeof fakeDb> & {
+    financeEntry: { findMany: () => Promise<ReturnType<typeof entry>[]> };
+  };
+  const baseFindMany = db.financeEntry.findMany;
+  db.financeEntry.findMany = async () => [
+    ...await baseFindMany(),
+    entry({
+      id: 'delivery',
+      recordKey: 'DOC000102',
+      type: 'EXPENSE',
+      amount: 25,
+      obligation: true,
+      obligationKind: 'PAYABLE',
+      categoryType: 'SHIPPING',
+      party: { name: 'Courier' },
+      description: 'Delivery cost',
+    }),
+  ];
+  return db;
+}
+
 describe('shareholder finance report', () => {
   it('reconciles capital, mixed spending, FIFO inventory, assets, cash and payables', async () => {
     const report = await buildShareholderReportData({ asOf, db: fakeDb() as never });
@@ -97,6 +119,18 @@ describe('shareholder finance report', () => {
     const report = await buildShareholderReportData({ asOf, db: fakeDb(true) as never });
     expect(report.internallyReconciled).toBe(false);
     expect(report.checks.find((row) => row.key === 'record_key_traceability')?.status).toBe('FAIL');
+  });
+
+  it('reconciles direct operating expenses without fabricating ledger records', async () => {
+    const report = await buildShareholderReportData({ asOf, db: fakeDbWithDirectExpense() as never });
+    expect(report.internallyReconciled).toBe(true);
+    expect(report.baseline.totalSpending).toBe(725);
+    expect(report.baseline.operatingSpending).toBe(325);
+    expect(report.spendLines.find((row) => row.entryId === 'delivery')).toMatchObject({
+      itemType: 'EXPENSE',
+      category: 'SHIPPING',
+      lineTotal: 25,
+    });
   });
 
   it('renders the Arabic PDF and creates the bilingual audit workbook', async () => {

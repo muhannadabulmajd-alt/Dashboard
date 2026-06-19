@@ -117,6 +117,7 @@ enum CustomerSegment {
 enum MovementReason {
   OPENING
   PURCHASE
+  PRODUCTION_OUT
   PRODUCTION_IN
   SOLD
   SAMPLED
@@ -125,6 +126,11 @@ enum MovementReason {
   GIVEAWAY
   INTERNAL
   ADJUSTMENT
+}
+
+enum InventorySyncMode {
+  NORMAL
+  SKIP_HISTORICAL
 }
 
 enum InventoryCategory {
@@ -423,6 +429,7 @@ model Order {
   notes             String? // CR-2: free-form order notes
   offerId           String?
   uploadBatchId     String?
+  inventorySyncMode InventorySyncMode @default(NORMAL)
   createdAt         DateTime          @default(now())
 
   lines          OrderLine[]
@@ -466,29 +473,37 @@ model OrderLine {
 // ---------------------------------------------------------------------------
 
 model RoastBatch {
-  id                 String    @id @default(cuid())
-  batchNumber        String    @unique
-  roastDate          DateTime?
-  packagingDate      DateTime?
-  origin             String
-  roastLevel         String? // list-managed code
-  profileNotes       String?
-  greenInputGrams    Int
-  roastedOutputGrams Int?
-  qcScore            Float?
-  qcNotes            String?
-  operatorId         String?
-  branchId           String?
-  uploadBatchId      String?
-  isActive           Boolean   @default(true)
-  createdAt          DateTime  @default(now())
+  id                     String    @id @default(cuid())
+  batchNumber            String    @unique
+  roastDate              DateTime?
+  packagingDate          DateTime?
+  origin                 String
+  roastLevel             String? // list-managed code
+  profileNotes           String?
+  greenInputGrams        Int
+  roastedOutputGrams     Int?
+  qcScore                Float?
+  qcNotes                String?
+  operatorId             String?
+  branchId               String?
+  uploadBatchId          String?
+  greenInventoryItemId   String?
+  roastedInventoryItemId String?
+  isActive               Boolean   @default(true)
+  createdAt              DateTime  @default(now())
 
-  operator User?          @relation("BatchOperator", fields: [operatorId], references: [id])
-  branch   Branch?        @relation(fields: [branchId], references: [id])
-  skuLinks BatchSkuLink[]
+  operator             User?                @relation("BatchOperator", fields: [operatorId], references: [id])
+  branch               Branch?              @relation(fields: [branchId], references: [id])
+  greenInventoryItem   InventoryItem?       @relation("BatchGreenInventory", fields: [greenInventoryItemId], references: [id])
+  roastedInventoryItem InventoryItem?       @relation("BatchRoastedInventory", fields: [roastedInventoryItemId], references: [id])
+  skuLinks             BatchSkuLink[]
+  stockMovements       StockMovement[]
+  costLayers           InventoryCostLayer[]
 
   @@index([roastDate])
   @@index([roastLevel])
+  @@index([greenInventoryItemId])
+  @@index([roastedInventoryItemId])
 }
 
 model BatchSkuLink {
@@ -509,6 +524,7 @@ model BatchSkuLink {
 
 model InventoryItem {
   id            String            @id @default(cuid())
+  externalKey   String?           @unique
   category      InventoryCategory
   productId     String?
   nameEn        String
@@ -521,12 +537,14 @@ model InventoryItem {
   isActive      Boolean           @default(true)
   createdAt     DateTime          @default(now())
 
-  product     Product?             @relation(fields: [productId], references: [id])
-  branch      Branch?              @relation(fields: [branchId], references: [id])
-  movements   StockMovement[]
-  recipeUses  ProductComponent[]
-  costLayers  InventoryCostLayer[]
-  ledgerLines LedgerEntryLine[]
+  product        Product?             @relation(fields: [productId], references: [id])
+  branch         Branch?              @relation(fields: [branchId], references: [id])
+  movements      StockMovement[]
+  recipeUses     ProductComponent[]
+  costLayers     InventoryCostLayer[]
+  ledgerLines    LedgerEntryLine[]
+  greenBatches   RoastBatch[]         @relation("BatchGreenInventory")
+  roastedBatches RoastBatch[]         @relation("BatchRoastedInventory")
 
   @@index([category])
 }
@@ -539,6 +557,7 @@ model InventoryCostLayer {
   id              String   @id @default(cuid())
   inventoryItemId String
   financeEntryId  String?
+  roastBatchId    String?
   qtyReceived     Decimal  @db.Decimal(14, 3)
   unitCost        Decimal  @db.Decimal(14, 3) // minor units IQD per unit
   receivedAt      DateTime
@@ -546,9 +565,11 @@ model InventoryCostLayer {
 
   inventoryItem InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
   financeEntry  FinanceEntry? @relation(fields: [financeEntryId], references: [id], onDelete: SetNull)
+  roastBatch    RoastBatch?   @relation(fields: [roastBatchId], references: [id], onDelete: Cascade)
 
   @@index([inventoryItemId, receivedAt])
   @@index([financeEntryId])
+  @@index([roastBatchId])
 }
 
 model StockMovement {
@@ -564,17 +585,20 @@ model StockMovement {
   branchId        String?
   uploadBatchId   String?
   orderId         String? // sales deduction source (variations module §18)
+  roastBatchId    String?
   createdAt       DateTime       @default(now())
 
   inventoryItem InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
   financeEntry  FinanceEntry? @relation(fields: [financeEntryId], references: [id], onDelete: SetNull)
   branch        Branch?       @relation(fields: [branchId], references: [id])
   order         Order?        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  roastBatch    RoastBatch?   @relation(fields: [roastBatchId], references: [id], onDelete: Cascade)
 
   @@index([inventoryItemId, occurredAt])
   @@index([financeEntryId])
   @@index([reason])
   @@index([orderId])
+  @@index([roastBatchId])
 }
 
 model LedgerEntryLine {
@@ -718,21 +742,24 @@ model ListOption {
 // ---------------------------------------------------------------------------
 
 model Shipment {
-  id            String         @id @default(cuid())
-  orderId       String         @unique
-  courier       String
-  status        ShipmentStatus @default(DISPATCHED)
-  dispatchedAt  DateTime?
-  deliveredAt   DateTime?
-  shippingCost  Int            @default(0)
-  governorate   String // list-managed code
-  failureReason String?
-  createdAt     DateTime       @default(now())
+  id             String         @id @default(cuid())
+  orderId        String         @unique
+  courier        String
+  status         ShipmentStatus @default(DISPATCHED)
+  dispatchedAt   DateTime?
+  deliveredAt    DateTime?
+  shippingCost   Int            @default(0)
+  governorate    String // list-managed code
+  failureReason  String?
+  courierPartyId String?
+  createdAt      DateTime       @default(now())
 
-  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  order        Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  courierParty Party? @relation(fields: [courierPartyId], references: [id], onDelete: SetNull)
 
   @@index([status])
   @@index([courier])
+  @@index([courierPartyId])
 }
 
 // ---------------------------------------------------------------------------
@@ -873,6 +900,7 @@ enum ObligationKind {
 
 model FinanceAccount {
   id             String      @id @default(cuid())
+  externalKey    String?     @unique
   name           String
   type           AccountType
   bankName       String?
@@ -891,6 +919,7 @@ model FinanceAccount {
 
 model Party {
   id                String    @id @default(cuid())
+  externalKey       String?   @unique
   name              String
   type              PartyType @default(OTHER)
   phone             String?
@@ -906,6 +935,7 @@ model Party {
 
   entries     FinanceEntry[]
   fixedAssets FixedAsset[]
+  shipments   Shipment[]
 
   @@index([type])
   @@index([branchId])

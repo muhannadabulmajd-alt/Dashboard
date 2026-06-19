@@ -91,6 +91,7 @@ export async function syncOrderFinance(
     paidAmount?: number | null;
     paymentMethod?: string | null;
     paymentDate?: Date | null;
+    partyId?: string | null;
     statusRole: OrderMetricRole;
   },
 ) {
@@ -138,7 +139,7 @@ export async function syncOrderFinance(
       await closeOrDeleteAutoEntry(tx, paidKey, `Closed paid income sync for order ${order.orderNumber}`);
       return;
     }
-    const partyId = await resolveOrderParty(tx, order.id);
+    const partyId = input.partyId ?? await resolveOrderParty(tx, order.id);
     await tx.financeEntry.upsert({
       where: { importKey: paidKey },
       create: {
@@ -183,7 +184,7 @@ export async function syncOrderFinance(
 
   await closeOrDeleteAutoEntry(tx, paidKey, `Replaced by receivable sync for order ${order.orderNumber}`);
 
-  const partyId = await resolveOrderParty(tx, order.id);
+  const partyId = input.partyId ?? await resolveOrderParty(tx, order.id);
   const receivable = await tx.financeEntry.upsert({
     where: { importKey: arKey },
     create: {

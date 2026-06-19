@@ -23,6 +23,7 @@ export async function importCsv(_prev: ImportState, formData: FormData): Promise
     userId: user.id,
     branchId: user.branchId,
     fileName: file.name,
+    dryRun: formData.get('dryRun') === 'true',
   });
 
   revalidatePath('/[locale]/(dashboard)/admin/uploads', 'page');

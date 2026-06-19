@@ -52,6 +52,10 @@ export function UploadForm() {
             <Download className="size-3.5" />
             {t('template')}
           </a>
+          <label className="ms-auto inline-flex items-center gap-2 text-xs text-muted-foreground">
+            <input name="dryRun" type="checkbox" value="true" className="size-4 rounded border" />
+            {t('dryRun')}
+          </label>
         </div>
       </form>
 
@@ -59,6 +63,7 @@ export function UploadForm() {
 
       {summary ? (
         <div className="rounded-[var(--radius)] border bg-card p-4 text-sm">
+          {summary.dryRun ? <p className="mb-2 font-semibold text-primary">{t('dryRunResult')}</p> : null}
           <div className="flex flex-wrap gap-4">
             <span className="text-success">
               {t('inserted')}: <b>{summary.inserted}</b>
