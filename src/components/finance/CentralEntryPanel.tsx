@@ -13,9 +13,9 @@ type InventoryOption = Option & { unit: string; category: string; name: string }
 type QuickCreateResult = { ok: true; id: string; label: string } | { ok: false; error: string };
 type CreateAction = (prev: ActionState, fd: FormData) => Promise<ActionState>;
 type QuickAction = (fd: FormData) => Promise<QuickCreateResult>;
-type LineType = 'INVENTORY' | 'EXPENSE' | 'SERVICE' | 'OTHER';
+type LineType = 'INVENTORY' | 'ASSET' | 'EXPENSE' | 'SERVICE' | 'OTHER';
 
-type LedgerLineRow = {
+export type LedgerLineRow = {
   id: string;
   type: LineType;
   itemName: string;
@@ -25,12 +25,34 @@ type LedgerLineRow = {
   newItemNameAr: string;
   newItemCategory: string;
   categoryType: string;
+  assetKey: string;
+  assetCategory: string;
   unit: string;
   quantity: string;
   unitCost: string;
   discount: string;
   extra: string;
   notes: string;
+};
+
+export type CentralEntryInitial = {
+  recordKind?: RecordKind;
+  date?: string;
+  amount?: string;
+  currency?: string;
+  rate?: string;
+  accountId?: string;
+  branchId?: string;
+  partyId?: string;
+  paymentMode?: string;
+  paidAmount?: string;
+  paymentDate?: string;
+  dueDate?: string;
+  paymentMethod?: string;
+  reference?: string;
+  description?: string;
+  attachmentUrl?: string;
+  lines?: Partial<LedgerLineRow>[];
 };
 
 type RecordKind =
@@ -64,6 +86,8 @@ function makeLine(overrides: Partial<LedgerLineRow> = {}): LedgerLineRow {
     newItemNameAr: '',
     newItemCategory: 'PACKAGING',
     categoryType: 'OVERHEAD',
+    assetKey: '',
+    assetCategory: 'Equipment',
     unit: 'unit',
     quantity: '1.000',
     unitCost: '',
@@ -130,6 +154,7 @@ const COPY = {
     expenseLine: 'Expense',
     serviceLine: 'Service',
     otherLine: 'Other',
+    assetLine: 'Equipment / asset',
     existingItem: 'Use existing item',
     newItem: 'Create new item',
     itemNameEn: 'Item name',
@@ -153,6 +178,9 @@ const COPY = {
     attachment: 'Attachment link',
     assetName: 'Asset name',
     assetCategory: 'Asset type',
+    assetKey: 'Asset reference',
+    changeReason: 'Reason for change',
+    save: 'Save changes',
     submit: 'Add record',
     cancel: 'Cancel',
     invalid: 'Please check the required fields.',
@@ -198,6 +226,7 @@ const COPY = {
     expenseLine: 'مصروف',
     serviceLine: 'خدمة',
     otherLine: 'أخرى',
+    assetLine: 'معدّة / أصل',
     existingItem: 'استخدام صنف موجود',
     newItem: 'إنشاء صنف جديد',
     itemNameEn: 'اسم الصنف',
@@ -221,6 +250,9 @@ const COPY = {
     attachment: 'رابط المرفق',
     assetName: 'اسم الأصل',
     assetCategory: 'نوع الأصل',
+    assetKey: 'مرجع الأصل',
+    changeReason: 'سبب التعديل',
+    save: 'حفظ التعديلات',
     submit: 'إضافة السجل',
     cancel: 'إلغاء',
     invalid: 'يرجى مراجعة الحقول المطلوبة.',
@@ -330,6 +362,9 @@ export function CentralEntryPanel({
   inventoryItems,
   branches,
   cancelHref,
+  initial,
+  lockKind = false,
+  editMode = false,
 }: {
   action: CreateAction;
   createParty: QuickAction;
@@ -341,19 +376,24 @@ export function CentralEntryPanel({
   inventoryItems: InventoryOption[];
   branches: Option[];
   cancelHref: string;
+  initial?: CentralEntryInitial;
+  lockKind?: boolean;
+  editMode?: boolean;
 }) {
   const c = COPY[locale];
   const [state, formAction, pending] = useActionState<ActionState, FormData>(action, undefined);
-  const [recordKind, setRecordKind] = useState<RecordKind>('MONEY_IN');
-  const [currency, setCurrency] = useState('IQD');
-  const [paymentMode, setPaymentMode] = useState('PAID');
-  const [paidAmount, setPaidAmount] = useState('');
-  const [lines, setLines] = useState<LedgerLineRow[]>(() => [
-    makeLine(),
-    makeLine({ type: 'EXPENSE', itemName: 'Delivery fee', categoryType: 'SHIPPING', quantity: '1.000', unit: 'unit' }),
-  ]);
+  const [recordKind, setRecordKind] = useState<RecordKind>(initial?.recordKind ?? 'MONEY_IN');
+  const [currency, setCurrency] = useState(initial?.currency ?? 'IQD');
+  const [paymentMode, setPaymentMode] = useState(initial?.paymentMode ?? 'PAID');
+  const [paidAmount, setPaidAmount] = useState(initial?.paidAmount ?? '');
+  const [lines, setLines] = useState<LedgerLineRow[]>(() => initial?.lines?.length
+    ? initial.lines.map((line) => makeLine(line))
+    : [
+      makeLine(),
+      makeLine({ type: 'EXPENSE', itemName: 'Delivery fee', categoryType: 'SHIPPING', quantity: '1.000', unit: 'unit' }),
+    ]);
   const [partyOptions, setPartyOptions] = useState<Option[]>(parties);
-  const [partyId, setPartyId] = useState('');
+  const [partyId, setPartyId] = useState(initial?.partyId ?? '');
   const [popup, setPopup] = useState<'party' | 'customer' | null>(null);
   const [quickPending, startQuick] = useTransition();
   const [quickError, setQuickError] = useState('');
@@ -437,7 +477,7 @@ export function CentralEntryPanel({
             <p className="text-sm font-semibold text-foreground">{c.choose}</p>
             <p className="text-xs leading-5 text-muted-foreground">{selectedKind.hint[locale]}</p>
           </div>
-          <div className="grid gap-2 md:grid-cols-3 xl:grid-cols-4">
+          <div className={cn('grid gap-2 md:grid-cols-3 xl:grid-cols-4', lockKind && 'hidden')}>
             {(Object.keys(KIND_LABELS) as RecordKind[]).map((kind) => (
               <button
                 key={kind}
@@ -455,9 +495,9 @@ export function CentralEntryPanel({
         </div>
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          <Field name="date" labelText={c.date} type="date" required value={today} />
+          <Field name="date" labelText={c.date} type="date" required value={initial?.date ?? today} />
           {recordKind === 'STOCK_PURCHASE' ? null : (
-            <Field name="amount" labelText={c.amount} type="number" required step="0.01" placeholder="0" />
+            <Field name="amount" labelText={c.amount} type="number" required step="0.01" placeholder="0" value={initial?.amount} />
           )}
           <SelectField
             name="currency"
@@ -470,18 +510,18 @@ export function CentralEntryPanel({
             onChange={setCurrency}
             empty={false}
           />
-          {currency === 'USD' ? <Field name="rate" labelText={c.rate} type="number" required step="1" /> : null}
+          {currency === 'USD' ? <Field name="rate" labelText={c.rate} type="number" required step="1" value={initial?.rate} /> : null}
 
           {recordKind === 'TRANSFER' ? (
             <>
-              <SelectField name="accountId" labelText={c.fromAccount} options={accounts} required />
+              <SelectField name="accountId" labelText={c.fromAccount} options={accounts} required value={initial?.accountId} />
               <SelectField name="toAccountId" labelText={c.toAccount} options={accounts} required />
             </>
           ) : showPaidAccount ? (
-            <SelectField name="accountId" labelText={c.account} options={accounts} required={paymentMode !== 'CREDIT'} />
+            <SelectField name="accountId" labelText={c.account} options={accounts} required={paymentMode !== 'CREDIT'} value={initial?.accountId} />
           ) : null}
 
-          <SelectField name="branchId" labelText={c.branch} options={branches} />
+          <SelectField name="branchId" labelText={c.branch} options={branches} value={initial?.branchId} />
 
           {['STOCK_PURCHASE', 'ASSET_PURCHASE'].includes(recordKind) ? (
             <>
@@ -500,15 +540,15 @@ export function CentralEntryPanel({
               {paymentMode === 'PARTIAL' ? (
                 <>
                   <Field name="paidAmount" labelText={c.paidAmount} type="number" required step="0.01" value={paidAmount} onChange={setPaidAmount} placeholder="0" />
-                  <Field name="paymentDate" labelText={c.paymentDate} type="date" value={today} />
+                  <Field name="paymentDate" labelText={c.paymentDate} type="date" value={initial?.paymentDate ?? today} />
                 </>
               ) : null}
-              {paymentMode !== 'PAID' ? <Field name="dueDate" labelText={c.dueDate} type="date" value={today} /> : null}
+              {paymentMode !== 'PAID' ? <Field name="dueDate" labelText={c.dueDate} type="date" value={initial?.dueDate ?? today} /> : null}
             </>
           ) : null}
 
           {(recordKind === 'STOCK_PURCHASE' || recordKind === 'ASSET_PURCHASE') && (paymentMode === 'PAID' || paymentMode === 'PARTIAL') ? (
-            <SelectField name="paymentMethod" labelText={c.paymentMethod} options={paymentMethodOptions} empty={false} />
+            <SelectField name="paymentMethod" labelText={c.paymentMethod} options={paymentMethodOptions} empty={false} value={initial?.paymentMethod} />
           ) : null}
 
           {['CUSTOMER_DUE', 'SUPPLIER_DUE'].includes(recordKind) ? <Field name="dueDate" labelText={c.dueDate} type="date" value={today} /> : null}
@@ -587,6 +627,7 @@ export function CentralEntryPanel({
                         onChange={(value) => updateLine(row.id, { type: value as LineType })}
                         options={[
                           { value: 'INVENTORY', label: c.inventoryLine },
+                          { value: 'ASSET', label: c.assetLine },
                           { value: 'EXPENSE', label: c.expenseLine },
                           { value: 'SERVICE', label: c.serviceLine },
                           { value: 'OTHER', label: c.otherLine },
@@ -633,6 +674,12 @@ export function CentralEntryPanel({
                               />
                             </>
                           )}
+                        </>
+                      ) : row.type === 'ASSET' ? (
+                        <>
+                          <Field name={`${prefix}itemName`} labelText={c.assetName} required value={row.itemName} onChange={(value) => updateLine(row.id, { itemName: value })} />
+                          <Field name={`${prefix}assetCategory`} labelText={c.assetCategory} required value={row.assetCategory} onChange={(value) => updateLine(row.id, { assetCategory: value })} />
+                          <Field name={`${prefix}assetKey`} labelText={c.assetKey} value={row.assetKey} onChange={(value) => updateLine(row.id, { assetKey: value })} />
                         </>
                       ) : (
                         <>
@@ -687,9 +734,10 @@ export function CentralEntryPanel({
         ) : null}
 
         <div className="grid gap-4 md:grid-cols-3">
-          <Field name="reference" labelText={c.reference} />
-          <Field name="description" labelText={c.note} />
-          <Field name="attachmentUrl" labelText={c.attachment} type="url" />
+          <Field name="reference" labelText={c.reference} value={initial?.reference} />
+          <Field name="description" labelText={c.note} value={initial?.description} />
+          <Field name="attachmentUrl" labelText={c.attachment} type="url" value={initial?.attachmentUrl} />
+          {editMode ? <Field name="changeReason" labelText={c.changeReason} required /> : null}
         </div>
 
         {state?.error ? (
@@ -705,7 +753,7 @@ export function CentralEntryPanel({
             className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-amber/90 disabled:opacity-60"
           >
             {pending ? <Loader2 className="size-4 animate-spin" /> : null}
-            {c.submit}
+            {editMode ? c.save : c.submit}
           </button>
           <Link href={cancelHref} className="inline-flex min-h-10 items-center rounded-lg border border-border/80 bg-card px-4 py-2 text-sm font-semibold text-roast hover:bg-linen/45">
             {c.cancel}

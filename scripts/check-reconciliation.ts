@@ -121,6 +121,67 @@ async function main(): Promise<void> {
   });
 
   checks.push({
+    name: 'orphan finance-linked inventory records',
+    failures: await count`
+      SELECT COUNT(*) AS count FROM (
+        SELECT c.id
+        FROM "InventoryCostLayer" c
+        WHERE c."financeEntryId" IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM "LedgerEntryLine" l
+            WHERE l."financeEntryId" = c."financeEntryId"
+              AND l."inventoryItemId" = c."inventoryItemId"
+              AND l."itemType" = 'INVENTORY'
+          )
+        UNION ALL
+        SELECT m.id
+        FROM "StockMovement" m
+        WHERE m."financeEntryId" IS NOT NULL AND m.reason = 'PURCHASE'
+          AND NOT EXISTS (
+            SELECT 1 FROM "LedgerEntryLine" l
+            WHERE l."financeEntryId" = m."financeEntryId"
+              AND l."inventoryItemId" = m."inventoryItemId"
+              AND l."itemType" = 'INVENTORY'
+          )
+      ) orphans
+    `,
+  });
+
+  checks.push({
+    name: 'asset line allocations',
+    failures: await count`
+      SELECT COUNT(*) AS count FROM (
+        SELECT l."assetKey" AS key
+        FROM "LedgerEntryLine" l
+        WHERE l."itemType" = 'ASSET' AND l."assetKey" IS NOT NULL
+        GROUP BY l."assetKey"
+        HAVING SUM(l."lineTotal") <> COALESCE((
+          SELECT SUM(a."totalCost") FROM "FixedAsset" a
+          WHERE a."importKey" = 'ASSET:HISTORICAL_SPEND:' || l."assetKey"
+        ), 0)
+        UNION ALL
+        SELECT l."financeEntryId" AS key
+        FROM "LedgerEntryLine" l
+        WHERE l."itemType" = 'ASSET' AND l."assetKey" IS NULL
+        GROUP BY l."financeEntryId"
+        HAVING SUM(l."lineTotal") <> COALESCE((
+          SELECT SUM(a."totalCost") FROM "FixedAsset" a
+          WHERE a."financeEntryId" = l."financeEntryId" AND a."importKey" IS NULL
+        ), 0)
+      ) mismatches
+    `,
+  });
+
+  checks.push({
+    name: 'non-inventory lines without stock links',
+    failures: await count`
+      SELECT COUNT(*) AS count
+      FROM "LedgerEntryLine" l
+      WHERE l."itemType" <> 'INVENTORY' AND l."inventoryItemId" IS NOT NULL
+    `,
+  });
+
+  checks.push({
     name: 'fixed asset totals',
     failures: await count`
       SELECT COUNT(*) AS count

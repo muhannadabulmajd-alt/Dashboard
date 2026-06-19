@@ -16,7 +16,7 @@ import { BackLink, DetailGrid, type DetailField } from '@/components/records/par
 import { DataTable, type Column } from '@/components/data-table/DataTable';
 import { RecordActions } from '@/components/records/RecordActions';
 import { RecordForm, type FieldDef } from '@/components/records/form';
-import { archiveInventory, deleteInventory, receiveStock } from '@/server/records/inventory';
+import { archiveInventory, deleteInventory, receiveStock, setInventoryQuantity } from '@/server/records/inventory';
 
 export default async function InventoryDetailPage({
   params,
@@ -25,7 +25,7 @@ export default async function InventoryDetailPage({
   params: Promise<{ locale: string; id: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { locale } = await getPageContext(params, searchParams, 'manage:inventory');
+  const { locale, user } = await getPageContext(params, searchParams, 'manage:inventory');
   const { id } = await params;
   const t = await getTranslations('records');
   const [item, accounts, parties] = await Promise.all([
@@ -150,6 +150,12 @@ export default async function InventoryDetailPage({
     },
   ];
   const receiveErrors = { invalid: t('err.invalid'), forbidden: t('err.forbidden') };
+  const ownerAdmin = user.role === 'OWNER' || user.role === 'ADMIN';
+  const adjustmentFields: FieldDef[] = [
+    { name: 'targetQuantity', label: t('f.targetQuantity'), type: 'number', required: true, step: '0.001', hint: t('h.targetQuantity') },
+    { name: 'occurredAt', label: t('f.adjustmentDate'), type: 'date', required: true },
+    { name: 'adjustmentReason', label: t('f.adjustmentReason'), type: 'text', required: true, hint: t('h.adjustmentReason') },
+  ];
 
   return (
     <>
@@ -169,6 +175,23 @@ export default async function InventoryDetailPage({
         }}
       />
       <DetailGrid items={items} />
+
+      {ownerAdmin ? (
+        <div className="mt-6 space-y-2">
+          <h3 className="text-sm font-semibold">{t('setStockQuantity')}</h3>
+          <p className="text-xs text-muted-foreground">{t('setStockQuantityHint')}</p>
+          <RecordForm
+            action={setInventoryQuantity.bind(null, item.id)}
+            fields={adjustmentFields}
+            initial={{ targetQuantity: current.toFixed(3), occurredAt: dateInputValue() }}
+            locale={locale}
+            submitLabel={t('setStockQuantitySubmit')}
+            cancelHref={`/admin/records/inventory/${item.id}`}
+            cancelLabel={t('cancel')}
+            errors={receiveErrors}
+          />
+        </div>
+      ) : null}
 
       {roast ? (
         <div className="mt-4 space-y-2">
