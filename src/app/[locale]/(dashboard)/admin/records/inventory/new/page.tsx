@@ -23,7 +23,11 @@ export default async function NewInventoryPage({
   const { locale } = await getPageContext(params, searchParams, 'manage:inventory');
   const t = await getTranslations('records');
   const tk = (k: string) => t(k);
-  const products = await variationOptions(locale);
+  const [products, branchRows] = await Promise.all([
+    variationOptions(locale),
+    prisma.branch.findMany({ where: { isActive: true }, orderBy: { nameEn: 'asc' } }),
+  ]);
+  const branches = branchRows.map((branch) => ({ value: branch.id, label: locale === 'ar' ? branch.nameAr : branch.nameEn }));
   const errors = { invalid: t('err.invalid'), exists: t('err.exists'), forbidden: t('err.forbidden') };
 
   return (
@@ -32,7 +36,7 @@ export default async function NewInventoryPage({
       <PageHeader title={t('newTitle', { entity: t('entities.inventory') })} />
       <RecordForm
         action={createInventory}
-        fields={inventoryFields(tk, locale, products)}
+        fields={inventoryFields(tk, locale, products, branches)}
         locale={locale}
         submitLabel={t('create')}
         cancelHref="/admin/records/inventory"

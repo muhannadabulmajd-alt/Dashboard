@@ -37,7 +37,7 @@ const RECORD_KINDS = [
 type RecordKind = (typeof RECORD_KINDS)[number];
 type Tx = Prisma.TransactionClient;
 
-const LINE_TYPES = ['INVENTORY', 'EXPENSE', 'SERVICE', 'OTHER'] as const;
+const LINE_TYPES = ['INVENTORY', 'ASSET', 'EXPENSE', 'SERVICE', 'OTHER'] as const;
 type LedgerLineType = (typeof LINE_TYPES)[number];
 
 const PURCHASE_PAYMENT_MODES = ['PAID', 'CREDIT', 'PARTIAL'] as const;
@@ -58,6 +58,8 @@ type ParsedLedgerLine = {
   itemType: LedgerLineType;
   itemName: string;
   categoryType: ExpenseCategoryType | null;
+  assetKey: string | null;
+  assetCategory: string | null;
   inventoryItemId: string | null;
   inventoryItemMode: 'existing' | 'new';
   newItemNameEn: string;
@@ -201,6 +203,8 @@ async function parseLedgerLines(fd: FormData): Promise<{ lines: ParsedLedgerLine
       itemType,
       itemName: reqField(fd, `${prefix}itemName`),
       categoryType,
+      assetKey: optField(fd, `${prefix}assetKey`) ?? null,
+      assetCategory: optField(fd, `${prefix}assetCategory`) ?? null,
       inventoryItemId: optField(fd, `${prefix}inventoryItemId`) ?? null,
       inventoryItemMode,
       newItemNameEn: reqField(fd, `${prefix}newItemNameEn`),
@@ -569,6 +573,8 @@ export async function createCentralRecord(_prev: ActionState, fd: FormData): Pro
             },
           });
           touchedItems.push(item.id);
+        } else if (line.itemType === 'ASSET') {
+          categoryType = 'EQUIPMENT';
         } else if (!categoryType) {
           categoryType = 'OVERHEAD';
         }
@@ -579,6 +585,8 @@ export async function createCentralRecord(_prev: ActionState, fd: FormData): Pro
             lineNo: line.lineNo,
             itemType: line.itemType,
             itemName,
+            assetKey: line.assetKey,
+            assetCategory: line.assetCategory,
             categoryType,
             inventoryItemId,
             unit: line.unit,
@@ -592,6 +600,24 @@ export async function createCentralRecord(_prev: ActionState, fd: FormData): Pro
             notes: line.notes,
           },
         });
+        if (line.itemType === 'ASSET') {
+          await tx.fixedAsset.create({
+            data: {
+              name: itemName,
+              category: line.assetCategory ?? 'Equipment',
+              quantity: decimalData(line.quantity),
+              unit: line.unit,
+              totalCost: line.lineTotal,
+              unitCost: line.landedUnitCost,
+              purchaseDate: date,
+              partyId: optField(fd, 'partyId') ?? null,
+              branchId: line.branchId,
+              financeEntryId: entry.id,
+              notes: line.notes,
+              createdById: user.id,
+            },
+          });
+        }
       }
 
       if (paidMode === 'PARTIAL') {
@@ -841,6 +867,206 @@ export async function createCentralRecord(_prev: ActionState, fd: FormData): Pro
   for (const itemId of touchedItems) await syncActiveCost(itemId);
   revalidateFinancePaths();
   redirect(`/${locale}/finance/ledger/${newId}`);
+}
+
+export async function updateCentralPurchase(
+  id: string,
+  _prev: ActionState,
+  fd: FormData,
+): Promise<ActionState> {
+  const user = await requireOwnerAdminUser();
+  if (!user) return { error: 'forbidden' };
+  const locale = reqField(fd, 'locale') || 'ar';
+  const date = parseDate(reqField(fd, 'date'));
+  const payload = await parseLedgerLines(fd);
+  const changeReason = reqField(fd, 'changeReason');
+  if (!date || !payload || !changeReason) return { error: 'invalid' };
+
+  const paidMode = parsePurchasePaymentMode(fd);
+  const paymentMethod = parsePaymentMethod(fd);
+  const paidAmountMajor = parseMajorAmount(optField(fd, 'paidAmount'), true);
+  const currencyShape = await parseCurrencyShape(fd);
+  const paidAmount = paidMode === 'PAID'
+    ? payload.money.amount
+    : paidMode === 'PARTIAL' && paidAmountMajor != null && currencyShape
+      ? inputMajorToIqdMinor(paidAmountMajor, currencyShape.currency, currencyShape.fxRate)
+      : 0;
+  if (paidMode === 'PARTIAL' && (paidAmount <= 0 || paidAmount >= payload.money.amount)) return { error: 'invalid' };
+  if (paidMode !== 'CREDIT' && !optField(fd, 'accountId')) return { error: 'invalid' };
+
+  const touchedItems = new Set<string>();
+  try {
+    await prisma.$transaction(async (tx) => {
+      const before = await entrySnapshot(tx, id);
+      if (!before || before.type !== 'PURCHASE') throw new Error('invalid-entry');
+      before.stockMovements.forEach((movement) => touchedItems.add(movement.inventoryItemId));
+
+      await tx.inventoryCostLayer.deleteMany({ where: { financeEntryId: id } });
+      await tx.stockMovement.deleteMany({ where: { financeEntryId: id } });
+      await tx.fixedAsset.deleteMany({ where: { financeEntryId: id } });
+      await tx.ledgerEntryLine.deleteMany({ where: { financeEntryId: id } });
+
+      await tx.financeEntry.update({
+        where: { id },
+        data: {
+          date,
+          amount: payload.money.amount,
+          origCurrency: payload.money.origCurrency,
+          origAmount: payload.money.origAmount,
+          fxRate: payload.money.fxRate,
+          recordClass: ledgerRecordClassForLines(payload.lines),
+          obligation: paidMode !== 'PAID',
+          obligationKind: paidMode !== 'PAID' ? 'PAYABLE' : null,
+          dueDate: paidMode !== 'PAID' ? parseOptionalDate(optField(fd, 'dueDate')) ?? date : null,
+          accountId: paidMode === 'PAID' ? optField(fd, 'accountId') ?? null : null,
+          partyId: optField(fd, 'partyId') ?? null,
+          categoryType: overallCategory(payload.lines),
+          paymentMethod: paidMode === 'CREDIT' ? 'CREDIT' : paymentMethod,
+          branchId: optField(fd, 'branchId') ?? null,
+          description: optField(fd, 'description') ?? null,
+          reference: optField(fd, 'reference') ?? null,
+          attachmentUrl: optField(fd, 'attachmentUrl') ?? null,
+        },
+      });
+
+      for (const line of payload.lines) {
+        let inventoryItemId: string | null = null;
+        let categoryType = line.categoryType;
+        let itemName = line.itemName;
+        if (line.itemType === 'INVENTORY') {
+          const item = await resolveLineInventoryItem(tx, line, user.id);
+          if (!item) throw new Error('invalid-inventory-line');
+          inventoryItemId = item.id;
+          categoryType = categoryForInventory(item.category);
+          itemName ||= item.nameEn;
+          touchedItems.add(item.id);
+          await tx.inventoryCostLayer.create({
+            data: {
+              inventoryItemId: item.id,
+              financeEntryId: id,
+              qtyReceived: decimalData(line.quantity),
+              unitCost: line.landedUnitCost,
+              receivedAt: date,
+            },
+          });
+          await tx.stockMovement.create({
+            data: {
+              inventoryItemId: item.id,
+              financeEntryId: id,
+              occurredAt: date,
+              reason: 'PURCHASE',
+              quantity: decimalData(line.quantity),
+              reference: optField(fd, 'reference') ?? null,
+              branchId: line.branchId ?? item.branchId,
+            },
+          });
+        } else if (line.itemType === 'ASSET') {
+          categoryType = 'EQUIPMENT';
+        } else if (!categoryType) {
+          categoryType = 'OVERHEAD';
+        }
+        if (!itemName) throw new Error('invalid-line-name');
+
+        await tx.ledgerEntryLine.create({
+          data: {
+            financeEntryId: id,
+            lineNo: line.lineNo,
+            itemType: line.itemType,
+            itemName,
+            assetKey: line.assetKey,
+            assetCategory: line.assetCategory,
+            categoryType,
+            inventoryItemId,
+            unit: line.unit,
+            quantity: decimalData(line.quantity),
+            unitCost: line.unitCost,
+            landedUnitCost: line.landedUnitCost,
+            discountAmount: line.discountAmount,
+            extraAmount: line.extraAmount,
+            lineTotal: line.lineTotal,
+            branchId: line.branchId,
+            notes: line.notes,
+          },
+        });
+
+        if (line.itemType === 'ASSET') {
+          await tx.fixedAsset.create({
+            data: {
+              name: itemName,
+              category: line.assetCategory ?? 'Equipment',
+              quantity: decimalData(line.quantity),
+              unit: line.unit,
+              totalCost: line.lineTotal,
+              unitCost: line.landedUnitCost,
+              purchaseDate: date,
+              partyId: optField(fd, 'partyId') ?? null,
+              branchId: line.branchId,
+              financeEntryId: id,
+              notes: line.notes,
+              createdById: user.id,
+            },
+          });
+        }
+      }
+
+      const settlements = before.settlements.filter((row) => !row.archivedAt && !row.reversedAt && !row.reversalOfId);
+      if (paidMode === 'PARTIAL') {
+        const settlementData = {
+          date: parseOptionalDate(optField(fd, 'paymentDate')) ?? date,
+          type: 'PAYMENT_OUT' as const,
+          amount: paidAmount,
+          currency: 'IQD' as const,
+          obligation: false,
+          accountId: optField(fd, 'accountId') ?? null,
+          partyId: optField(fd, 'partyId') ?? null,
+          categoryType: overallCategory(payload.lines),
+          paymentMethod,
+          branchId: optField(fd, 'branchId') ?? null,
+          description: `Payment for ${optField(fd, 'reference') ?? id.slice(-8)}`,
+          reference: optField(fd, 'reference') ?? null,
+          createdById: user.id,
+        };
+        if (settlements[0]) {
+          await tx.financeEntry.update({ where: { id: settlements[0].id }, data: settlementData });
+        } else {
+          await tx.financeEntry.create({ data: { ...settlementData, settlesId: id } });
+        }
+        if (settlements.length > 1) {
+          await tx.financeEntry.updateMany({
+            where: { id: { in: settlements.slice(1).map((row) => row.id) } },
+            data: { archivedAt: new Date(), archivedById: user.id, archiveReason: 'Consolidated during invoice edit' },
+          });
+        }
+      } else if (settlements.length) {
+        await tx.financeEntry.updateMany({
+          where: { id: { in: settlements.map((row) => row.id) } },
+          data: { archivedAt: new Date(), archivedById: user.id, archiveReason: 'Payment status changed during invoice edit' },
+        });
+      }
+
+      const after = await entrySnapshot(tx, id);
+      await tx.auditLog.create({
+        data: {
+          userId: user.id,
+          action: 'UPDATE',
+          entity: 'FinanceEntry',
+          entityId: id,
+          metadata: {
+            source: 'multi-item-ledger-editor',
+            reason: changeReason,
+            before: jsonSafe(before),
+            after: jsonSafe(after),
+          },
+        },
+      });
+    }, { timeout: 60_000 });
+  } catch {
+    return { error: 'invalid' };
+  }
+
+  for (const itemId of touchedItems) await syncActiveCost(itemId);
+  revalidateFinancePaths();
+  redirect(`/${locale}/finance/ledger/${id}`);
 }
 
 async function entrySnapshot(tx: Tx, id: string) {

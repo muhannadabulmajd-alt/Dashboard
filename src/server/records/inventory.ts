@@ -17,6 +17,11 @@ const DUES = '/[locale]/(dashboard)/finance/dues';
 const CAP = 'manage:inventory' as const;
 const decimal3 = z.coerce.number().nonnegative().refine((v) => Number.isInteger(v * 1000));
 const positiveDecimal3 = z.coerce.number().positive().refine((v) => Number.isInteger(v * 1000));
+const adjustmentSchema = z.object({
+  targetQuantity: decimal3,
+  occurredAt: z.coerce.date(),
+  reason: z.string().min(3),
+});
 
 const schema = z.object({
   nameEn: z.string().min(1),
@@ -24,6 +29,7 @@ const schema = z.object({
   category: z.enum(INVENTORY_CATEGORIES),
   unit: z.string().min(1),
   productId: z.string().optional(), // linked variation: sales deduct this item (§18)
+  branchId: z.string().optional(),
   reorderPoint: decimal3.optional(),
   avgDailyUsage: z.coerce.number().nonnegative().optional(),
   unitCost: decimal3.optional(),
@@ -36,6 +42,7 @@ function parse(fd: FormData) {
     category: reqField(fd, 'category'),
     unit: reqField(fd, 'unit'),
     productId: optField(fd, 'productId'),
+    branchId: optField(fd, 'branchId'),
     reorderPoint: optField(fd, 'reorderPoint'),
     avgDailyUsage: optField(fd, 'avgDailyUsage'),
     unitCost: optField(fd, 'unitCost'),
@@ -43,7 +50,11 @@ function parse(fd: FormData) {
 }
 
 // Blank linked-product selection → null (unlinked / raw material).
-const withProduct = <T extends { productId?: string }>(data: T) => ({ ...data, productId: data.productId || null });
+const withRelations = <T extends { productId?: string; branchId?: string }>(data: T) => ({
+  ...data,
+  productId: data.productId || null,
+  branchId: data.branchId || null,
+});
 
 export async function createInventory(_prev: ActionState, fd: FormData): Promise<ActionState> {
   const user = await requireCap(CAP);
@@ -51,7 +62,7 @@ export async function createInventory(_prev: ActionState, fd: FormData): Promise
   const r = parse(fd);
   if (!r.success) return { error: 'invalid' };
   const locale = reqField(fd, 'locale') || 'ar';
-  const item = await prisma.inventoryItem.create({ data: withProduct(r.data) });
+  const item = await prisma.inventoryItem.create({ data: withRelations(r.data) });
   await audit(user.id, 'CREATE', 'InventoryItem', { id: item.id });
   revalidatePath(LIST, 'page');
   redirect(`/${locale}/admin/records/inventory/${item.id}`);
@@ -68,7 +79,7 @@ export async function updateInventory(
   if (!r.success) return { error: 'invalid' };
   const locale = reqField(fd, 'locale') || 'ar';
   const before = await prisma.inventoryItem.findUnique({ where: { id }, select: { unitCost: true } });
-  await prisma.inventoryItem.update({ where: { id }, data: withProduct(r.data) });
+  await prisma.inventoryItem.update({ where: { id }, data: withRelations(r.data) });
   await audit(user.id, 'UPDATE', 'InventoryItem', { id });
   // Dynamic recalculation (§4.3): a changed component cost recomputes the cost
   // of every product whose recipe links this item.
@@ -76,6 +87,77 @@ export async function updateInventory(
     await recomputeProductsForItem(id, r.data.unitCost);
   }
   revalidatePath(LIST, 'page');
+  redirect(`/${locale}/admin/records/inventory/${id}`);
+}
+
+export async function setInventoryQuantity(
+  id: string,
+  _prev: ActionState,
+  fd: FormData,
+): Promise<ActionState> {
+  const user = await requireCap(CAP);
+  if (!user || (user.role !== 'OWNER' && user.role !== 'ADMIN')) return { error: 'forbidden' };
+  const parsed = adjustmentSchema.safeParse({
+    targetQuantity: reqField(fd, 'targetQuantity'),
+    occurredAt: reqField(fd, 'occurredAt'),
+    reason: reqField(fd, 'adjustmentReason'),
+  });
+  if (!parsed.success) return { error: 'invalid' };
+  const locale = reqField(fd, 'locale') || 'ar';
+
+  let changed = false;
+  await prisma.$transaction(async (tx) => {
+    const item = await tx.inventoryItem.findUnique({
+      where: { id },
+      include: { movements: { select: { quantity: true } } },
+    });
+    if (!item) throw new Error('inventory-not-found');
+    const current = item.movements.reduce((sum, movement) => sum + decimalNumber(movement.quantity), 0);
+    const delta = Number((parsed.data.targetQuantity - current).toFixed(3));
+    if (delta === 0) return;
+    changed = true;
+
+    await tx.stockMovement.create({
+      data: {
+        inventoryItemId: id,
+        occurredAt: parsed.data.occurredAt,
+        reason: 'ADJUSTMENT',
+        quantity: delta.toFixed(3),
+        reference: `Owner/Admin stock correction: ${parsed.data.reason}`,
+        branchId: item.branchId,
+      },
+    });
+    if (delta > 0) {
+      await tx.inventoryCostLayer.create({
+        data: {
+          inventoryItemId: id,
+          qtyReceived: delta.toFixed(3),
+          unitCost: (item.unitCost ?? 0).toString(),
+          receivedAt: parsed.data.occurredAt,
+        },
+      });
+    }
+    await tx.auditLog.create({
+      data: {
+        userId: user.id,
+        action: 'ADJUST_QUANTITY',
+        entity: 'InventoryItem',
+        entityId: id,
+        metadata: {
+          reason: parsed.data.reason,
+          beforeQuantity: current.toFixed(3),
+          targetQuantity: parsed.data.targetQuantity.toFixed(3),
+          adjustment: delta.toFixed(3),
+          occurredAt: parsed.data.occurredAt.toISOString(),
+        },
+      },
+    });
+  });
+  if (changed) await syncActiveCost(id);
+  revalidatePath(LIST, 'page');
+  revalidatePath(FINANCE, 'page');
+  revalidatePath(LEDGER, 'page');
+  revalidatePath('/[locale]/(dashboard)', 'page');
   redirect(`/${locale}/admin/records/inventory/${id}`);
 }
 
