@@ -72,7 +72,14 @@ const lineSelect = {
 } as const;
 
 function hasProductFilter(filters: DashboardFilters): boolean {
-  return Boolean(filters.sku?.length || filters.productLine?.length || filters.grind?.length || filters.roastLevel?.length);
+  return Boolean(
+    filters.sku?.length ||
+      filters.productLine?.length ||
+      filters.grind?.length ||
+      filters.roastLevel?.length ||
+      filters.sizeLabel?.length ||
+      filters.productGroup?.length,
+  );
 }
 
 function allocatedNet(row: SelectedLine): number {

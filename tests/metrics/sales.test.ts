@@ -8,6 +8,7 @@ import {
   orderCompletionRate,
   unitsSold,
   aov,
+  averageOrdersPerDay,
   avgUnitPrice,
   discountEffect,
   salesByDimension,
@@ -58,6 +59,24 @@ describe('sales metrics', () => {
     expect(aov(140_000, 0)).toBe(0);
     expect(avgUnitPrice(140_000, 7)).toBe(20_000);
     expect(avgUnitPrice(140_000, 0)).toBe(0);
+  });
+
+  it('averageOrdersPerDay uses first sale date for all-time ranges', () => {
+    const rows = [
+      makeOrder({ placedAt: new Date('2026-06-01T10:00:00.000Z'), status: 'COMPLETED' }),
+      makeOrder({ placedAt: new Date('2026-06-03T10:00:00.000Z'), status: 'COMPLETED' }),
+      makeOrder({ placedAt: new Date('2026-06-03T12:00:00.000Z'), status: 'CANCELLED' }),
+    ];
+    expect(averageOrdersPerDay(rows, { start: new Date('2000-01-01T00:00:00.000Z'), end: new Date('2026-06-04T00:00:00.000Z') })).toBeCloseTo(2 / 3, 6);
+  });
+
+  it('averageOrdersPerDay respects selected custom ranges and empty data', () => {
+    const rows = [
+      makeOrder({ placedAt: new Date('2026-06-02T10:00:00.000Z'), status: 'COMPLETED' }),
+      makeOrder({ placedAt: new Date('2026-06-03T10:00:00.000Z'), status: 'COMPLETED' }),
+    ];
+    expect(averageOrdersPerDay(rows, { start: new Date('2026-06-01T00:00:00.000Z'), end: new Date('2026-06-04T00:00:00.000Z') })).toBeCloseTo(2 / 3, 6);
+    expect(averageOrdersPerDay([], { start: new Date('2026-06-01T00:00:00.000Z'), end: new Date('2026-06-04T00:00:00.000Z') })).toBe(0);
   });
 
   it('discountEffect computes effective discount rate', () => {

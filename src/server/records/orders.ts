@@ -11,6 +11,7 @@ import { syncActiveCostForProducts } from '@/server/inventory/fifo';
 import { closeOrderFinance, syncOrderFinance, type FinanceSyncMode } from '@/server/finance/sync';
 import { getOrderStatusRoleMap } from '@/server/lists/resolver';
 import { applySoldMovements, syncCustomerStats } from '@/server/orders/sync';
+import { generateOrderNumber } from '@/server/records/numbering';
 import { requireCap, audit, reqField, optField, type ActionState } from './shared';
 
 const LIST = '/[locale]/(dashboard)/admin/records/orders';
@@ -31,7 +32,7 @@ type LineData = {
 };
 
 const headerSchema = z.object({
-  orderNumber: z.string().min(1),
+  orderNumber: z.string().optional(),
   placedAt: z.coerce.date(),
   customerExternalId: z.string().optional(),
   // channel/governorate/status are list-managed codes (§9): the dropdowns are
@@ -106,7 +107,7 @@ export async function createOrder(_prev: ActionState, fd: FormData): Promise<Act
   if (!parsedLines.success || parsedLines.data.length === 0) return { error: 'nolines' };
 
   const locale = reqField(fd, 'locale') || 'ar';
-  if (await prisma.order.findUnique({ where: { orderNumber: h.data.orderNumber }, select: { id: true } }))
+  if (h.data.orderNumber && await prisma.order.findUnique({ where: { orderNumber: h.data.orderNumber }, select: { id: true } }))
     return { error: 'exists' };
   if ((h.data.financeMode === 'PAID' || h.data.financeMode === 'PARTIAL') && !h.data.financeAccountId) return { error: 'invalid' };
   const statusRoles = await getOrderStatusRoleMap();
@@ -148,9 +149,10 @@ export async function createOrder(_prev: ActionState, fd: FormData): Promise<Act
   }
 
   const order = await prisma.$transaction(async (tx) => {
+    const orderNumber = await generateOrderNumber(tx, h.data.placedAt, h.data.channel);
     const o = await tx.order.create({
       data: {
-        orderNumber: h.data.orderNumber,
+        orderNumber,
         placedAt: h.data.placedAt,
         customerId: customer?.id ?? null,
         branchId: branch?.id ?? null,
@@ -188,7 +190,7 @@ export async function createOrder(_prev: ActionState, fd: FormData): Promise<Act
   });
   // Stock consumption changed → roll each linked item's active FIFO cost (§8).
   await syncActiveCostForProducts(lineData.map((l) => l.productId));
-  await audit(user.id, 'CREATE', 'Order', { orderNumber: h.data.orderNumber, lines: lineData.length });
+  await audit(user.id, 'CREATE', 'Order', { orderNumber: order.orderNumber, lines: lineData.length });
   revalidatePath(LIST, 'page');
   revalidatePath(FINANCE, 'page');
   revalidatePath(LEDGER, 'page');

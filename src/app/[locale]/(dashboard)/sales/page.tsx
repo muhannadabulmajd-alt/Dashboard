@@ -3,12 +3,18 @@ import { getPageContext } from '@/server/page-context';
 import { getOrders, getOrderLines, getActiveCatalog } from '@/server/db/repositories/sales.repo';
 import * as M from '@/lib/metrics';
 import { enumLabel } from '@/lib/enums';
-import { buildExportHref } from '@/lib/filters';
+import { buildExportHref, serializeFilters, type DashboardFilters } from '@/lib/filters';
 import { formatMoney, formatNumber, formatPercent } from '@/lib/money';
 import { KpiCard } from '@/components/kpi/KpiCard';
 import { LineChartCard, BarChartCard, DonutChartCard } from '@/components/charts/Charts';
 import { DataTable } from '@/components/data-table/DataTable';
 import { PageHeader } from '@/components/ui/primitives';
+
+function salesHref(filters: DashboardFilters, extra: Partial<DashboardFilters>) {
+  const sp = serializeFilters({ ...filters, ...extra });
+  const query = sp.toString();
+  return query ? `/sales?${query}` : '/sales';
+}
 
 export default async function SalesPage({
   params,
@@ -33,27 +39,33 @@ export default async function SalesPage({
   const orderCount = M.salesOrderCount(orders);
   const units = M.unitsSold(lines);
   const discount = M.discountEffect(orders);
+  const avgPerDay = M.averageOrdersPerDay(orders, range);
 
-  const trend = M.salesTimeSeries(orders, 'day').map((p) => ({ label: p.label.slice(5), value: p.netSales }));
-  const mix = M.productMix(lines).slice(0, 8).map((p) => ({ label: p.name[locale], value: p.netSales }));
-  const byGrind = M.preferenceBy(lines, 'grind').map((g) => ({ label: enumLabel(g.key, locale), value: g.units }));
-  const bySize = M.preferenceBy(lines, 'sizeLabel').map((g) => ({ label: g.key, value: g.units }));
+  const trend = M.salesTimeSeries(orders, 'day').map((p) => ({
+    label: p.label.slice(5),
+    value: p.netSales,
+    href: salesHref(filters, { range: 'custom', from: p.key, to: p.key }),
+  }));
+  const mix = M.productMix(lines).slice(0, 8).map((p) => ({ label: p.name[locale], value: p.netSales, href: salesHref(filters, { sku: [p.sku] }) }));
+  const byGrind = M.preferenceBy(lines, 'grind').map((g) => ({ label: enumLabel(g.key, locale), value: g.units, href: salesHref(filters, { grind: [g.key] }) }));
+  const bySize = M.preferenceBy(lines, 'sizeLabel').map((g) => ({ label: g.key, value: g.units, href: salesHref(filters, { sizeLabel: [g.key] }) }));
   const byCity = M.salesByDimension(orders, 'governorate').map((b) => ({
     label: enumLabel(b.key, locale),
     value: b.netSales,
+    href: salesHref(filters, { governorate: [b.key] }),
   }));
   // Count-based companions to the amount charts: performance by number of orders.
   const ordersByCity = M.salesByDimension(orders, 'governorate')
-    .map((b) => ({ label: enumLabel(b.key, locale), value: b.orders }))
+    .map((b) => ({ label: enumLabel(b.key, locale), value: b.orders, href: salesHref(filters, { governorate: [b.key] }) }))
     .sort((a, b) => b.value - a.value);
   const ordersByChannel = M.salesByDimension(orders, 'channel')
-    .map((b) => ({ label: enumLabel(b.key, locale), value: b.orders }))
+    .map((b) => ({ label: enumLabel(b.key, locale), value: b.orders, href: salesHref(filters, { channel: [b.key] }) }))
     .sort((a, b) => b.value - a.value);
 
   // Parent-product (group) revenue — variations rolled up to their parent.
   const byGroup = M.salesByGroup(lines)
     .slice(0, 8)
-    .map((g) => ({ label: locale === 'ar' ? g.nameAr : g.nameEn, value: g.netSales }));
+    .map((g) => ({ label: locale === 'ar' ? g.nameAr : g.nameEn, value: g.netSales, href: salesHref(filters, { productGroup: [g.key] }) }));
 
   const top = M.topProducts(lines, 10);
   const slow = M.slowMovers(lines, catalog, 10);
@@ -71,9 +83,10 @@ export default async function SalesPage({
     <>
       <PageHeader title={t('title')} subtitle={t('subtitle')} />
 
-      <section className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-6">
         <KpiCard label={tk('netSales')} value={formatMoney(net, 'IQD', locale)} locale={locale} />
         <KpiCard label={tk('orders')} value={formatNumber(orderCount, locale)} locale={locale} />
+        <KpiCard label={tk('avgOrdersPerDay')} value={formatNumber(avgPerDay, locale)} locale={locale} />
         <KpiCard label={tk('units')} value={formatNumber(units, locale)} locale={locale} />
         <KpiCard label={tk('aov')} value={formatMoney(M.aov(net, orderCount), 'IQD', locale)} locale={locale} />
         <KpiCard

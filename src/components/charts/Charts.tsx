@@ -49,6 +49,17 @@ function ChartFrame({ title, children }: { title: string; children: React.ReactN
 interface Point {
   label: string;
   value: number;
+  href?: string;
+}
+
+function openPoint(point: unknown): void {
+  if (!point || typeof point !== 'object' || !('href' in point)) return;
+  const href = (point as { href?: unknown }).href;
+  if (typeof href === 'string' && href) window.location.assign(href);
+}
+
+function activePoint(state: unknown): unknown {
+  return (state as { activePayload?: { payload?: unknown }[] } | undefined)?.activePayload?.[0]?.payload;
 }
 
 export function LineChartCard({
@@ -65,7 +76,12 @@ export function LineChartCard({
   return (
     <ChartFrame title={title}>
       <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+        <LineChart
+          data={data}
+          margin={{ top: 8, right: 12, left: 0, bottom: 0 }}
+          onClick={(state) => openPoint(activePoint(state))}
+          style={data.some((point) => point.href) ? { cursor: 'pointer' } : undefined}
+        >
           <CartesianGrid strokeDasharray="3 3" stroke="#e6dccb" vertical={false} />
           <XAxis dataKey="label" {...axisProps} minTickGap={24} />
           <YAxis {...axisProps} width={56} tickFormatter={(v) => fmt(Number(v), valueKind, locale, true)} />
@@ -106,7 +122,7 @@ export function BarChartCard({
             <XAxis type="number" {...axisProps} tickFormatter={(v) => fmt(Number(v), valueKind, locale, true)} />
             <YAxis type="category" dataKey="label" {...axisProps} width={110} />
             <Tooltip formatter={(v) => fmt(Number(v), valueKind, locale)} />
-            <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+            <Bar dataKey="value" radius={[0, 4, 4, 0]} onClick={(point) => openPoint(point?.payload)}>
               {data.map((_, i) => (
                 <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
               ))}
@@ -118,7 +134,7 @@ export function BarChartCard({
             <XAxis dataKey="label" {...axisProps} minTickGap={8} />
             <YAxis {...axisProps} width={56} tickFormatter={(v) => fmt(Number(v), valueKind, locale, true)} />
             <Tooltip formatter={(v) => fmt(Number(v), valueKind, locale)} />
-            <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+            <Bar dataKey="value" radius={[4, 4, 0, 0]} onClick={(point) => openPoint(point?.payload)}>
               {data.map((_, i) => (
                 <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
               ))}
@@ -152,6 +168,7 @@ export function DonutChartCard({
             innerRadius="55%"
             outerRadius="80%"
             paddingAngle={2}
+            onClick={(point) => openPoint(point?.payload ?? point)}
           >
             {data.map((_, i) => (
               <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />

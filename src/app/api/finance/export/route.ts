@@ -18,6 +18,7 @@ import {
   getProductProfitabilityReport,
   type CashFlowBucketKey,
 } from '@/server/finance/reports';
+import { getSpendRows, type SpendBucket } from '@/server/finance/spend';
 import { getBalanceSheetSnapshot } from '@/server/finance/balance-sheet';
 import { getUsdToIqd } from '@/server/settings';
 import type { ObligationKind, FinanceType, LedgerRecordClass, Prisma } from '@prisma/client';
@@ -222,6 +223,25 @@ export async function GET(req: NextRequest) {
       row.lastActivity ? formatDate(row.lastActivity, locale) : '',
     ]);
     filename = kind === 'customer' ? 'customer-statements' : kind === 'supplier' ? 'supplier-statements' : 'party-statements';
+  } else if (type === 'spend') {
+    const bucket = (['capex', 'opex', 'cogs'].includes(p.get('bucket') ?? '') ? p.get('bucket') : 'opex') as SpendBucket;
+    const spendRows = await getSpendRows(bucket, filters, scope, range, {
+      category: p.get('category') ?? undefined,
+      month: p.get('month') ?? undefined,
+      party: p.get('party') ?? undefined,
+      q: p.get('q') ?? undefined,
+    });
+    headers = ['Bucket', 'Date', 'Description', 'Category', 'Party', 'Reference', 'Amount_IQD'];
+    rows = spendRows.map((row) => [
+      row.bucket,
+      formatDate(row.date, locale),
+      row.description,
+      row.category,
+      row.party ?? '',
+      row.reference ?? '',
+      row.amount,
+    ]);
+    filename = `${bucket}-details`;
   } else {
     const [entries, branches, users] = await Promise.all([
       prisma.financeEntry.findMany({

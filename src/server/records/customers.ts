@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { prisma } from '@/server/db/client';
 import { CUSTOMER_SEGMENTS } from '@/lib/enums';
+import { generateCustomerExternalId } from '@/server/records/numbering';
 import { requireCap, audit, reqField, optField, type ActionState } from './shared';
 
 const LIST = '/[locale]/(dashboard)/admin/records/customers';
@@ -40,18 +41,14 @@ function parse(fd: FormData) {
   });
 }
 
-const isUniqueViolation = (e: unknown) =>
-  typeof e === 'object' && e !== null && 'code' in e && (e as { code?: string }).code === 'P2002';
+export type InlineCustomerState =
+  | { ok: true; customer: { externalId: string; label: string } }
+  | { error: string }
+  | undefined;
 
-/** Next sequential customer code, e.g. CL-000001. Spans legacy CL-1 and padded forms. */
-async function nextCustomerCode(): Promise<string> {
-  const rows = await prisma.customer.findMany({ select: { externalId: true } });
-  let max = 0;
-  for (const { externalId } of rows) {
-    const m = externalId?.match(/^CL-0*(\d+)$/i);
-    if (m) max = Math.max(max, Number(m[1]));
-  }
-  return `CL-${String(max + 1).padStart(6, '0')}`;
+function customerLabel(data: { externalId: string | null; nameEn: string | null; nameAr: string | null; phone: string | null }) {
+  const name = data.nameEn || data.nameAr || data.phone || data.externalId || 'Customer';
+  return data.externalId ? `${name} (${data.externalId})` : name;
 }
 
 export async function createCustomer(_prev: ActionState, fd: FormData): Promise<ActionState> {
@@ -60,27 +57,31 @@ export async function createCustomer(_prev: ActionState, fd: FormData): Promise<
   const r = parse(fd);
   if (!r.success) return { error: 'invalid' };
   const locale = reqField(fd, 'locale') || 'ar';
-  // Customer ID is auto-generated (CR-4). A manually supplied value is honored
-  // but must be unique; otherwise we generate the next code, retrying on races.
-  const provided = r.data.externalId?.trim();
-  if (provided && (await prisma.customer.findUnique({ where: { externalId: provided }, select: { id: true } })))
-    return { error: 'exists' };
   const { externalId, ...rest } = r.data;
   void externalId;
-  let created;
-  for (let attempt = 0; ; attempt++) {
-    const externalId = provided || (await nextCustomerCode());
-    try {
-      created = await prisma.customer.create({ data: { ...rest, externalId } });
-      break;
-    } catch (e) {
-      if (!provided && isUniqueViolation(e) && attempt < 5) continue;
-      throw e;
-    }
-  }
+  const created = await prisma.$transaction(async (tx) => {
+    const externalId = await generateCustomerExternalId(tx);
+    return tx.customer.create({ data: { ...rest, externalId } });
+  });
   await audit(user.id, 'CREATE', 'Customer', { externalId: created.externalId });
   revalidatePath(LIST, 'page');
   redirect(`/${locale}/admin/records/customers/${created.id}`);
+}
+
+export async function createCustomerInline(_prev: InlineCustomerState, fd: FormData): Promise<InlineCustomerState> {
+  const user = await requireCap(CAP);
+  if (!user) return { error: 'forbidden' };
+  const r = parse(fd);
+  if (!r.success) return { error: 'invalid' };
+  const { externalId, ...rest } = r.data;
+  void externalId;
+  const created = await prisma.$transaction(async (tx) => {
+    const externalId = await generateCustomerExternalId(tx);
+    return tx.customer.create({ data: { ...rest, externalId }, select: { externalId: true, nameEn: true, nameAr: true, phone: true } });
+  });
+  await audit(user.id, 'CREATE', 'Customer', { externalId: created.externalId, source: 'order-inline-modal' });
+  revalidatePath(LIST, 'page');
+  return { ok: true, customer: { externalId: created.externalId!, label: customerLabel(created) } };
 }
 
 export async function updateCustomer(

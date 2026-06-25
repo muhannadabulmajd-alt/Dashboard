@@ -5,6 +5,7 @@ import { prisma } from '@/server/db/client';
 import { enumLabel } from '@/lib/enums';
 import { formatMoney, convertToIqd } from '@/lib/money';
 import { formatDate } from '@/lib/dates';
+import { serializeFilters } from '@/lib/filters';
 import { getUsdToIqd } from '@/server/settings';
 import { can } from '@/lib/rbac';
 import { Badge, PageHeader } from '@/components/ui/primitives';
@@ -22,11 +23,20 @@ export default async function FinancePartyDetailPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { locale, user } = await getPageContext(params, searchParams, 'view:finance');
+  const sp = await searchParams;
   const { id } = await params;
   const t = await getTranslations('finance');
   const tr = await getTranslations('records');
   const trf = await getTranslations('records.f');
   const canManage = can(user.role, 'manage:finance');
+  const canExport = can(user.role, 'export:financial');
+  const statementParams = serializeFilters({
+    range: typeof sp.range === 'string' ? sp.range as Parameters<typeof serializeFilters>[0]['range'] : undefined,
+    from: typeof sp.from === 'string' ? sp.from : undefined,
+    to: typeof sp.to === 'string' ? sp.to : undefined,
+  });
+  statementParams.set('locale', locale);
+  const statementPdfHref = `/api/finance/parties/${id}/statement/pdf?${statementParams.toString()}`;
   const [p, entries, rate] = await Promise.all([
     prisma.party.findUnique({ where: { id } }),
     prisma.financeEntry.findMany({
@@ -131,7 +141,19 @@ export default async function FinancePartyDetailPage({
       ) : null}
       <DetailGrid items={items} />
       <div className="mt-4 space-y-2">
-        <h3 className="text-sm font-semibold">{t('statement')}</h3>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold">{t('statement')}</h3>
+          {canExport ? (
+            <div className="flex gap-2">
+              <a href={statementPdfHref} className="rounded-lg border px-3 py-1.5 text-xs font-semibold hover:bg-muted">
+                {t('downloadPdf')}
+              </a>
+              <a href={statementPdfHref} target="_blank" rel="noreferrer" className="rounded-lg border px-3 py-1.5 text-xs font-semibold hover:bg-muted">
+                {t('print')}
+              </a>
+            </div>
+          ) : null}
+        </div>
         <DataTable columns={cols} rows={rows} emptyLabel={tr('none')} />
       </div>
     </>

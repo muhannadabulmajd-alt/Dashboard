@@ -34,6 +34,8 @@ function productLineConstraint(filters: DashboardFilters): Prisma.OrderLineWhere
   if (filters.productLine?.length) product.productLine = { in: filters.productLine };
   if (filters.grind?.length) product.grind = { in: filters.grind };
   if (filters.roastLevel?.length) product.roastLevel = { in: filters.roastLevel };
+  if (filters.sizeLabel?.length) product.sizeLabel = { in: filters.sizeLabel };
+  if (filters.productGroup?.length) product.groupId = { in: filters.productGroup };
   if (Object.keys(product).length) where.product = product;
 
   return where;
@@ -44,7 +46,9 @@ function hasProductFilter(filters: DashboardFilters): boolean {
     filters.sku?.length ||
       filters.productLine?.length ||
       filters.grind?.length ||
-      filters.roastLevel?.length,
+      filters.roastLevel?.length ||
+      filters.sizeLabel?.length ||
+      filters.productGroup?.length,
   );
 }
 

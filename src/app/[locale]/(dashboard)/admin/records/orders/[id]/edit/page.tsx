@@ -8,6 +8,7 @@ import { OrderForm, type OrderLineInput } from '@/components/records/OrderForm';
 import { getOrderCatalog } from '@/server/records/order-catalog';
 import { getListOptions } from '@/server/lists/resolver';
 import { updateOrder } from '@/server/records/orders';
+import { createCustomerInline } from '@/server/records/customers';
 
 export default async function EditOrderPage({
   params,
@@ -19,7 +20,7 @@ export default async function EditOrderPage({
   const { locale } = await getPageContext(params, searchParams, 'manage:orders');
   const { id } = await params;
   const t = await getTranslations('records');
-  const [catalog, channels, governorates, fulfillment, statuses, accounts, paymentMethods, financeEntries] = await Promise.all([
+  const [catalog, channels, governorates, fulfillment, statuses, accounts, paymentMethods, financeEntries, customers] = await Promise.all([
     getOrderCatalog(locale, t('ungrouped')),
     getListOptions('channel', locale),
     getListOptions('governorate', locale),
@@ -30,6 +31,12 @@ export default async function EditOrderPage({
     prisma.financeEntry.findMany({
       where: { orderId: id, importKey: { startsWith: `ORD:${id}:` }, reversedAt: null, reversalOfId: null },
       select: { importKey: true, obligation: true, accountId: true, dueDate: true, amount: true, paymentMethod: true, date: true },
+    }),
+    prisma.customer.findMany({
+      where: { isActive: true, externalId: { not: null } },
+      orderBy: { createdAt: 'desc' },
+      take: 500,
+      select: { externalId: true, nameEn: true, nameAr: true, phone: true },
     }),
   ]);
 
@@ -83,6 +90,15 @@ export default async function EditOrderPage({
     customer: t('f.customer'),
     customerHint: t('orderForm.customerHint'),
     newCustomer: t('orderForm.newCustomer'),
+    orderNumberGenerated: t('orderForm.orderNumberGenerated'),
+    searchCustomer: t('orderForm.searchCustomer'),
+    selectCustomer: t('orderForm.selectCustomer'),
+    createCustomer: t('orderForm.createCustomer'),
+    saving: t('create'),
+    customerName: t('f.name'),
+    customerPhone: t('f.phone'),
+    customerEmail: t('f.email'),
+    customerAddress: t('f.address1'),
     channel: t('f.channel'),
     governorate: t('f.governorate'),
     fulfillment: t('f.fulfillment'),
@@ -148,6 +164,12 @@ export default async function EditOrderPage({
         submitLabel={t('save')}
         editing
         catalog={catalog}
+        customerOptions={customers.map((customer) => ({
+          externalId: customer.externalId!,
+          label: `${customer.nameEn || customer.nameAr || customer.phone || customer.externalId} (${customer.externalId})`,
+          phone: customer.phone,
+        }))}
+        inlineCustomerAction={createCustomerInline}
       />
     </>
   );

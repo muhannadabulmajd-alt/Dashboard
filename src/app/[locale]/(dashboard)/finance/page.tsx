@@ -1,62 +1,47 @@
-import { getTranslations } from 'next-intl/server';
 import {
-  Wallet,
-  Banknote,
-  TrendingDown,
-  TrendingUp,
+  AlertTriangle,
   Clock,
   HandCoins,
   Package,
-  Users,
-  BookOpen,
-  FileBarChart2,
-  PieChart,
   Plus,
-  ChevronRight,
-  Scale,
-  AlertTriangle,
-  type LucideIcon,
+  TrendingDown,
+  Wallet,
 } from 'lucide-react';
+import { getTranslations } from 'next-intl/server';
 import { getPageContext } from '@/server/page-context';
 import { prisma } from '@/server/db/client';
-import { enumLabel } from '@/lib/enums';
 import { formatMoney, convertToIqd } from '@/lib/money';
 import { can } from '@/lib/rbac';
-import { accountBalance, netCash, unassignedCash, financeTotals, type FinanceEntryLike } from '@/lib/metrics/finance';
-import { buildOperatingExpenseBreakdown, buildPnlSnapshot } from '@/lib/metrics';
+import { enumLabel } from '@/lib/enums';
+import { serializeFilters } from '@/lib/filters';
+import { financeTotals, netCash, type FinanceEntryLike } from '@/lib/metrics/finance';
 import { getUsdToIqd } from '@/server/settings';
-import { getOrders, getOrderLines } from '@/server/db/repositories/sales.repo';
-import { getOperatingExpenseFacts } from '@/server/db/repositories/finance.repo';
-import { getInventoryItems } from '@/server/db/repositories/inventory.repo';
-import { stockRow } from '@/lib/metrics/inventory';
 import { setUsdToIqd } from '@/server/finance/settings';
+import { getSpendRows, getSpendTotals, spendByCategory, spendByMonth, spendByParty } from '@/server/finance/spend';
 import { RateEditor } from '@/components/finance/RateEditor';
 import { Badge, Card, CardContent, CardHeader, CardTitle, PageHeader } from '@/components/ui/primitives';
 import { KpiCard } from '@/components/kpi/KpiCard';
-import { DataTable, type Column } from '@/components/data-table/DataTable';
 import { BarChartCard, DonutChartCard } from '@/components/charts/Charts';
 import { Link } from '@/i18n/navigation';
-import type { ExpenseCategoryType } from '@prisma/client';
 
-type Vals = {
-  cash: number;
-  cashIn: number;
-  cashOut: number;
-  payable: number;
-  receivable: number;
-};
 type ChartEntry = FinanceEntryLike & {
   date: Date;
   dueDate: Date | null;
-  categoryType: ExpenseCategoryType | null;
-  party: { name: string } | null;
 };
 
 const ALERT_TONES = {
   danger: 'border-danger/40 bg-danger-soft text-danger',
   warning: 'border-warning/40 bg-warning-soft text-warning',
 } as const;
+
 type FinancialAlert = { title: string; body: string; href: string; tone: keyof typeof ALERT_TONES };
+
+function filteredHref(base: string, filters: Parameters<typeof serializeFilters>[0], extra?: Record<string, string | undefined>) {
+  const sp = serializeFilters(filters);
+  for (const [key, value] of Object.entries(extra ?? {})) if (value) sp.set(key, value);
+  const query = sp.toString();
+  return query ? `${base}?${query}` : base;
+}
 
 export default async function FinancePage({
   params,
@@ -74,93 +59,83 @@ export default async function FinancePage({
     : filters.branchId?.length
       ? { branchId: { in: filters.branchId } }
       : {};
-  const [accounts, entriesRaw, orders, lines, inventoryItems, expenseRows] = await Promise.all([
+
+  const [accounts, entriesRaw, rate, spendTotals, opexRows] = await Promise.all([
     prisma.financeAccount.findMany({ where: { isActive: true, ...branchWhere }, orderBy: { createdAt: 'asc' } }),
     prisma.financeEntry.findMany({
       where: { archivedAt: null, reversedAt: null, reversalOfId: null, date: { lte: range.end }, ...branchWhere },
       select: {
-        id: true, type: true, amount: true, currency: true, obligation: true,
-        obligationKind: true, accountId: true, toAccountId: true, settlesId: true,
-        archivedAt: true, date: true, dueDate: true, categoryType: true, party: { select: { name: true } },
+        id: true,
+        type: true,
+        amount: true,
+        currency: true,
+        obligation: true,
+        obligationKind: true,
+        accountId: true,
+        toAccountId: true,
+        settlesId: true,
+        archivedAt: true,
+        reversedAt: true,
+        reversalOfId: true,
+        date: true,
+        dueDate: true,
       },
     }),
-    getOrders(filters, scope, range),
-    getOrderLines(filters, scope, range),
-    getInventoryItems(filters, scope, range),
-    getOperatingExpenseFacts(filters, scope, range),
+    getUsdToIqd(),
+    getSpendTotals(filters, scope, range),
+    getSpendRows('opex', filters, scope, range),
   ]);
   const entries = entriesRaw as ChartEntry[];
 
   const currencies = Array.from(new Set([...accounts.map((a) => a.currency), ...entries.map((e) => e.currency)]));
-  if (currencies.length === 0) currencies.push('IQD');
+  if (!currencies.length) currencies.push('IQD');
 
-  const rate = await getUsdToIqd();
   const byCur = currencies.map((cur) => {
     const ce = entries.filter((e) => e.currency === cur);
     const ca = accounts.filter((a) => a.currency === cur);
-    const tot = financeTotals(ce);
-    const cash = netCash(ca, ce);
-    const vals: Vals = {
-      cash,
-      cashIn: tot.cashIn,
-      cashOut: tot.cashOut,
-      payable: tot.outstandingPayable,
-      receivable: tot.outstandingReceivable,
+    const totals = financeTotals(ce);
+    return {
+      cur,
+      totals,
+      cash: netCash(ca, ce),
     };
-    return { cur, ce, ca, vals };
   });
-  const combined: Vals = byCur.reduce<Vals>(
-    (acc, x) => {
-      (Object.keys(acc) as (keyof Vals)[]).forEach((k) => {
-        acc[k] += convertToIqd(x.vals[k], x.cur, rate);
-      });
+  const combined = byCur.reduce(
+    (acc, row) => {
+      acc.cash += convertToIqd(row.cash, row.cur, rate);
+      acc.payable += convertToIqd(row.totals.outstandingPayable, row.cur, rate);
+      acc.receivable += convertToIqd(row.totals.outstandingReceivable, row.cur, rate);
       return acc;
     },
-    { cash: 0, cashIn: 0, cashOut: 0, payable: 0, receivable: 0 },
+    { cash: 0, payable: 0, receivable: 0 },
   );
-  const iqd = (e: ChartEntry) => convertToIqd(e.amount, e.currency, rate);
-  const accountBalanceIqd = (account: (typeof accounts)[number]) =>
-    convertToIqd(
-      accountBalance(account, entries.filter((e) => e.currency === account.currency)),
-      account.currency,
-      rate,
-    );
-  const cashAccounts = accounts.filter((a) => a.type === 'CASH').reduce((s, a) => s + accountBalanceIqd(a), 0);
-  const bankAccounts = accounts.filter((a) => a.type !== 'CASH').reduce((s, a) => s + accountBalanceIqd(a), 0);
-  const totalAvailable = combined.cash;
-  const pnl = buildPnlSnapshot(orders, lines, expenseRows);
-  const revenue = pnl.netSales;
-  const gross = { amount: pnl.grossProfit, pct: pnl.grossMarginPct };
-  const expenseBreakdown = buildOperatingExpenseBreakdown(expenseRows);
-  const operatingExpenses = pnl.operatingExpenses;
-  const netProfit = pnl.operatingProfit;
-  const inventoryValue = inventoryItems.reduce((sum, item) => sum + stockRow(item).value, 0);
-  const netCashMovement = combined.cashIn - combined.cashOut;
-  const now = new Date();
+
+  const iqd = (entry: ChartEntry) => convertToIqd(entry.amount, entry.currency, rate);
   const paidByObligation = new Map<string, number>();
-  for (const e of entries) {
-    if (e.settlesId) paidByObligation.set(e.settlesId, (paidByObligation.get(e.settlesId) ?? 0) + iqd(e));
+  for (const entry of entries) {
+    if (entry.settlesId) paidByObligation.set(entry.settlesId, (paidByObligation.get(entry.settlesId) ?? 0) + iqd(entry));
   }
+
+  const now = new Date();
   const overdue = entries.reduce(
-    (acc, e) => {
-      if (!e.obligation || !e.obligationKind || !e.dueDate || e.dueDate >= now) return acc;
-      const outstanding = Math.max(0, iqd(e) - (paidByObligation.get(e.id) ?? 0));
-      if (e.obligationKind === 'PAYABLE') acc.payables += outstanding;
+    (acc, entry) => {
+      if (!entry.obligation || !entry.obligationKind || !entry.dueDate || entry.dueDate >= now) return acc;
+      const outstanding = Math.max(0, iqd(entry) - (paidByObligation.get(entry.id) ?? 0));
+      if (entry.obligationKind === 'PAYABLE') acc.payables += outstanding;
       else acc.receivables += outstanding;
       return acc;
     },
     { payables: 0, receivables: 0 },
   );
-  const openPayables = entries
-    .filter((e) => e.obligation && e.obligationKind === 'PAYABLE')
-    .map((e) => Math.max(0, iqd(e) - (paidByObligation.get(e.id) ?? 0)))
-    .filter((amount) => amount > 0);
-  const largeExpenses = expenseRows
-    .map((expense) => expense.amount)
+
+  const largeOpex = opexRows
+    .map((row) => row.amount)
     .filter((amount) => amount >= 1_000_000)
-    .sort((a, b) => b - a)
-    .slice(0, 3);
-  const largestExpense = largeExpenses[0] ?? 0;
+    .sort((a, b) => b - a);
+  const openPayables = entries
+    .filter((entry) => entry.obligation && entry.obligationKind === 'PAYABLE')
+    .map((entry) => Math.max(0, iqd(entry) - (paidByObligation.get(entry.id) ?? 0)))
+    .filter((amount) => amount > 0);
   const financialAlerts: FinancialAlert[] = [
     ...(overdue.payables > 0
       ? [{
@@ -189,15 +164,7 @@ export default async function FinancePage({
           tone: 'danger' as const,
         }]
       : []),
-    ...(gross.amount < 0 || gross.pct < 0
-      ? [{
-          title: t('alerts.negativeMargin.title'),
-          body: t('alerts.negativeMargin.body', { amount: formatMoney(gross.amount, 'IQD', locale) }),
-          href: '/pnl',
-          tone: 'danger' as const,
-        }]
-      : []),
-    ...(openPayables.length > 0
+    ...(openPayables.length
       ? [{
           title: t('alerts.unpaidSupplierInvoices.title'),
           body: t('alerts.unpaidSupplierInvoices.body', { count: openPayables.length }),
@@ -205,85 +172,50 @@ export default async function FinancePage({
           tone: 'warning' as const,
         }]
       : []),
-    ...(largeExpenses.length > 0
+    ...(largeOpex.length
       ? [{
           title: t('alerts.largeExpense.title'),
           body: t('alerts.largeExpense.body', {
-            amount: formatMoney(largestExpense, 'IQD', locale),
-            count: largeExpenses.length,
+            amount: formatMoney(largeOpex[0], 'IQD', locale),
+            count: Math.min(largeOpex.length, 3),
           }),
-          href: '/finance/ledger',
+          href: filteredHref('/finance/spend', filters, { bucket: 'opex' }),
           tone: 'warning' as const,
         }]
       : []),
   ];
 
-  // P&L charts use the same classified operating-expense facts as the KPI and
-  // reports. Inventory and fixed-asset purchases remain balance-sheet items.
-  const spendByMonth = expenseBreakdown.byMonth.map((row) => ({ label: row.key, value: row.amount }));
-  const spendByCategory = expenseBreakdown.byCategory.map((row) => ({ label: enumLabel(row.key, locale), value: row.amount }));
-  const topParties = expenseBreakdown.byParty.slice(0, 8).map((row) => ({ label: row.key, value: row.amount }));
+  const spendBase = '/finance/spend';
+  const monthChart = spendByMonth(opexRows).map((row) => ({
+    label: row.key,
+    value: row.amount,
+    href: filteredHref(spendBase, filters, { bucket: 'opex', month: row.key }),
+  }));
+  const categoryChart = spendByCategory(opexRows).map((row) => ({
+    label: enumLabel(row.key, locale),
+    value: row.amount,
+    href: filteredHref(spendBase, filters, { bucket: 'opex', category: row.key }),
+  }));
+  const partyChart = spendByParty(opexRows).slice(0, 8).map((row) => ({
+    label: row.key,
+    value: row.amount,
+    href: filteredHref(spendBase, filters, { bucket: 'opex', party: row.key }),
+  }));
 
-  const overdueRisk = overdue.receivables + overdue.payables;
-  const cockpitCards = [
+  const cards = [
     {
       label: t('totalAvailable'),
-      value: totalAvailable,
-      Icon: Wallet,
-      tone: totalAvailable >= 0 ? 'success' as const : 'danger' as const,
+      value: combined.cash,
+      icon: Wallet,
       href: '/finance/accounts',
-      description: `${t('cashOnHand')}: ${formatMoney(cashAccounts, 'IQD', locale)} · ${t('bankBalance')}: ${formatMoney(bankAccounts, 'IQD', locale)}`,
+      tone: combined.cash >= 0 ? 'success' as const : 'danger' as const,
       emphasis: true,
     },
-    {
-      label: t('netProfit'),
-      value: netProfit,
-      Icon: PieChart,
-      tone: netProfit >= 0 ? 'success' as const : 'danger' as const,
-      href: '/pnl',
-      description: `${t('grossProfit')}: ${formatMoney(gross.amount, 'IQD', locale)} · ${t('netCashMovement')}: ${formatMoney(netCashMovement, 'IQD', locale)}`,
-    },
-    { label: t('totalRevenue'), value: revenue, Icon: TrendingUp, tone: 'success' as const, href: '/sales' },
-    { label: t('totalExpenses'), value: operatingExpenses, Icon: TrendingDown, tone: 'danger' as const, href: '/finance/ledger' },
-    { label: t('receivables'), value: combined.receivable, Icon: HandCoins, tone: 'accent' as const, href: '/finance/dues' },
-    { label: t('payables'), value: combined.payable, Icon: Clock, tone: 'warning' as const, href: '/finance/dues' },
-    { label: t('inventoryValue'), value: inventoryValue, Icon: Package, tone: 'default' as const, href: '/inventory' },
-    {
-      label: t('overdueRisk'),
-      value: overdueRisk,
-      Icon: AlertTriangle,
-      tone: overdueRisk > 0 ? 'warning' as const : 'success' as const,
-      href: '/finance/dues',
-      description: `${t('overdueReceivables')}: ${formatMoney(overdue.receivables, 'IQD', locale)} · ${t('overduePayables')}: ${formatMoney(overdue.payables, 'IQD', locale)}`,
-    },
-  ];
-
-  const accCols: Column[] = [
-    { label: t('f.currency') },
-    { label: t('f.name') },
-    { label: t('f.type') },
-    { label: t('f.balance'), align: 'end' },
-  ];
-  const accountRows = byCur.flatMap(({ cur, ce, ca }) => [
-    ...ca.map((a) => [
-      cur,
-      a.name,
-      enumLabel(a.type, locale),
-      formatMoney(accountBalance(a, ce), cur, locale),
-    ]),
-    ...(unassignedCash(ce)
-      ? [[cur, t('unassigned'), '—', formatMoney(unassignedCash(ce), cur, locale)]]
-      : []),
-  ]);
-
-  const cards: { href: string; key: string; Icon: LucideIcon }[] = [
-    { href: '/finance/reports', key: 'reports', Icon: FileBarChart2 },
-    { href: '/finance/ledger', key: 'ledger', Icon: BookOpen },
-    { href: '/finance/dues', key: 'dues', Icon: Clock },
-    { href: '/finance/shareholders', key: 'shareholders', Icon: PieChart },
-    { href: '/balance-sheet', key: 'balanceSheet', Icon: Scale },
-    { href: '/finance/accounts', key: 'accounts', Icon: Wallet },
-    { href: '/finance/parties', key: 'parties', Icon: Users },
+    { label: t('receivables'), value: combined.receivable, icon: HandCoins, href: '/finance/dues', tone: 'accent' as const },
+    { label: t('payables'), value: combined.payable, icon: Clock, href: '/finance/dues', tone: 'warning' as const },
+    { label: t('capex'), value: spendTotals.capex, icon: Package, href: filteredHref(spendBase, filters, { bucket: 'capex' }), tone: 'default' as const },
+    { label: t('opex'), value: spendTotals.opex, icon: TrendingDown, href: filteredHref(spendBase, filters, { bucket: 'opex' }), tone: 'danger' as const },
+    { label: t('cogs'), value: spendTotals.cogs, icon: Package, href: filteredHref(spendBase, filters, { bucket: 'cogs' }), tone: 'warning' as const },
   ];
 
   return (
@@ -301,103 +233,63 @@ export default async function FinancePage({
         ) : null}
       </div>
 
-      {canManage ? (
-        <RateEditor action={setUsdToIqd} locale={locale} rate={rate} label={t('rate')} apply={t('apply')} />
-      ) : null}
+      {canManage ? <RateEditor action={setUsdToIqd} locale={locale} rate={rate} label={t('rate')} apply={t('apply')} /> : null}
 
-      <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {cockpitCards.map((card) => (
+      <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6">
+        {cards.map((card) => (
           <KpiCard
             key={card.label}
             label={card.label}
             value={formatMoney(card.value, 'IQD', locale)}
-            icon={card.Icon}
+            icon={card.icon}
             tone={card.tone}
             href={card.href}
-            description={card.description}
             emphasis={card.emphasis}
             locale={locale}
           />
         ))}
       </section>
 
-      <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <Card>
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="size-4 text-warning" />
-              <CardTitle>{t('financialAlerts')}</CardTitle>
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="size-4 text-warning" />
+            <CardTitle>{t('financialAlerts')}</CardTitle>
+          </div>
+          <Badge variant={financialAlerts.length ? 'warning' : 'success'}>
+            {financialAlerts.length ? financialAlerts.length : t('alertsClearShort')}
+          </Badge>
+        </CardHeader>
+        <CardContent>
+          {financialAlerts.length ? (
+            <div className="grid gap-2 md:grid-cols-3">
+              {financialAlerts.slice(0, 3).map((alert) => (
+                <Link
+                  key={alert.title}
+                  href={alert.href}
+                  className={`rounded-lg border p-3 hover:opacity-90 ${ALERT_TONES[alert.tone]}`}
+                >
+                  <div className="text-sm font-semibold">{alert.title}</div>
+                  <div className="mt-1 text-xs leading-5 opacity-90">{alert.body}</div>
+                </Link>
+              ))}
             </div>
-            <Badge variant={financialAlerts.length ? 'warning' : 'success'}>
-              {financialAlerts.length ? financialAlerts.length : t('alertsClearShort')}
-            </Badge>
-          </CardHeader>
-          <CardContent>
-            {financialAlerts.length ? (
-              <div className="grid gap-2 md:grid-cols-2">
-                {financialAlerts.map((alert) => (
-                  <Link
-                    key={alert.title}
-                    href={alert.href}
-                    className={`rounded-lg border p-3 hover:opacity-90 ${ALERT_TONES[alert.tone]}`}
-                  >
-                    <div className="text-sm font-semibold">{alert.title}</div>
-                    <div className="mt-1 text-xs leading-5 opacity-90">{alert.body}</div>
-                  </Link>
-                ))}
-              </div>
-            ) : (
-              <div className="rounded-lg border border-success/30 bg-success-soft px-3 py-2 text-sm font-semibold text-success">
-                {t('alertsClear')}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+          ) : (
+            <div className="rounded-lg border border-success/30 bg-success-soft px-3 py-2 text-sm font-semibold text-success">
+              {t('alertsClear')}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
-        <Card variant="surface">
-          <CardHeader>
-            <CardTitle>{t('cashBreakdown')}</CardTitle>
-            <Badge variant="muted">{currencies.join(' / ')}</Badge>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {[
-              { label: t('cashOnHand'), value: cashAccounts, Icon: Wallet },
-              { label: t('bankBalance'), value: bankAccounts, Icon: Banknote },
-            ].map(({ label, value, Icon }) => (
-              <Link
-                key={label}
-                href="/finance/accounts"
-                className="flex items-center justify-between gap-3 rounded-lg border border-border/80 bg-card px-3 py-2.5 hover:bg-linen/40"
-              >
-                <span className="flex items-center gap-2 text-sm font-semibold text-roast">
-                  <span className="flex size-8 items-center justify-center rounded-lg bg-amber/10 text-primary">
-                    <Icon className="size-4" />
-                  </span>
-                  {label}
-                </span>
-                <span className="tabular text-sm font-bold text-roast">{formatMoney(value, 'IQD', locale)}</span>
-              </Link>
-            ))}
-          </CardContent>
-        </Card>
-      </section>
-
-      <section className="space-y-2">
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-sm font-bold text-roast">{t('accountBalances')}</h2>
-          <Badge variant="muted">{t('allInIqd')}</Badge>
-        </div>
-        <DataTable columns={accCols} rows={accountRows} emptyLabel="—" />
-      </section>
-
-      {spendByCategory.length ? (
+      {opexRows.length ? (
         <section className="space-y-4">
           <div className="grid gap-4 lg:grid-cols-2">
-            <BarChartCard title={t('spendByMonth')} data={spendByMonth} locale={locale} valueKind="iqd" />
-            <DonutChartCard title={t('spendByCategory')} data={spendByCategory} locale={locale} valueKind="iqd" />
+            <BarChartCard title={t('spendByMonth')} data={monthChart} locale={locale} valueKind="iqd" />
+            <DonutChartCard title={t('spendByCategory')} data={categoryChart} locale={locale} valueKind="iqd" />
           </div>
-          {topParties.length ? (
-            <BarChartCard title={t('topSuppliers')} data={topParties} locale={locale} valueKind="iqd" horizontal />
+          {partyChart.length ? (
+            <BarChartCard title={t('topSuppliers')} data={partyChart} locale={locale} valueKind="iqd" horizontal />
           ) : null}
         </section>
       ) : (
@@ -405,25 +297,6 @@ export default async function FinancePage({
           {t('noSpend')}
         </div>
       )}
-
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {cards.map(({ href, key, Icon }) => (
-          <Link
-            key={key}
-            href={href}
-            className="group flex items-center gap-3 rounded-[var(--radius)] border border-border/80 bg-card p-4 shadow-[0_1px_0_rgba(83,45,31,0.05)] hover:border-primary/45 hover:bg-linen/25"
-          >
-            <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-amber/10 text-primary">
-              <Icon className="size-5" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="text-sm font-semibold text-roast">{t(key)}</div>
-              <div className="truncate text-xs text-muted-foreground">{t(`entityHints.${key}`)}</div>
-            </div>
-            <ChevronRight className="size-4 shrink-0 text-muted-foreground rtl:rotate-180 group-hover:text-primary" />
-          </Link>
-        ))}
-      </div>
     </>
   );
 }

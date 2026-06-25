@@ -14,6 +14,8 @@ export type OrderLineInput = { sku: string; quantity: string; unitGrossPrice: st
 export type OrderInitial = { header: Record<string, string>; lines: OrderLineInput[] };
 /** A selectable variation for the order line picker. */
 export type CatalogItem = { sku: string; name: string; group: string; price: number; unit: string };
+export type CustomerOption = { externalId: string; label: string; phone?: string | null };
+type InlineCustomerState = { ok: true; customer: CustomerOption } | { error: string } | undefined;
 const emptyLine: OrderLineInput = { sku: '', quantity: '1', unitGrossPrice: '0', lineDiscount: '0' };
 
 // Header inputs are defined at module scope so re-renders (line edits) don't
@@ -71,6 +73,72 @@ function HeaderSelect({ name, label, options, defaultValue, hint }: { name: stri
   );
 }
 
+function InlineCustomerModal({
+  action,
+  locale,
+  governorateOptions,
+  labels,
+  errors,
+  onCreated,
+}: {
+  action: (prev: InlineCustomerState, fd: FormData) => Promise<InlineCustomerState>;
+  locale: string;
+  governorateOptions: Opt[];
+  labels: Record<string, string>;
+  errors: Record<string, string>;
+  onCreated: (customer: CustomerOption) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [state, formAction, pending] = useActionState<InlineCustomerState, FormData>(async (prev, fd) => {
+    const result = await action(prev, fd);
+    if (result && 'ok' in result && result.ok) {
+      onCreated(result.customer);
+      setOpen(false);
+      return undefined;
+    }
+    return result;
+  }, undefined);
+
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)} className="inline-flex text-xs font-medium text-primary hover:underline">
+        {labels.newCustomer}
+      </button>
+      {open ? (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-roast/30 p-4">
+          <div className="w-full max-w-lg rounded-[var(--radius)] border bg-card p-4 shadow-xl">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h3 className="text-sm font-semibold text-foreground">{labels.newCustomer}</h3>
+              <button type="button" onClick={() => setOpen(false)} className="rounded-lg border p-1.5 text-muted-foreground hover:bg-muted">
+                <X className="size-4" />
+              </button>
+            </div>
+            <form action={formAction} className="grid gap-3 sm:grid-cols-2">
+              <input type="hidden" name="locale" value={locale} />
+              <input type="hidden" name="segment" value="NEW" />
+              <HeaderField name="nameEn" label={labels.customerName} />
+              <HeaderField name="phone" label={labels.customerPhone} />
+              <HeaderField name="email" label={labels.customerEmail} />
+              <HeaderSelect name="governorate" label={labels.governorate} options={governorateOptions} />
+              <HeaderField name="address1" label={labels.customerAddress} />
+              <HeaderField name="notes" label={labels.notes} />
+              {state && 'error' in state ? <p className="text-sm font-medium text-danger sm:col-span-2">{errors[state.error] ?? state.error}</p> : null}
+              <div className="flex justify-end gap-2 sm:col-span-2">
+                <button type="button" onClick={() => setOpen(false)} className="rounded-lg border px-3 py-2 text-sm font-medium hover:bg-muted">
+                  {labels.cancel}
+                </button>
+                <button type="submit" disabled={pending} className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-60">
+                  {pending ? labels.saving : labels.createCustomer}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
 export function OrderForm({
   action,
   locale,
@@ -87,6 +155,8 @@ export function OrderForm({
   submitLabel,
   editing,
   catalog = [],
+  customerOptions = [],
+  inlineCustomerAction,
 }: {
   action: (prev: ActionState, fd: FormData) => Promise<ActionState>;
   locale: string;
@@ -103,9 +173,14 @@ export function OrderForm({
   submitLabel: string;
   editing?: boolean;
   catalog?: CatalogItem[];
+  customerOptions?: CustomerOption[];
+  inlineCustomerAction?: (prev: InlineCustomerState, fd: FormData) => Promise<InlineCustomerState>;
 }) {
   const [state, formAction, pending] = useActionState<ActionState, FormData>(action, undefined);
   const [lines, setLines] = useState<OrderLineInput[]>(initial?.lines?.length ? initial.lines : [{ ...emptyLine }]);
+  const [customers, setCustomers] = useState<CustomerOption[]>(customerOptions);
+  const [customerQuery, setCustomerQuery] = useState('');
+  const [selectedCustomer, setSelectedCustomer] = useState(initial?.header?.customerExternalId ?? '');
 
   // Active variations grouped by parent for the picker (BRD §11–12).
   const catalogByGroup = useMemo(() => {
@@ -147,6 +222,17 @@ export function OrderForm({
     return { subtotal, discount, extra, net: subtotal - discount + extra };
   }, [lines, adj]);
   const fmt = (n: number) => new Intl.NumberFormat(locale === 'ar' ? 'ar-IQ' : 'en-US').format(n);
+  const visibleCustomers = useMemo(() => {
+    const q = customerQuery.trim().toLowerCase();
+    const list = q
+      ? customers.filter((customer) => `${customer.label} ${customer.phone ?? ''} ${customer.externalId}`.toLowerCase().includes(q))
+      : customers;
+    return list.slice(0, 80);
+  }, [customers, customerQuery]);
+  const addInlineCustomer = (customer: CustomerOption) => {
+    setCustomers((current) => current.some((item) => item.externalId === customer.externalId) ? current : [customer, ...current]);
+    setSelectedCustomer(customer.externalId);
+  };
 
   return (
     <form action={formAction} className="space-y-4">
@@ -158,13 +244,50 @@ export function OrderForm({
           <h2 className="text-sm font-semibold text-foreground">{labels.detailsTitle}</h2>
           <p className="text-xs leading-5 text-muted-foreground">{labels.detailsHint}</p>
         </div>
-        <HeaderField name="orderNumber" label={labels.orderNumber} defaultValue={h.orderNumber} disabled={editing} />
+        {editing ? (
+          <HeaderField name="orderNumber" label={labels.orderNumber} defaultValue={h.orderNumber} disabled />
+        ) : (
+          <div className="flex flex-col gap-1">
+            <span className="text-xs font-medium text-muted-foreground">{labels.orderNumber}</span>
+            <div className="rounded-lg border bg-muted/35 px-3 py-2 text-sm text-muted-foreground">{labels.orderNumberGenerated}</div>
+          </div>
+        )}
         <HeaderField name="placedAt" label={labels.date} type="date" defaultValue={h.placedAt} />
         <div className="space-y-1">
-          <HeaderField name="customerExternalId" label={labels.customer} defaultValue={h.customerExternalId} hint={labels.customerHint} />
-          <Link href="/admin/records/customers/new" className="inline-flex text-xs font-medium text-primary hover:underline">
-            {labels.newCustomer}
-          </Link>
+          <input type="hidden" name="customerExternalId" value={selectedCustomer} />
+          <label className="text-xs font-medium text-muted-foreground">{labels.customer}</label>
+          <input
+            value={customerQuery}
+            onChange={(event) => setCustomerQuery(event.target.value)}
+            placeholder={labels.searchCustomer}
+            className={input}
+          />
+          <select value={selectedCustomer} onChange={(event) => setSelectedCustomer(event.target.value)} className={input}>
+            <option value="">{labels.selectCustomer}</option>
+            {selectedCustomer && !customers.some((customer) => customer.externalId === selectedCustomer) ? (
+              <option value={selectedCustomer}>{selectedCustomer}</option>
+            ) : null}
+            {visibleCustomers.map((customer) => (
+              <option key={customer.externalId} value={customer.externalId}>
+                {customer.label}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs leading-5 text-muted-foreground">{labels.customerHint}</p>
+          {inlineCustomerAction ? (
+            <InlineCustomerModal
+              action={inlineCustomerAction}
+              locale={locale}
+              governorateOptions={governorateOptions}
+              labels={labels}
+              errors={errors}
+              onCreated={addInlineCustomer}
+            />
+          ) : (
+            <Link href="/admin/records/customers/new" className="inline-flex text-xs font-medium text-primary hover:underline">
+              {labels.newCustomer}
+            </Link>
+          )}
         </div>
         <HeaderSelect name="channel" label={labels.channel} options={channelOptions} defaultValue={h.channel} />
         <HeaderSelect name="governorate" label={labels.governorate} options={governorateOptions} defaultValue={h.governorate} />

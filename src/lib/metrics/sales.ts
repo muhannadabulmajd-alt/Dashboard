@@ -82,6 +82,18 @@ export function aov(netSalesValue: number, orderCount: number): number {
   return orderCount > 0 ? netSalesValue / orderCount : 0;
 }
 
+export function averageOrdersPerDay(
+  orders: OrderLike[],
+  range: { start: Date; end: Date },
+): number {
+  const sales = orders.filter(isSalesOrder);
+  if (!sales.length) return 0;
+  const firstSale = sales.reduce((min, order) => (order.placedAt < min ? order.placedAt : min), sales[0].placedAt);
+  const start = range.start.getFullYear() <= 2000 ? firstSale : range.start;
+  const days = Math.max(1, Math.ceil((range.end.getTime() - start.getTime()) / 86_400_000));
+  return sales.length / days;
+}
+
 export function avgUnitPrice(netSalesValue: number, units: number): number {
   return units > 0 ? netSalesValue / units : 0;
 }
