@@ -28,7 +28,7 @@
   --font-sans: ui-sans-serif, system-ui, "Segoe UI", Tahoma, "Noto Sans Arabic",
     "Cairo", "Helvetica Neue", Arial, sans-serif;
 
-  --radius: 0.65rem;
+  --radius: 0.85rem;
 }
 
 *,
@@ -86,8 +86,17 @@ summary:focus-visible {
 
 .app-surface {
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--color-linen) 35%, white) 0%, var(--color-background) 22rem),
+    radial-gradient(circle at top left, color-mix(in srgb, var(--color-amber) 10%, transparent) 0, transparent 22rem),
+    linear-gradient(180deg, color-mix(in srgb, var(--color-linen) 42%, white) 0%, var(--color-background) 24rem),
     var(--color-background);
+}
+
+@media (max-width: 767px) {
+  .app-surface {
+    background:
+      linear-gradient(180deg, color-mix(in srgb, var(--color-linen) 30%, white) 0%, var(--color-background) 18rem),
+      var(--color-background);
+  }
 }
 
 .dashboard-builder-grid {

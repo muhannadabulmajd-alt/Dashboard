@@ -23,10 +23,10 @@ export async function TopBar({
   const signOut = signOutAction.bind(null, locale);
 
   return (
-    <header className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b border-border/80 bg-card/88 px-3 py-2.5 backdrop-blur sm:gap-3 sm:px-4 sm:py-3">
+    <header className="sticky top-0 z-40 flex min-w-0 flex-wrap items-center justify-between gap-2 border-b border-border/80 bg-card/92 px-3 py-2.5 pt-[calc(env(safe-area-inset-top)+0.625rem)] shadow-[0_8px_24px_rgba(83,45,31,0.06)] backdrop-blur sm:gap-3 sm:px-4 sm:py-3">
       <div className="flex items-center gap-2 md:hidden">
         <MobileNav groups={navGroups} title={tApp('short')} />
-        <span className="text-sm font-bold text-roast">{tApp('short')}</span>
+        <span className="truncate text-sm font-bold text-roast">{tApp('short')}</span>
       </div>
       <div className="ms-auto flex min-w-0 items-center gap-2 sm:gap-3">
         <LocaleSwitcher />

@@ -54,7 +54,7 @@ export default async function ProductProfitabilityPage({
       <BackLink href="/finance/reports" label={tr('back')} />
       <PageHeader title={t('productProfitability')} subtitle={t('productProfitabilitySubtitle')} />
 
-      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <KpiCard label={tt('netSales')} value={formatMoney(report.totals.netSales, 'IQD', locale)} locale={locale} />
         <KpiCard label={tt('cogs')} value={formatMoney(report.totals.cogs, 'IQD', locale)} locale={locale} invertDelta />
         <KpiCard label={tt('margin')} value={formatMoney(report.totals.grossProfit, 'IQD', locale)} locale={locale} />

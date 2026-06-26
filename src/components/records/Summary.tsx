@@ -17,7 +17,7 @@ const TONE: Record<NonNullable<SummaryStat['tone']>, string> = {
 export function RecordsSummary({ stats }: { stats: SummaryStat[] }) {
   if (!stats.length) return null;
   return (
-    <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+    <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
       {stats.map((s) => (
         <div key={s.label} className="rounded-[var(--radius)] border border-border/80 bg-card p-3 shadow-[0_1px_0_rgba(83,45,31,0.05)]">
           <div className="text-xs font-semibold text-muted-foreground">{s.label}</div>

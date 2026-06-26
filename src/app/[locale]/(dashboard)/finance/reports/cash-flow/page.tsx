@@ -47,7 +47,7 @@ export default async function CashFlowReportPage({
       <BackLink href="/finance/reports" label={tr('back')} />
       <PageHeader title={t('cashFlow')} subtitle={t('cashFlowSubtitle')} />
 
-      <section className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+      <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <KpiCard label={t('cashIn')} value={formatMoney(report.totalIn, 'IQD', locale)} locale={locale} />
         <KpiCard label={t('cashOut')} value={formatMoney(report.totalOut, 'IQD', locale)} locale={locale} invertDelta />
         <KpiCard label={t('netCashMovement')} value={formatMoney(report.netMovement, 'IQD', locale)} locale={locale} />

@@ -68,7 +68,7 @@ export default async function OffersPage({
     <>
       <PageHeader title={t('title')} subtitle={t('subtitle')} />
 
-      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <KpiCard label={t('activeOffers')} value={formatNumber(activeOffers, locale)} locale={locale} />
         <KpiCard label={t('revenue')} value={formatMoney(revenue, 'IQD', locale)} locale={locale} />
         <KpiCard label={t('discountSpend')} value={formatMoney(discount, 'IQD', locale)} locale={locale} invertDelta />

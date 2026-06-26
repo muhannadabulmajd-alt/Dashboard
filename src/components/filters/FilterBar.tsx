@@ -114,12 +114,12 @@ export function FilterBar({
   return (
     <div
       className={cn(
-        'flex max-w-full flex-wrap items-center gap-2 overflow-x-clip border-b border-border/80 bg-card/85 px-3 py-2.5 shadow-[0_1px_0_rgba(83,45,31,0.03)] backdrop-blur transition-opacity sm:px-4',
+        'flex max-w-full flex-nowrap items-center gap-2 overflow-x-auto border-b border-border/80 bg-card/90 px-3 py-2.5 shadow-[0_1px_0_rgba(83,45,31,0.03)] backdrop-blur transition-opacity sm:flex-wrap sm:overflow-x-visible sm:px-4',
         pending && 'opacity-60',
       )}
     >
       <span className="flex items-center gap-1.5 text-sm font-semibold text-roast">
-        <SlidersHorizontal className="size-4" />
+        <SlidersHorizontal className="size-4 shrink-0" />
         {t('title')}
       </span>
 
@@ -136,7 +136,7 @@ export function FilterBar({
             }
           })
         }
-        className="min-h-10 flex-1 rounded-lg border border-border/80 bg-background px-2.5 py-1.5 text-sm text-roast outline-none focus:border-primary sm:flex-none"
+        className="min-h-10 shrink-0 rounded-xl border border-border/80 bg-background px-2.5 py-1.5 text-sm text-roast outline-none focus:border-primary"
       >
         {RANGE_PRESETS.map((p) => (
           <option key={p} value={p}>
@@ -146,7 +146,7 @@ export function FilterBar({
       </select>
 
       {range === 'custom' ? (
-        <span className="flex w-full flex-wrap items-center gap-1 sm:w-auto">
+        <span className="flex shrink-0 items-center gap-1 sm:w-auto sm:flex-wrap">
           <input
             type="date"
             aria-label={t('from')}
@@ -155,7 +155,7 @@ export function FilterBar({
             onChange={(e) =>
               apply((sp) => (e.target.value ? sp.set('from', e.target.value) : sp.delete('from')))
             }
-            className="min-h-10 flex-1 rounded-lg border border-border/80 bg-background px-2 py-1.5 text-sm outline-none focus:border-primary sm:flex-none"
+            className="min-h-10 w-36 shrink-0 rounded-xl border border-border/80 bg-background px-2 py-1.5 text-sm outline-none focus:border-primary"
           />
           <span className="text-xs text-muted-foreground">→</span>
           <input
@@ -166,7 +166,7 @@ export function FilterBar({
             onChange={(e) =>
               apply((sp) => (e.target.value ? sp.set('to', e.target.value) : sp.delete('to')))
             }
-            className="min-h-10 flex-1 rounded-lg border border-border/80 bg-background px-2 py-1.5 text-sm outline-none focus:border-primary sm:flex-none"
+            className="min-h-10 w-36 shrink-0 rounded-xl border border-border/80 bg-background px-2 py-1.5 text-sm outline-none focus:border-primary"
           />
         </span>
       ) : null}
@@ -206,8 +206,8 @@ function MultiSelect({
   onToggle: (value: string) => void;
 }) {
   return (
-    <details className="group relative">
-      <summary className="flex min-h-10 cursor-pointer list-none items-center gap-1.5 rounded-lg border border-border/80 bg-background px-2.5 py-1.5 text-sm font-medium text-roast hover:bg-linen/35 [&::-webkit-details-marker]:hidden">
+    <details className="group relative shrink-0">
+      <summary className="flex min-h-10 shrink-0 cursor-pointer list-none items-center gap-1.5 rounded-xl border border-border/80 bg-background px-2.5 py-1.5 text-sm font-medium text-roast hover:bg-linen/35 [&::-webkit-details-marker]:hidden">
         {label}
         {selected.length > 0 ? (
           <span className="rounded-full bg-amber/15 px-1.5 text-xs font-bold text-primary">

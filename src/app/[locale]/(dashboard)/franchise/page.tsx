@@ -51,7 +51,7 @@ export default async function FranchisePage({
     <>
       <PageHeader title={t('title')} subtitle={t('subtitle')} />
 
-      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <KpiCard label={t('branches')} value={formatNumber(perf.length, locale)} locale={locale} />
         <KpiCard label={t('totalSales')} value={formatMoney(totalNet, 'IQD', locale)} locale={locale} />
         <KpiCard label={t('avgMargin')} value={formatPercent(avgMargin, locale)} locale={locale} />
@@ -95,7 +95,7 @@ export default async function FranchisePage({
                 ))}
               </div>
 
-              <div className="grid grid-cols-2 gap-2 border-t pt-2 text-xs">
+              <div className="grid grid-cols-1 gap-2 border-t pt-2 text-xs sm:grid-cols-2">
                 <div>
                   <div className="text-muted-foreground">{t('netSales')}</div>
                   <div className="font-semibold tabular">{formatMoney(b.netSales, 'IQD', locale)}</div>
