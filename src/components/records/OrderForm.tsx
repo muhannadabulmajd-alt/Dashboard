@@ -1,6 +1,7 @@
 'use client';
 
 import { useActionState, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Loader2, Plus, X } from 'lucide-react';
 import { Link } from '@/i18n/navigation';
 import { cn } from '@/lib/utils';
@@ -131,12 +132,8 @@ function InlineCustomerModal({
     return result;
   }, undefined);
 
-  return (
-    <>
-      <button type="button" onClick={() => setOpen(true)} className="inline-flex text-xs font-medium text-primary hover:underline">
-        {labels.newCustomer}
-      </button>
-      {open ? (
+  const modal = open && typeof document !== 'undefined'
+    ? createPortal(
         <div className="fixed inset-0 z-50 grid place-items-center bg-roast/30 p-4">
           <div className="w-full max-w-lg rounded-[var(--radius)] border bg-card p-4 shadow-xl">
             <div className="mb-3 flex items-center justify-between gap-3">
@@ -165,8 +162,17 @@ function InlineCustomerModal({
               </div>
             </form>
           </div>
-        </div>
-      ) : null}
+        </div>,
+        document.body,
+      )
+    : null;
+
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)} className="inline-flex text-xs font-medium text-primary hover:underline">
+        {labels.newCustomer}
+      </button>
+      {modal}
     </>
   );
 }
@@ -398,7 +404,7 @@ export function OrderForm({
               <div className="flex flex-col gap-1">
                 <label className={rowLabel(i === 0)}>{labels.variation ?? labels.sku}</label>
                 {catalog.length ? (
-                  <select value={l.sku} onChange={(e) => pickVariation(i, e.target.value)} className={input} required>
+                  <select value={l.sku} onChange={(e) => pickVariation(i, e.target.value)} className={input} required data-order-line-sku={i}>
                     <option value="">—</option>
                     {catalogByGroup.map(([group, items]) => (
                       <optgroup key={group} label={group}>
@@ -423,15 +429,15 @@ export function OrderForm({
               </div>
               <div className="flex flex-col gap-1">
                 <label className={rowLabel(i === 0)}>{labels.qty}</label>
-                <input type="number" value={l.quantity} onChange={(e) => setLine(i, 'quantity', e.target.value)} className={input} required min="1" step="1" />
+                <input type="number" value={l.quantity} onChange={(e) => setLine(i, 'quantity', e.target.value)} className={input} required min="1" step="1" data-order-line-quantity={i} />
               </div>
               <div className="flex flex-col gap-1">
                 <label className={rowLabel(i === 0)}>{labels.unitPrice}</label>
-                <input type="number" value={l.unitGrossPrice} onChange={(e) => setLine(i, 'unitGrossPrice', e.target.value)} className={input} required min="0" step="1" />
+                <input type="number" value={l.unitGrossPrice} onChange={(e) => setLine(i, 'unitGrossPrice', e.target.value)} className={input} required min="0" step="1" data-order-line-price={i} />
               </div>
               <div className="flex flex-col gap-1">
                 <label className={rowLabel(i === 0)}>{labels.discount}</label>
-                <input type="number" value={l.lineDiscount} onChange={(e) => setLine(i, 'lineDiscount', e.target.value)} className={input} required min="0" step="1" />
+                <input type="number" value={l.lineDiscount} onChange={(e) => setLine(i, 'lineDiscount', e.target.value)} className={input} required min="0" step="1" data-order-line-discount={i} />
               </div>
               <button
                 type="button"
@@ -480,7 +486,7 @@ export function OrderForm({
         </div>
       </div>
 
-      {state?.error ? <p className="text-sm font-medium text-danger">{errors[state.error] ?? state.error}</p> : null}
+      {state?.error ? <p className="text-sm font-medium text-danger" data-order-error>{errors[state.error] ?? state.error}</p> : null}
 
       <div className="flex flex-col gap-3 rounded-[var(--radius)] border bg-card p-3 shadow-sm sm:flex-row sm:flex-wrap sm:items-center">
         <div className="me-auto">
@@ -490,6 +496,7 @@ export function OrderForm({
         <button
           type="submit"
           disabled={pending}
+          data-order-submit
           className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-95 disabled:opacity-60 max-sm:w-full"
         >
           {pending ? <Loader2 className="size-4 animate-spin" /> : null}
