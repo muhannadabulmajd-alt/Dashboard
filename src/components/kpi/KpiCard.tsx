@@ -47,18 +47,24 @@ export function KpiCard({
   const body = (
     <div
       className={cn(
-        'h-full rounded-[var(--radius)] border p-4 shadow-[0_1px_0_rgba(83,45,31,0.05)] transition-colors',
+        'h-full min-h-32 rounded-[var(--radius)] border p-4 shadow-[0_1px_0_rgba(83,45,31,0.05)] transition-colors',
         style.card,
         href && 'hover:border-primary/45 hover:bg-linen/20',
         emphasis && 'bg-grove text-primary-foreground',
       )}
     >
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className={cn('text-xs font-semibold', emphasis ? 'text-primary-foreground/70' : 'text-muted-foreground')}>
+        <div className="min-w-0 flex-1">
+          <div className={cn('max-w-full text-xs font-semibold leading-5', emphasis ? 'text-primary-foreground/70' : 'text-muted-foreground')}>
             {label}
           </div>
-          <div className={cn('mt-1 truncate text-2xl font-bold tabular', emphasis ? 'text-primary-foreground' : 'text-roast')} title={value}>
+          <div
+            className={cn(
+              'mt-1 max-w-full break-words text-[clamp(1.45rem,1.65vw,2rem)] font-bold leading-tight tracking-[-0.01em] tabular',
+              emphasis ? 'text-primary-foreground' : 'text-roast',
+            )}
+            title={value}
+          >
             {value}
           </div>
         </div>

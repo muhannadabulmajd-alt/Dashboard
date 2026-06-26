@@ -17,6 +17,8 @@ export interface MetricDefinition {
   valueKind: WidgetValueKind;
   defaultType: DashboardWidgetType;
   requiresDimension?: boolean;
+  dimensionEn?: string;
+  dimensionAr?: string;
 }
 
 export const METRIC_CATALOG: MetricDefinition[] = [
@@ -26,11 +28,11 @@ export const METRIC_CATALOG: MetricDefinition[] = [
   { id: 'sales.avgOrdersPerDay', source: 'sales', labelEn: 'Avg orders / day', labelAr: 'متوسط الطلبات يومياً', supportedTypes: ['kpi'], valueKind: 'count', defaultType: 'kpi' },
   { id: 'sales.units', source: 'sales', labelEn: 'Units sold', labelAr: 'الوحدات المباعة', supportedTypes: ['kpi', 'bar'], valueKind: 'count', defaultType: 'kpi' },
   { id: 'sales.discount', source: 'sales', labelEn: 'Discount spend', labelAr: 'قيمة الخصومات', supportedTypes: ['kpi'], valueKind: 'iqd', defaultType: 'kpi' },
-  { id: 'sales.trend', source: 'sales', labelEn: 'Sales over time', labelAr: 'المبيعات عبر الوقت', supportedTypes: ['line', 'combo'], valueKind: 'iqd', defaultType: 'line' },
-  { id: 'sales.byChannel', source: 'sales', labelEn: 'Sales by channel', labelAr: 'المبيعات حسب القناة', supportedTypes: ['bar', 'donut'], valueKind: 'iqd', defaultType: 'bar' },
-  { id: 'sales.byCity', source: 'sales', labelEn: 'Sales by city', labelAr: 'المبيعات حسب المدينة', supportedTypes: ['bar', 'donut'], valueKind: 'iqd', defaultType: 'bar' },
-  { id: 'sales.byProduct', source: 'sales', labelEn: 'Sales by product', labelAr: 'المبيعات حسب المنتج', supportedTypes: ['bar', 'donut', 'table'], valueKind: 'iqd', defaultType: 'bar' },
-  { id: 'sales.byGroup', source: 'sales', labelEn: 'Sales by product group', labelAr: 'المبيعات حسب مجموعة المنتج', supportedTypes: ['bar', 'donut'], valueKind: 'iqd', defaultType: 'bar' },
+  { id: 'sales.trend', source: 'sales', labelEn: 'Sales over time', labelAr: 'المبيعات عبر الوقت', supportedTypes: ['line', 'combo'], valueKind: 'iqd', defaultType: 'line', dimensionEn: 'Date', dimensionAr: 'التاريخ' },
+  { id: 'sales.byChannel', source: 'sales', labelEn: 'Sales by channel', labelAr: 'المبيعات حسب القناة', supportedTypes: ['bar', 'donut'], valueKind: 'iqd', defaultType: 'bar', dimensionEn: 'Channel', dimensionAr: 'القناة' },
+  { id: 'sales.byCity', source: 'sales', labelEn: 'Sales by city', labelAr: 'المبيعات حسب المدينة', supportedTypes: ['bar', 'donut'], valueKind: 'iqd', defaultType: 'bar', dimensionEn: 'City', dimensionAr: 'المدينة' },
+  { id: 'sales.byProduct', source: 'sales', labelEn: 'Sales by product', labelAr: 'المبيعات حسب المنتج', supportedTypes: ['bar', 'donut', 'table'], valueKind: 'iqd', defaultType: 'bar', dimensionEn: 'Product', dimensionAr: 'المنتج' },
+  { id: 'sales.byGroup', source: 'sales', labelEn: 'Sales by product group', labelAr: 'المبيعات حسب مجموعة المنتج', supportedTypes: ['bar', 'donut'], valueKind: 'iqd', defaultType: 'bar', dimensionEn: 'Product group', dimensionAr: 'مجموعة المنتج' },
 
   { id: 'finance.revenue', source: 'finance', labelEn: 'Revenue', labelAr: 'الإيراد', supportedTypes: ['kpi'], valueKind: 'iqd', defaultType: 'kpi' },
   { id: 'finance.capex', source: 'finance', labelEn: 'Capex', labelAr: 'المصاريف الرأسمالية', supportedTypes: ['kpi', 'bar', 'table'], valueKind: 'iqd', defaultType: 'kpi' },
@@ -39,25 +41,25 @@ export const METRIC_CATALOG: MetricDefinition[] = [
   { id: 'finance.cash', source: 'finance', labelEn: 'Cash available', labelAr: 'النقد المتاح', supportedTypes: ['kpi'], valueKind: 'iqd', defaultType: 'kpi' },
   { id: 'finance.receivables', source: 'finance', labelEn: 'Receivables', labelAr: 'مستحقات لنا', supportedTypes: ['kpi'], valueKind: 'iqd', defaultType: 'kpi' },
   { id: 'finance.payables', source: 'finance', labelEn: 'Payables', labelAr: 'مستحقات علينا', supportedTypes: ['kpi'], valueKind: 'iqd', defaultType: 'kpi' },
-  { id: 'finance.spendByMonth', source: 'finance', labelEn: 'Spend by month', labelAr: 'الصرف حسب الشهر', supportedTypes: ['bar', 'line'], valueKind: 'iqd', defaultType: 'bar' },
-  { id: 'finance.spendByCategory', source: 'finance', labelEn: 'Spend by category', labelAr: 'الصرف حسب التصنيف', supportedTypes: ['bar', 'donut'], valueKind: 'iqd', defaultType: 'donut' },
-  { id: 'finance.spendByParty', source: 'finance', labelEn: 'Spend by party', labelAr: 'الصرف حسب الجهة', supportedTypes: ['bar', 'table'], valueKind: 'iqd', defaultType: 'bar' },
+  { id: 'finance.spendByMonth', source: 'finance', labelEn: 'Spend by month', labelAr: 'الصرف حسب الشهر', supportedTypes: ['bar', 'line'], valueKind: 'iqd', defaultType: 'bar', dimensionEn: 'Month', dimensionAr: 'الشهر' },
+  { id: 'finance.spendByCategory', source: 'finance', labelEn: 'Spend by category', labelAr: 'الصرف حسب التصنيف', supportedTypes: ['bar', 'donut'], valueKind: 'iqd', defaultType: 'donut', dimensionEn: 'Category', dimensionAr: 'التصنيف' },
+  { id: 'finance.spendByParty', source: 'finance', labelEn: 'Spend by party', labelAr: 'الصرف حسب الجهة', supportedTypes: ['bar', 'table'], valueKind: 'iqd', defaultType: 'bar', dimensionEn: 'Party', dimensionAr: 'الجهة' },
 
   { id: 'inventory.value', source: 'inventory', labelEn: 'Inventory value', labelAr: 'قيمة المخزون', supportedTypes: ['kpi'], valueKind: 'iqd', defaultType: 'kpi' },
   { id: 'inventory.stock', source: 'inventory', labelEn: 'Available stock', labelAr: 'المخزون المتاح', supportedTypes: ['kpi', 'table'], valueKind: 'count', defaultType: 'kpi' },
   { id: 'inventory.lowStock', source: 'inventory', labelEn: 'Low stock items', labelAr: 'مواد منخفضة المخزون', supportedTypes: ['kpi', 'table'], valueKind: 'count', defaultType: 'kpi' },
-  { id: 'inventory.byCategory', source: 'inventory', labelEn: 'Inventory by category', labelAr: 'المخزون حسب التصنيف', supportedTypes: ['bar', 'donut'], valueKind: 'iqd', defaultType: 'donut' },
+  { id: 'inventory.byCategory', source: 'inventory', labelEn: 'Inventory by category', labelAr: 'المخزون حسب التصنيف', supportedTypes: ['bar', 'donut'], valueKind: 'iqd', defaultType: 'donut', dimensionEn: 'Category', dimensionAr: 'التصنيف' },
 
   { id: 'customers.total', source: 'customers', labelEn: 'Customers', labelAr: 'العملاء', supportedTypes: ['kpi'], valueKind: 'count', defaultType: 'kpi' },
   { id: 'customers.repeat', source: 'customers', labelEn: 'Repeat customers', labelAr: 'العملاء المتكررون', supportedTypes: ['kpi'], valueKind: 'count', defaultType: 'kpi' },
-  { id: 'customers.byCity', source: 'customers', labelEn: 'Customers by city', labelAr: 'العملاء حسب المدينة', supportedTypes: ['bar', 'donut'], valueKind: 'count', defaultType: 'bar' },
+  { id: 'customers.byCity', source: 'customers', labelEn: 'Customers by city', labelAr: 'العملاء حسب المدينة', supportedTypes: ['bar', 'donut'], valueKind: 'count', defaultType: 'bar', dimensionEn: 'City', dimensionAr: 'المدينة' },
   { id: 'customers.top', source: 'customers', labelEn: 'Top customers', labelAr: 'أفضل العملاء', supportedTypes: ['table'], valueKind: 'iqd', defaultType: 'table' },
 
   { id: 'fulfillment.delivered', source: 'fulfillment', labelEn: 'Delivered orders', labelAr: 'طلبات تم توصيلها', supportedTypes: ['kpi'], valueKind: 'count', defaultType: 'kpi' },
   { id: 'fulfillment.open', source: 'fulfillment', labelEn: 'Open deliveries', labelAr: 'توصيلات مفتوحة', supportedTypes: ['kpi', 'table'], valueKind: 'count', defaultType: 'kpi' },
   { id: 'fulfillment.completionRate', source: 'fulfillment', labelEn: 'Delivery completion rate', labelAr: 'نسبة اكتمال التوصيل', supportedTypes: ['kpi'], valueKind: 'percent', defaultType: 'kpi' },
-  { id: 'fulfillment.byStatus', source: 'fulfillment', labelEn: 'Deliveries by status', labelAr: 'التوصيل حسب الحالة', supportedTypes: ['bar', 'donut'], valueKind: 'count', defaultType: 'donut' },
-  { id: 'fulfillment.byCourier', source: 'fulfillment', labelEn: 'Courier performance', labelAr: 'أداء شركات التوصيل', supportedTypes: ['bar', 'table'], valueKind: 'count', defaultType: 'bar' },
+  { id: 'fulfillment.byStatus', source: 'fulfillment', labelEn: 'Deliveries by status', labelAr: 'التوصيل حسب الحالة', supportedTypes: ['bar', 'donut'], valueKind: 'count', defaultType: 'donut', dimensionEn: 'Status', dimensionAr: 'الحالة' },
+  { id: 'fulfillment.byCourier', source: 'fulfillment', labelEn: 'Courier performance', labelAr: 'أداء شركات التوصيل', supportedTypes: ['bar', 'table'], valueKind: 'count', defaultType: 'bar', dimensionEn: 'Courier', dimensionAr: 'شركة التوصيل' },
 
   { id: 'roastery.batches', source: 'roastery', labelEn: 'Roast batches', labelAr: 'دفعات التحميص', supportedTypes: ['kpi', 'table'], valueKind: 'count', defaultType: 'kpi' },
   { id: 'roastery.greenInput', source: 'roastery', labelEn: 'Green input', labelAr: 'البن الأخضر الداخل', supportedTypes: ['kpi'], valueKind: 'grams', defaultType: 'kpi' },
@@ -84,12 +86,16 @@ export const WidgetSchema = z.object({
   description: z.string().optional(),
   source: z.enum(DATA_SOURCES).optional(),
   metric: MetricIdSchema.optional(),
+  dimension: z.string().optional(),
   filters: z.record(z.string(), z.union([z.string(), z.array(z.string())])).optional(),
   style: z.object({
     tone: z.enum(['default', 'accent', 'success', 'warning', 'danger']).optional(),
     showLegend: z.boolean().optional(),
+    showValues: z.boolean().optional(),
     compact: z.boolean().optional(),
   }).optional(),
+  locked: z.boolean().optional(),
+  refreshNonce: z.number().optional(),
   hideFromPdf: z.boolean().default(false),
   text: z.string().optional(),
 });

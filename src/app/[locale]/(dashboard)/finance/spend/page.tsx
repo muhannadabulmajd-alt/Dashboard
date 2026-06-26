@@ -9,6 +9,7 @@ import { can } from '@/lib/rbac';
 import { getSpendRows, type SpendBucket } from '@/server/finance/spend';
 import { DataTable, type Column } from '@/components/data-table/DataTable';
 import { KpiCard } from '@/components/kpi/KpiCard';
+import { DrilldownBanner } from '@/components/insights/DrilldownBanner';
 import { BackLink } from '@/components/records/parts';
 import { PageHeader } from '@/components/ui/primitives';
 import { Link } from '@/i18n/navigation';
@@ -60,6 +61,13 @@ export default async function FinanceSpendPage({
   ]);
 
   const activeFilters = [rowFilters.month, rowFilters.category, rowFilters.party, rowFilters.q].filter(Boolean).join(' · ');
+  const activeChips = [
+    `${t('spendBuckets.' + bucket)}`,
+    rowFilters.month ? `${locale === 'ar' ? 'الشهر' : 'Month'}: ${rowFilters.month}` : null,
+    rowFilters.category ? `${locale === 'ar' ? 'التصنيف' : 'Category'}: ${rowFilters.category}` : null,
+    rowFilters.party ? `${locale === 'ar' ? 'الجهة' : 'Party'}: ${rowFilters.party}` : null,
+    rowFilters.q ? `${locale === 'ar' ? 'بحث' : 'Search'}: ${rowFilters.q}` : null,
+  ].filter(Boolean) as string[];
   const exportHref = buildFinanceExportHref('spend', filters, locale, {
     bucket,
     month: rowFilters.month,
@@ -74,6 +82,19 @@ export default async function FinanceSpendPage({
       <PageHeader
         title={t(`spendBuckets.${bucket}`)}
         subtitle={activeFilters || t('spendDetailSubtitle')}
+      />
+      <DrilldownBanner
+        title={locale === 'ar' ? 'نتيجة مفلترة' : 'Filtered result'}
+        description={locale === 'ar' ? 'هذه القائمة تعرض البنود المطابقة لما ضغطت عليه في البطاقة أو الرسم.' : 'This page shows the rows behind the card or chart item you opened.'}
+        chips={activeChips}
+        totalLabel={t('total')}
+        totalValue={formatMoney(total, 'IQD', locale)}
+        rowsLabel={t('rows')}
+        rowsValue={rows.length}
+        backHref="/finance"
+        backLabel={locale === 'ar' ? 'العودة للمالية' : 'Back to finance'}
+        clearHref={`/finance/spend?bucket=${bucket}`}
+        clearLabel={locale === 'ar' ? 'مسح الفلاتر' : 'Clear filters'}
       />
       <section className="grid gap-3 sm:grid-cols-3">
         <KpiCard label={t('total')} value={formatMoney(total, 'IQD', locale)} locale={locale} />

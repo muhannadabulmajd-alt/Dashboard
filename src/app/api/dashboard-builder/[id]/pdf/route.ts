@@ -1,6 +1,7 @@
 import { createElement } from 'react';
+import path from 'node:path';
 import { NextResponse, type NextRequest } from 'next/server';
-import { renderToBuffer } from '@react-pdf/renderer';
+import { Font, renderToBuffer } from '@react-pdf/renderer';
 import { getCurrentUser } from '@/server/auth/session';
 import { getDashboard, resolveDashboardWidgetData } from '@/server/dashboard-builder/service';
 import { DashboardPdf } from '@/server/dashboard-builder/DashboardPdf';
@@ -8,6 +9,8 @@ import { parseFilters } from '@/lib/filters';
 import type { AppLocale } from '@/lib/money';
 
 export const runtime = 'nodejs';
+
+Font.register({ family: 'Amiri', src: path.join(process.cwd(), 'public/fonts/Amiri-Regular.ttf') });
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await getCurrentUser();

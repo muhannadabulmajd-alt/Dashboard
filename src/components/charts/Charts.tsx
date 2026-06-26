@@ -33,14 +33,23 @@ const axisProps = {
   axisLine: false,
 } as const;
 
-function ChartFrame({ title, children }: { title: string; children: React.ReactNode }) {
+function hasDrilldown(data: Point[]): boolean {
+  return data.some((point) => Boolean(point.href));
+}
+
+function ChartFrame({ title, children, drilldown }: { title: string; children: React.ReactNode; drilldown?: boolean }) {
   return (
-    <Card>
-      <CardHeader>
+    <Card className="h-full">
+      <CardHeader className="items-start">
         <CardTitle>{title}</CardTitle>
+        {drilldown ? (
+          <span className="rounded-full border border-amber/25 bg-amber/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
+            View details
+          </span>
+        ) : null}
       </CardHeader>
-      <CardContent>
-        <div className="h-64 w-full">{children}</div>
+      <CardContent className="h-[calc(100%-3.5rem)] min-h-72">
+        <div className="h-full min-h-64 w-full">{children}</div>
       </CardContent>
     </Card>
   );
@@ -62,6 +71,14 @@ function activePoint(state: unknown): unknown {
   return (state as { activePayload?: { payload?: unknown }[] } | undefined)?.activePayload?.[0]?.payload;
 }
 
+function ChartEmpty({ locale }: { locale: AppLocale }) {
+  return (
+    <div className="flex h-full min-h-48 items-center justify-center rounded-lg border border-dashed border-amber/25 bg-linen/20 p-4 text-center text-sm text-muted-foreground">
+      {locale === 'ar' ? 'لا توجد بيانات ضمن الفلاتر الحالية.' : 'No data found for the selected filters.'}
+    </div>
+  );
+}
+
 export function LineChartCard({
   title,
   data,
@@ -73,19 +90,23 @@ export function LineChartCard({
   locale: AppLocale;
   valueKind?: ValueKind;
 }) {
+  const drilldown = hasDrilldown(data);
   return (
-    <ChartFrame title={title}>
-      <ResponsiveContainer width="100%" height="100%">
+    <ChartFrame title={title} drilldown={drilldown}>
+      {data.length ? <ResponsiveContainer width="100%" height="100%">
         <LineChart
           data={data}
-          margin={{ top: 8, right: 12, left: 0, bottom: 0 }}
+          margin={{ top: 8, right: 20, left: 8, bottom: 8 }}
           onClick={(state) => openPoint(activePoint(state))}
-          style={data.some((point) => point.href) ? { cursor: 'pointer' } : undefined}
+          style={drilldown ? { cursor: 'pointer' } : undefined}
         >
           <CartesianGrid strokeDasharray="3 3" stroke="#e6dccb" vertical={false} />
           <XAxis dataKey="label" {...axisProps} minTickGap={24} />
-          <YAxis {...axisProps} width={56} tickFormatter={(v) => fmt(Number(v), valueKind, locale, true)} />
-          <Tooltip formatter={(v) => fmt(Number(v), valueKind, locale)} />
+          <YAxis {...axisProps} width={valueKind === 'iqd' ? 74 : 48} tickFormatter={(v) => fmt(Number(v), valueKind, locale, true)} />
+          <Tooltip
+            formatter={(v) => fmt(Number(v), valueKind, locale)}
+            labelFormatter={(label) => drilldown ? `${label} · ${locale === 'ar' ? 'اضغط للتفاصيل' : 'click for details'}` : String(label)}
+          />
           <Line
             type="monotone"
             dataKey="value"
@@ -95,7 +116,7 @@ export function LineChartCard({
             activeDot={{ r: 4 }}
           />
         </LineChart>
-      </ResponsiveContainer>
+      </ResponsiveContainer> : <ChartEmpty locale={locale} />}
     </ChartFrame>
   );
 }
@@ -113,15 +134,20 @@ export function BarChartCard({
   valueKind?: ValueKind;
   horizontal?: boolean;
 }) {
+  const drilldown = hasDrilldown(data);
+  const leftWidth = Math.min(190, Math.max(116, ...data.map((point) => point.label.length * 7)));
   return (
-    <ChartFrame title={title}>
-      <ResponsiveContainer width="100%" height="100%">
+    <ChartFrame title={title} drilldown={drilldown}>
+      {data.length ? <ResponsiveContainer width="100%" height="100%">
         {horizontal ? (
-          <BarChart data={data} layout="vertical" margin={{ top: 4, right: 16, left: 8, bottom: 4 }}>
+          <BarChart data={data} layout="vertical" margin={{ top: 4, right: 20, left: 8, bottom: 8 }} style={drilldown ? { cursor: 'pointer' } : undefined}>
             <CartesianGrid strokeDasharray="3 3" stroke="#e6dccb" horizontal={false} />
             <XAxis type="number" {...axisProps} tickFormatter={(v) => fmt(Number(v), valueKind, locale, true)} />
-            <YAxis type="category" dataKey="label" {...axisProps} width={110} />
-            <Tooltip formatter={(v) => fmt(Number(v), valueKind, locale)} />
+            <YAxis type="category" dataKey="label" {...axisProps} width={leftWidth} tick={{ ...axisProps.tick, width: leftWidth }} />
+            <Tooltip
+              formatter={(v) => fmt(Number(v), valueKind, locale)}
+              labelFormatter={(label) => drilldown ? `${label} · ${locale === 'ar' ? 'اضغط للتفاصيل' : 'click for details'}` : String(label)}
+            />
             <Bar dataKey="value" radius={[0, 4, 4, 0]} onClick={(point) => openPoint(point?.payload)}>
               {data.map((_, i) => (
                 <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
@@ -129,11 +155,14 @@ export function BarChartCard({
             </Bar>
           </BarChart>
         ) : (
-          <BarChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+          <BarChart data={data} margin={{ top: 8, right: 20, left: 8, bottom: 8 }} style={drilldown ? { cursor: 'pointer' } : undefined}>
             <CartesianGrid strokeDasharray="3 3" stroke="#e6dccb" vertical={false} />
-            <XAxis dataKey="label" {...axisProps} minTickGap={8} />
-            <YAxis {...axisProps} width={56} tickFormatter={(v) => fmt(Number(v), valueKind, locale, true)} />
-            <Tooltip formatter={(v) => fmt(Number(v), valueKind, locale)} />
+            <XAxis dataKey="label" {...axisProps} minTickGap={12} interval="preserveStartEnd" />
+            <YAxis {...axisProps} width={valueKind === 'iqd' ? 74 : 48} tickFormatter={(v) => fmt(Number(v), valueKind, locale, true)} />
+            <Tooltip
+              formatter={(v) => fmt(Number(v), valueKind, locale)}
+              labelFormatter={(label) => drilldown ? `${label} · ${locale === 'ar' ? 'اضغط للتفاصيل' : 'click for details'}` : String(label)}
+            />
             <Bar dataKey="value" radius={[4, 4, 0, 0]} onClick={(point) => openPoint(point?.payload)}>
               {data.map((_, i) => (
                 <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
@@ -141,7 +170,7 @@ export function BarChartCard({
             </Bar>
           </BarChart>
         )}
-      </ResponsiveContainer>
+      </ResponsiveContainer> : <ChartEmpty locale={locale} />}
     </ChartFrame>
   );
 }
@@ -157,9 +186,10 @@ export function DonutChartCard({
   locale: AppLocale;
   valueKind?: ValueKind;
 }) {
+  const drilldown = hasDrilldown(data);
   return (
-    <ChartFrame title={title}>
-      <ResponsiveContainer width="100%" height="100%">
+    <ChartFrame title={title} drilldown={drilldown}>
+      {data.length ? <ResponsiveContainer width="100%" height="100%">
         <PieChart>
           <Pie
             data={data}
@@ -169,15 +199,19 @@ export function DonutChartCard({
             outerRadius="80%"
             paddingAngle={2}
             onClick={(point) => openPoint(point?.payload ?? point)}
+            style={drilldown ? { cursor: 'pointer' } : undefined}
           >
             {data.map((_, i) => (
               <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
             ))}
           </Pie>
-          <Tooltip formatter={(v) => fmt(Number(v), valueKind, locale)} />
-          <Legend wrapperStyle={{ fontSize: 11 }} />
+          <Tooltip
+            formatter={(v) => fmt(Number(v), valueKind, locale)}
+            labelFormatter={(label) => drilldown ? `${label} · ${locale === 'ar' ? 'اضغط للتفاصيل' : 'click for details'}` : String(label)}
+          />
+          <Legend wrapperStyle={{ fontSize: 11, lineHeight: '18px', paddingTop: 10 }} />
         </PieChart>
-      </ResponsiveContainer>
+      </ResponsiveContainer> : <ChartEmpty locale={locale} />}
     </ChartFrame>
   );
 }
@@ -223,10 +257,10 @@ export function WaterfallChart({
   return (
     <ChartFrame title={title}>
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+        <BarChart data={data} margin={{ top: 8, right: 20, left: 8, bottom: 8 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#e6dccb" vertical={false} />
           <XAxis dataKey="label" {...axisProps} interval={0} angle={-15} textAnchor="end" height={50} />
-          <YAxis {...axisProps} width={56} tickFormatter={(v) => formatMoneyCompact(Number(v), 'IQD', locale)} />
+          <YAxis {...axisProps} width={74} tickFormatter={(v) => formatMoneyCompact(Number(v), 'IQD', locale)} />
           <Tooltip formatter={(v) => formatMoney(Number(v), 'IQD', locale)} />
           <Bar dataKey="base" stackId="wf" fill="transparent" />
           <Bar dataKey="bar" stackId="wf" radius={[3, 3, 0, 0]}>

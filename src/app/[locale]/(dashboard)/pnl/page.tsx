@@ -119,7 +119,7 @@ export default async function PnlPage({
         points={tf.raw('guide.pnl.points')}
       />
 
-      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard label={tk('netSales')} value={formatMoney(net, 'IQD', locale)} locale={locale} />
         <KpiCard label={tk('cogs')} value={formatMoney(cogs, 'IQD', locale)} locale={locale} invertDelta />
         <KpiCard label={tk('grossMargin')} value={formatPercent(margin.pct, locale)} sub={formatMoney(margin.amount, 'IQD', locale)} locale={locale} />

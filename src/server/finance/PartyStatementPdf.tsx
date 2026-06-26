@@ -1,24 +1,28 @@
-import { Document, Page, StyleSheet, Text, View } from '@react-pdf/renderer';
+import path from 'node:path';
+import { Document, Font, Page, StyleSheet, Text, View } from '@react-pdf/renderer';
 import { formatDate } from '@/lib/dates';
 import { formatMoney } from '@/lib/money';
+import { PDF_COLORS as C, pdfBaseStyles, pdfDirection } from '@/server/pdf/laheeb-pdf';
 import type { PartyStatementData } from './party-statement';
 
+Font.register({ family: 'Amiri', src: path.join(process.cwd(), 'public/fonts/Amiri-Regular.ttf') });
+
 const styles = StyleSheet.create({
-  page: { padding: 28, fontSize: 10, color: '#532d1f', fontFamily: 'Helvetica' },
-  rtl: { direction: 'rtl', textAlign: 'right' },
-  title: { fontSize: 18, fontWeight: 700, marginBottom: 4 },
-  muted: { color: '#766b5f' },
+  page: { ...pdfBaseStyles.page, padding: 28, fontSize: 9.2 },
+  title: { fontSize: 20, color: C.grove, marginBottom: 4 },
+  muted: { color: C.muted, lineHeight: 1.35 },
   section: { marginTop: 14 },
-  grid: { flexDirection: 'row', gap: 8, marginTop: 10 },
-  box: { flex: 1, borderWidth: 1, borderColor: '#e6dccb', borderRadius: 6, padding: 8 },
-  boxLabel: { color: '#766b5f', marginBottom: 4 },
-  boxValue: { fontSize: 13, fontWeight: 700 },
-  row: { flexDirection: 'row', borderBottomWidth: 1, borderColor: '#e6dccb', paddingVertical: 5 },
-  head: { backgroundColor: '#f5efe4', fontWeight: 700 },
-  cDate: { width: '13%' },
-  cText: { width: '34%' },
-  cRef: { width: '17%' },
-  cMoney: { width: '12%', textAlign: 'right' },
+  grid: { flexDirection: 'row', gap: 8, marginTop: 12 },
+  box: { flex: 1, borderWidth: 1, borderColor: C.border, borderRadius: 6, padding: 8, minHeight: 54 },
+  boxLabel: { color: C.muted, marginBottom: 4 },
+  boxValue: { fontSize: 13.5, color: C.roast },
+  row: { flexDirection: 'row', borderBottomWidth: 1, borderColor: C.border, paddingVertical: 5, minHeight: 24 },
+  head: { backgroundColor: C.linen, color: C.grove },
+  cDate: { width: '11%', paddingHorizontal: 2 },
+  cText: { width: '32%', paddingHorizontal: 2 },
+  cRef: { width: '24%', paddingHorizontal: 2 },
+  cMoney: { width: '11%', paddingHorizontal: 2, textAlign: 'right' },
+  footer: pdfBaseStyles.footer,
 });
 
 const LABELS = {
@@ -55,10 +59,9 @@ const LABELS = {
 export function PartyStatementPdf({ data }: { data: PartyStatementData }) {
   const t = LABELS[data.locale];
   const locale = data.locale;
-  const rtl = locale === 'ar';
   return (
     <Document title={`${t.title} ${data.party.name}`}>
-      <Page size="A4" style={rtl ? [styles.page, styles.rtl] : styles.page}>
+      <Page size="A4" style={[styles.page, pdfDirection(locale)]} wrap>
         <Text style={styles.title}>{t.title}</Text>
         <Text>{data.party.name}</Text>
         <Text style={styles.muted}>
@@ -92,7 +95,7 @@ export function PartyStatementPdf({ data }: { data: PartyStatementData }) {
             <Text style={styles.cMoney}>{t.balance}</Text>
           </View>
           {data.entries.map((entry) => (
-            <View key={entry.id} style={styles.row}>
+            <View key={entry.id} style={styles.row} wrap={false}>
               <Text style={styles.cDate}>{formatDate(entry.date, locale)}</Text>
               <Text style={styles.cText}>{entry.description}</Text>
               <Text style={styles.cRef}>{entry.reference ?? ''}</Text>
@@ -102,6 +105,7 @@ export function PartyStatementPdf({ data }: { data: PartyStatementData }) {
             </View>
           ))}
         </View>
+        <View style={styles.footer} fixed><Text>LAHEEB ATLAS</Text><Text render={({ pageNumber, totalPages }) => `${pageNumber} / ${totalPages}`} /></View>
       </Page>
     </Document>
   );

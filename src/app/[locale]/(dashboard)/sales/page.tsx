@@ -3,11 +3,12 @@ import { getPageContext } from '@/server/page-context';
 import { getOrders, getOrderLines, getActiveCatalog } from '@/server/db/repositories/sales.repo';
 import * as M from '@/lib/metrics';
 import { enumLabel } from '@/lib/enums';
-import { buildExportHref, serializeFilters, type DashboardFilters } from '@/lib/filters';
+import { ARRAY_FILTER_KEYS, buildExportHref, serializeFilters, type DashboardFilters } from '@/lib/filters';
 import { formatMoney, formatNumber, formatPercent } from '@/lib/money';
 import { KpiCard } from '@/components/kpi/KpiCard';
 import { LineChartCard, BarChartCard, DonutChartCard } from '@/components/charts/Charts';
 import { DataTable } from '@/components/data-table/DataTable';
+import { DrilldownBanner } from '@/components/insights/DrilldownBanner';
 import { PageHeader } from '@/components/ui/primitives';
 
 function salesHref(filters: DashboardFilters, extra: Partial<DashboardFilters>) {
@@ -69,6 +70,11 @@ export default async function SalesPage({
 
   const top = M.topProducts(lines, 10);
   const slow = M.slowMovers(lines, catalog, 10);
+  const activeChips = [
+    filters.range !== 'all' ? `${locale === 'ar' ? 'الفترة' : 'Range'}: ${filters.range}` : null,
+    filters.from || filters.to ? `${filters.from ?? '...'} - ${filters.to ?? '...'}` : null,
+    ...ARRAY_FILTER_KEYS.flatMap((key) => (filters[key] ?? []).map((value) => `${key}: ${value}`)),
+  ].filter(Boolean) as string[];
 
   const productRows = (rows: typeof top) =>
     rows.map((p) => [p.name[locale], p.sku, formatNumber(p.units, locale), formatMoney(p.netSales, 'IQD', locale)]);
@@ -83,7 +89,23 @@ export default async function SalesPage({
     <>
       <PageHeader title={t('title')} subtitle={t('subtitle')} />
 
-      <section className="grid grid-cols-2 gap-3 lg:grid-cols-6">
+      {activeChips.length ? (
+        <DrilldownBanner
+          title={locale === 'ar' ? 'نتيجة مبيعات مفلترة' : 'Filtered sales result'}
+          description={locale === 'ar' ? 'هذه الأرقام والجداول تعرض نتيجة الفلاتر الحالية أو العنصر الذي ضغطت عليه في الرسم.' : 'These numbers and rows show the current filters or the chart item you opened.'}
+          chips={activeChips}
+          totalLabel={tk('netSales')}
+          totalValue={formatMoney(net, 'IQD', locale)}
+          rowsLabel={tk('orders')}
+          rowsValue={formatNumber(orderCount, locale)}
+          backHref="/sales"
+          backLabel={locale === 'ar' ? 'العودة للمبيعات' : 'Back to sales'}
+          clearHref="/sales"
+          clearLabel={locale === 'ar' ? 'مسح الفلاتر' : 'Clear filters'}
+        />
+      ) : null}
+
+      <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
         <KpiCard label={tk('netSales')} value={formatMoney(net, 'IQD', locale)} locale={locale} />
         <KpiCard label={tk('orders')} value={formatNumber(orderCount, locale)} locale={locale} />
         <KpiCard label={tk('avgOrdersPerDay')} value={formatNumber(avgPerDay, locale)} locale={locale} />

@@ -28,11 +28,13 @@ function formatValue(data: Extract<WidgetData, { kind: 'kpi' }>, locale: AppLoca
 
 function TableWidget({ data }: { data: Extract<WidgetData, { kind: 'table' }> }) {
   return (
-    <DataTable
-      columns={data.columns.map((label) => ({ label }))}
-      rows={data.rows}
-      emptyLabel="No data found for the selected filters."
-    />
+    <div className="max-h-full overflow-auto">
+      <DataTable
+        columns={data.columns.map((label) => ({ label }))}
+        rows={data.rows}
+        emptyLabel="No data found for the selected filters."
+      />
+    </div>
   );
 }
 
