@@ -26,7 +26,7 @@ export function Card({
 }
 
 export function CardHeader({ className, children }: { className?: string; children: React.ReactNode }) {
-  return <div className={cn('flex items-center justify-between gap-3 p-4 pb-2', className)}>{children}</div>;
+  return <div className={cn('flex flex-wrap items-start justify-between gap-2 p-3 pb-2 sm:gap-3 sm:p-4 sm:pb-2', className)}>{children}</div>;
 }
 
 export function CardTitle({ children, className }: { className?: string; children: React.ReactNode }) {
@@ -34,7 +34,7 @@ export function CardTitle({ children, className }: { className?: string; childre
 }
 
 export function CardContent({ className, children }: { className?: string; children: React.ReactNode }) {
-  return <div className={cn('p-4 pt-2', className)}>{children}</div>;
+  return <div className={cn('p-3 pt-2 sm:p-4 sm:pt-2', className)}>{children}</div>;
 }
 
 type BadgeVariant = 'default' | 'success' | 'danger' | 'warning' | 'muted';
@@ -82,15 +82,15 @@ export function PageHeader({
   eyebrow?: string;
 }) {
   return (
-    <div className="mb-1 flex flex-wrap items-start justify-between gap-3">
+    <div className="mb-1 flex min-w-0 flex-wrap items-start justify-between gap-3">
       <div className="min-w-0">
         {eyebrow ? (
           <div className="mb-1 text-[11px] font-bold uppercase tracking-[0.14em] text-primary">{eyebrow}</div>
         ) : null}
-        <h1 className="text-2xl font-bold tracking-tight text-roast">{title}</h1>
+        <h1 className="break-words text-[clamp(1.5rem,6vw,2rem)] font-bold leading-tight tracking-tight text-roast">{title}</h1>
         {subtitle ? <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">{subtitle}</p> : null}
       </div>
-      {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div> : null}
+      {actions ? <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:shrink-0">{actions}</div> : null}
     </div>
   );
 }
@@ -137,7 +137,7 @@ export function ActionLink({
     <Link
       href={href}
       className={cn(
-        'inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold',
+        'inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold max-sm:w-full',
         variant === 'primary'
           ? 'bg-primary text-primary-foreground shadow-[0_1px_0_rgba(83,45,31,0.18)] hover:bg-amber/90'
           : 'border border-border/80 bg-card text-roast hover:bg-linen/40',

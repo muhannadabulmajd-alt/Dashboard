@@ -43,6 +43,12 @@ body {
   color: var(--color-foreground);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+  max-width: 100%;
+  overflow-x: clip;
+}
+
+* {
+  min-width: 0;
 }
 
 button,
@@ -86,6 +92,18 @@ summary:focus-visible {
 
 .dashboard-builder-grid {
   min-height: 24rem;
+}
+
+@media (max-width: 767px) {
+  .dashboard-builder-grid {
+    min-height: 0;
+  }
+
+  .react-grid-layout,
+  .react-grid-item {
+    width: 100% !important;
+    transform: none !important;
+  }
 }
 
 .react-grid-item {
