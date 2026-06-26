@@ -115,6 +115,9 @@ export function DashboardBuilderCanvas({
   const searchParams = useSearchParams();
   const selected = config.widgets.find((widget) => widget.id === selectedId) ?? null;
   const activeFilters = { ...runtimeFilters, ...config.globalFilters } as DashboardConfig['globalFilters'];
+  const mobileEditHint = locale === 'ar'
+    ? 'تحرير اللوحة يعمل على الجوال للاختيار والمعاينة والنسخ والحذف والتصدير والحفظ. السحب وتغيير الحجم أفضل على الجهاز اللوحي أو سطح المكتب.'
+    : 'Dashboard editing is mobile-friendly for selecting, previewing, duplicating, deleting, exporting, and saving. Dragging and resizing are best on tablet or desktop.';
   const pdfQuery = searchParams.toString();
   const pdfHref = `/api/dashboard-builder/${dashboardId}/pdf?locale=${locale}${pdfQuery ? `&${pdfQuery}` : ''}`;
   const layout = useMemo<Layout>(() => config.layout.map((item) => ({
@@ -236,18 +239,18 @@ export function DashboardBuilderCanvas({
               </select>
             </label>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
             {message ? <span className="text-xs text-muted-foreground">{pending ? 'Working...' : message}</span> : null}
             <button
               type="button"
               onClick={() => setPreviewMode((value) => !value)}
-              className="inline-flex items-center gap-1 rounded-lg border bg-card px-3 py-2 text-xs font-semibold hover:bg-linen/40"
+              className="inline-flex flex-1 items-center justify-center gap-1 rounded-lg border bg-card px-3 py-2 text-xs font-semibold hover:bg-linen/40 sm:flex-none"
             >
               {previewMode ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
               {previewMode ? 'Edit' : 'Preview'}
             </button>
             {canExport ? (
-              <a href={pdfHref} className="inline-flex items-center gap-1 rounded-lg border bg-card px-3 py-2 text-xs font-semibold hover:bg-linen/40">
+              <a href={pdfHref} className="inline-flex flex-1 items-center justify-center gap-1 rounded-lg border bg-card px-3 py-2 text-xs font-semibold hover:bg-linen/40 sm:flex-none">
                 <Download className="size-3.5" />
                 PDF
               </a>
@@ -260,7 +263,7 @@ export function DashboardBuilderCanvas({
                   setSelectedId(initialConfig.widgets[0]?.id ?? null);
                   setMessage('Restored last saved version.');
                 }}
-                className="inline-flex items-center gap-1 rounded-lg border bg-card px-3 py-2 text-xs font-semibold hover:bg-linen/40"
+                className="inline-flex flex-1 items-center justify-center gap-1 rounded-lg border bg-card px-3 py-2 text-xs font-semibold hover:bg-linen/40 sm:flex-none"
               >
                 <RotateCcw className="size-3.5" />
                 Restore
@@ -270,7 +273,7 @@ export function DashboardBuilderCanvas({
               <button
                 type="button"
                 onClick={() => persist(config, true)}
-                className="inline-flex items-center gap-1 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:bg-amber/90"
+                className="inline-flex flex-1 items-center justify-center gap-1 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:bg-amber/90 sm:flex-none"
               >
                 <Save className="size-3.5" />
                 Save
@@ -280,8 +283,55 @@ export function DashboardBuilderCanvas({
         </div>
 
         {config.widgets.length ? (
+          <div className="space-y-3 md:hidden">
+            {!previewMode ? (
+              <div className="rounded-lg border border-amber/25 bg-amber/10 p-3 text-xs leading-5 text-muted-foreground">
+                {mobileEditHint}
+              </div>
+            ) : null}
+            {config.widgets.map((widget) => (
+              <div
+                key={widget.id}
+                className={cn(
+                  'rounded-[var(--radius)] border bg-card p-2',
+                  selectedId === widget.id && !previewMode && 'ring-2 ring-primary/35',
+                )}
+                onClick={() => setSelectedId(widget.id)}
+              >
+                {!previewMode ? (
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <button type="button" className="text-start text-xs font-semibold text-muted-foreground">
+                      {widget.title}
+                    </button>
+                    {canEdit ? (
+                      <div className="flex flex-wrap items-center gap-1">
+                        <button type="button" className={toolbarButtonClass()} onClick={(event) => { event.stopPropagation(); updateWidget({ refreshNonce: Date.now() }); }}>
+                          <RefreshCcw className="size-3.5" />
+                        </button>
+                        <button type="button" className={toolbarButtonClass()} onClick={(event) => { event.stopPropagation(); updateWidget({ hideFromPdf: !widget.hideFromPdf }); }}>
+                          {widget.hideFromPdf ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+                        </button>
+                        <button type="button" className={toolbarButtonClass()} onClick={(event) => { event.stopPropagation(); duplicateWidget(widget.id); }}>
+                          <Copy className="size-3.5" />
+                        </button>
+                        <button type="button" className={toolbarButtonClass()} onClick={(event) => { event.stopPropagation(); removeWidget(widget.id); }}>
+                          <Trash2 className="size-3.5" />
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+                <div className="min-h-56">
+                  <WidgetPreview widget={widget} filters={activeFilters} locale={locale} />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        {config.widgets.length ? (
           <ResponsiveGrid
-            className="dashboard-builder-grid"
+            className="dashboard-builder-grid max-md:hidden"
             layout={layout}
             cols={12}
             rowHeight={config.grid.rowHeight}

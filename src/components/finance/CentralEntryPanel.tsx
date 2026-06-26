@@ -568,11 +568,11 @@ export function CentralEntryPanel({
               onChange={setPartyId}
               required={['CUSTOMER_DUE', 'SUPPLIER_DUE'].includes(recordKind)}
             />
-            <button type="button" onClick={() => setPopup('party')} className="self-end rounded-lg border px-3 py-2 text-sm font-semibold hover:bg-muted">
+            <button type="button" onClick={() => setPopup('party')} className="self-end rounded-lg border px-3 py-2 text-sm font-semibold hover:bg-muted max-md:w-full">
               <Plus className="me-1 inline size-4" />
               {c.addParty}
             </button>
-            <button type="button" onClick={() => setPopup('customer')} className="self-end rounded-lg border px-3 py-2 text-sm font-semibold hover:bg-muted">
+            <button type="button" onClick={() => setPopup('customer')} className="self-end rounded-lg border px-3 py-2 text-sm font-semibold hover:bg-muted max-md:w-full">
               <Plus className="me-1 inline size-4" />
               {c.addCustomer}
             </button>
@@ -746,16 +746,16 @@ export function CentralEntryPanel({
           </p>
         ) : null}
 
-        <div className="flex flex-wrap items-center gap-3 border-t border-border/80 pt-3">
+        <div className="flex flex-col gap-3 border-t border-border/80 pt-3 sm:flex-row sm:flex-wrap sm:items-center">
           <button
             type="submit"
             disabled={pending}
-            className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-amber/90 disabled:opacity-60"
+            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-amber/90 disabled:opacity-60 max-sm:w-full"
           >
             {pending ? <Loader2 className="size-4 animate-spin" /> : null}
             {editMode ? c.save : c.submit}
           </button>
-          <Link href={cancelHref} className="inline-flex min-h-10 items-center rounded-lg border border-border/80 bg-card px-4 py-2 text-sm font-semibold text-roast hover:bg-linen/45">
+          <Link href={cancelHref} className="inline-flex min-h-10 items-center justify-center rounded-lg border border-border/80 bg-card px-4 py-2 text-sm font-semibold text-roast hover:bg-linen/45 max-sm:w-full">
             {c.cancel}
           </Link>
         </div>
@@ -763,7 +763,7 @@ export function CentralEntryPanel({
 
       {popup ? (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/35 p-4">
-          <div className="w-full max-w-lg rounded-[var(--radius)] border bg-card p-4 shadow-xl">
+          <div className="max-h-[88vh] w-full max-w-lg overflow-y-auto rounded-[var(--radius)] border bg-card p-4 shadow-xl">
             <div className="mb-3 flex items-center justify-between gap-3">
               <h2 className="text-base font-semibold">{popup === 'customer' ? c.addCustomer : c.addParty}</h2>
               <button type="button" onClick={() => setPopup(null)} className="rounded-lg border p-2 hover:bg-muted" aria-label={c.close}>
@@ -791,11 +791,11 @@ export function CentralEntryPanel({
               </div>
             </div>
             {quickError ? <p className="mt-3 rounded-lg border border-danger/20 bg-danger-soft px-3 py-2 text-sm text-danger">{quickError}</p> : null}
-            <div className="mt-4 flex justify-end gap-2">
+            <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <button type="button" onClick={() => setPopup(null)} className="rounded-lg border px-3 py-2 text-sm font-semibold hover:bg-muted">
                 {c.cancel}
               </button>
-              <button type="button" onClick={savePopup} disabled={quickPending} className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-60">
+              <button type="button" onClick={savePopup} disabled={quickPending} className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-60">
                 {quickPending ? <Loader2 className="size-4 animate-spin" /> : null}
                 {c.savePopup}
               </button>

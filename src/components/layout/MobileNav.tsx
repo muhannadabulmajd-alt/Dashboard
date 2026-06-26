@@ -34,7 +34,7 @@ export function MobileNav({ groups, title }: { groups: NavGroup[]; title: string
       {open ? (
         <div className="fixed inset-0 z-50 md:hidden" role="dialog" aria-modal="true">
           <div className="absolute inset-0 bg-grove/55" onClick={() => setOpen(false)} />
-          <div className="absolute inset-y-0 start-0 flex w-72 max-w-[82%] flex-col bg-card shadow-xl shadow-roast/20">
+          <div className="absolute inset-y-0 start-0 flex w-80 max-w-[88vw] flex-col bg-card shadow-xl shadow-roast/20">
             <div className="flex items-center justify-between border-b border-border/80 px-4 py-4">
               <div className="flex items-center gap-2">
                 <div className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">

@@ -6,6 +6,7 @@ import { Link } from '@/i18n/navigation';
 import type { ActionState } from '@/server/records/shared';
 
 const input = 'w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:border-primary';
+const rowLabel = (first: boolean) => first ? 'text-xs text-muted-foreground' : 'text-xs text-muted-foreground sm:hidden';
 export type ComponentRow = { inventoryItemId: string; name: string; quantity: string; unitCost: string };
 export type ItemOption = { value: string; label: string; cost: number };
 const empty: ComponentRow = { inventoryItemId: '', name: '', quantity: '1', unitCost: '0' };
@@ -69,9 +70,9 @@ export function ComponentEditor({
         </div>
         <div className="space-y-2">
           {rows.map((r, i) => (
-            <div key={i} className="grid grid-cols-[1.5fr_1.5fr_1fr_1fr_auto] items-end gap-2">
+            <div key={i} className="grid gap-2 rounded-lg border border-border/70 bg-background/35 p-2 sm:grid-cols-[1.5fr_1.5fr_1fr_1fr_auto] sm:border-0 sm:bg-transparent sm:p-0">
               <div className="flex flex-col gap-1">
-                {i === 0 ? <label className="text-xs text-muted-foreground">{labels.item}</label> : null}
+                <label className={rowLabel(i === 0)}>{labels.item}</label>
                 <select value={r.inventoryItemId} onChange={(e) => pickItem(i, e.target.value)} className={input}>
                   <option value="">{labels.manual}</option>
                   {items.map((o) => (
@@ -85,21 +86,21 @@ export function ComponentEditor({
                 </select>
               </div>
               <div className="flex flex-col gap-1">
-                {i === 0 ? <label className="text-xs text-muted-foreground">{labels.name}</label> : null}
+                <label className={rowLabel(i === 0)}>{labels.name}</label>
                 <input value={r.name} onChange={(e) => set(i, 'name', e.target.value)} className={input} />
               </div>
               <div className="flex flex-col gap-1">
-                {i === 0 ? <label className="text-xs text-muted-foreground">{labels.quantity}</label> : null}
+                <label className={rowLabel(i === 0)}>{labels.quantity}</label>
                 <input type="number" step="0.001" value={r.quantity} onChange={(e) => set(i, 'quantity', e.target.value)} className={input} />
               </div>
               <div className="flex flex-col gap-1">
-                {i === 0 ? <label className="text-xs text-muted-foreground">{labels.unitCost}</label> : null}
+                <label className={rowLabel(i === 0)}>{labels.unitCost}</label>
                 <input type="number" step="0.001" value={r.unitCost} onChange={(e) => set(i, 'unitCost', e.target.value)} className={input} />
               </div>
               <button
                 type="button"
                 onClick={() => setRows((rs) => (rs.length > 1 ? rs.filter((_, idx) => idx !== i) : rs))}
-                className="mb-1 rounded-lg border p-2 text-muted-foreground hover:bg-muted"
+                className="rounded-lg border p-2 text-muted-foreground hover:bg-muted sm:mb-1"
                 aria-label={labels.remove}
               >
                 <X className="size-4" />
@@ -116,16 +117,16 @@ export function ComponentEditor({
 
       {state?.error ? <p className="text-sm font-medium text-danger">{errors[state.error] ?? state.error}</p> : null}
 
-      <div className="flex items-center gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <button
           type="submit"
           disabled={pending}
-          className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-95 disabled:opacity-60"
+          className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-95 disabled:opacity-60"
         >
           {pending ? <Loader2 className="size-4 animate-spin" /> : null}
           {labels.save}
         </button>
-        <Link href={cancelHref} className="rounded-lg border px-4 py-2 text-sm font-medium hover:bg-muted">
+        <Link href={cancelHref} className="rounded-lg border px-4 py-2 text-center text-sm font-medium hover:bg-muted">
           {labels.cancel}
         </Link>
       </div>

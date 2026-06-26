@@ -43,13 +43,13 @@ function ChartFrame({ title, children, drilldown }: { title: string; children: R
       <CardHeader className="items-start">
         <CardTitle>{title}</CardTitle>
         {drilldown ? (
-          <span className="rounded-full border border-amber/25 bg-amber/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
+          <span className="rounded-full border border-amber/25 bg-amber/10 px-2 py-0.5 text-[11px] font-semibold text-primary max-sm:w-full max-sm:text-center">
             View details
           </span>
         ) : null}
       </CardHeader>
-      <CardContent className="h-[calc(100%-3.5rem)] min-h-72">
-        <div className="h-full min-h-64 w-full">{children}</div>
+      <CardContent className="h-[calc(100%-3.5rem)] min-h-64 sm:min-h-72">
+        <div className="h-full min-h-56 w-full sm:min-h-64">{children}</div>
       </CardContent>
     </Card>
   );
@@ -96,13 +96,13 @@ export function LineChartCard({
       {data.length ? <ResponsiveContainer width="100%" height="100%">
         <LineChart
           data={data}
-          margin={{ top: 8, right: 20, left: 8, bottom: 8 }}
+          margin={{ top: 8, right: 12, left: 0, bottom: 8 }}
           onClick={(state) => openPoint(activePoint(state))}
           style={drilldown ? { cursor: 'pointer' } : undefined}
         >
           <CartesianGrid strokeDasharray="3 3" stroke="#e6dccb" vertical={false} />
-          <XAxis dataKey="label" {...axisProps} minTickGap={24} />
-          <YAxis {...axisProps} width={valueKind === 'iqd' ? 74 : 48} tickFormatter={(v) => fmt(Number(v), valueKind, locale, true)} />
+          <XAxis dataKey="label" {...axisProps} minTickGap={18} tickMargin={8} />
+          <YAxis {...axisProps} width={valueKind === 'iqd' ? 68 : 44} tickFormatter={(v) => fmt(Number(v), valueKind, locale, true)} />
           <Tooltip
             formatter={(v) => fmt(Number(v), valueKind, locale)}
             labelFormatter={(label) => drilldown ? `${label} · ${locale === 'ar' ? 'اضغط للتفاصيل' : 'click for details'}` : String(label)}
@@ -140,7 +140,7 @@ export function BarChartCard({
     <ChartFrame title={title} drilldown={drilldown}>
       {data.length ? <ResponsiveContainer width="100%" height="100%">
         {horizontal ? (
-          <BarChart data={data} layout="vertical" margin={{ top: 4, right: 20, left: 8, bottom: 8 }} style={drilldown ? { cursor: 'pointer' } : undefined}>
+          <BarChart data={data} layout="vertical" margin={{ top: 4, right: 12, left: 0, bottom: 8 }} style={drilldown ? { cursor: 'pointer' } : undefined}>
             <CartesianGrid strokeDasharray="3 3" stroke="#e6dccb" horizontal={false} />
             <XAxis type="number" {...axisProps} tickFormatter={(v) => fmt(Number(v), valueKind, locale, true)} />
             <YAxis type="category" dataKey="label" {...axisProps} width={leftWidth} tick={{ ...axisProps.tick, width: leftWidth }} />
@@ -155,10 +155,10 @@ export function BarChartCard({
             </Bar>
           </BarChart>
         ) : (
-          <BarChart data={data} margin={{ top: 8, right: 20, left: 8, bottom: 8 }} style={drilldown ? { cursor: 'pointer' } : undefined}>
+          <BarChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 8 }} style={drilldown ? { cursor: 'pointer' } : undefined}>
             <CartesianGrid strokeDasharray="3 3" stroke="#e6dccb" vertical={false} />
-            <XAxis dataKey="label" {...axisProps} minTickGap={12} interval="preserveStartEnd" />
-            <YAxis {...axisProps} width={valueKind === 'iqd' ? 74 : 48} tickFormatter={(v) => fmt(Number(v), valueKind, locale, true)} />
+            <XAxis dataKey="label" {...axisProps} minTickGap={10} interval="preserveStartEnd" tickMargin={8} />
+            <YAxis {...axisProps} width={valueKind === 'iqd' ? 68 : 44} tickFormatter={(v) => fmt(Number(v), valueKind, locale, true)} />
             <Tooltip
               formatter={(v) => fmt(Number(v), valueKind, locale)}
               labelFormatter={(label) => drilldown ? `${label} · ${locale === 'ar' ? 'اضغط للتفاصيل' : 'click for details'}` : String(label)}
@@ -209,7 +209,7 @@ export function DonutChartCard({
             formatter={(v) => fmt(Number(v), valueKind, locale)}
             labelFormatter={(label) => drilldown ? `${label} · ${locale === 'ar' ? 'اضغط للتفاصيل' : 'click for details'}` : String(label)}
           />
-          <Legend wrapperStyle={{ fontSize: 11, lineHeight: '18px', paddingTop: 10 }} />
+          <Legend wrapperStyle={{ fontSize: 11, lineHeight: '18px', paddingTop: 10, maxWidth: '100%' }} />
         </PieChart>
       </ResponsiveContainer> : <ChartEmpty locale={locale} />}
     </ChartFrame>

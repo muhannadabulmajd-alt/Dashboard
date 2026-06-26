@@ -114,7 +114,7 @@ export function FilterBar({
   return (
     <div
       className={cn(
-        'flex flex-wrap items-center gap-2 border-b border-border/80 bg-card/85 px-4 py-2.5 shadow-[0_1px_0_rgba(83,45,31,0.03)] backdrop-blur transition-opacity',
+        'flex max-w-full flex-wrap items-center gap-2 overflow-x-clip border-b border-border/80 bg-card/85 px-3 py-2.5 shadow-[0_1px_0_rgba(83,45,31,0.03)] backdrop-blur transition-opacity sm:px-4',
         pending && 'opacity-60',
       )}
     >
@@ -136,7 +136,7 @@ export function FilterBar({
             }
           })
         }
-        className="rounded-lg border border-border/80 bg-background px-2.5 py-1.5 text-sm text-roast outline-none focus:border-primary"
+        className="min-h-10 flex-1 rounded-lg border border-border/80 bg-background px-2.5 py-1.5 text-sm text-roast outline-none focus:border-primary sm:flex-none"
       >
         {RANGE_PRESETS.map((p) => (
           <option key={p} value={p}>
@@ -146,7 +146,7 @@ export function FilterBar({
       </select>
 
       {range === 'custom' ? (
-        <span className="flex items-center gap-1">
+        <span className="flex w-full flex-wrap items-center gap-1 sm:w-auto">
           <input
             type="date"
             aria-label={t('from')}
@@ -155,7 +155,7 @@ export function FilterBar({
             onChange={(e) =>
               apply((sp) => (e.target.value ? sp.set('from', e.target.value) : sp.delete('from')))
             }
-            className="rounded-lg border border-border/80 bg-background px-2 py-1.5 text-sm outline-none focus:border-primary"
+            className="min-h-10 flex-1 rounded-lg border border-border/80 bg-background px-2 py-1.5 text-sm outline-none focus:border-primary sm:flex-none"
           />
           <span className="text-xs text-muted-foreground">→</span>
           <input
@@ -166,7 +166,7 @@ export function FilterBar({
             onChange={(e) =>
               apply((sp) => (e.target.value ? sp.set('to', e.target.value) : sp.delete('to')))
             }
-            className="rounded-lg border border-border/80 bg-background px-2 py-1.5 text-sm outline-none focus:border-primary"
+            className="min-h-10 flex-1 rounded-lg border border-border/80 bg-background px-2 py-1.5 text-sm outline-none focus:border-primary sm:flex-none"
           />
         </span>
       ) : null}
@@ -207,7 +207,7 @@ function MultiSelect({
 }) {
   return (
     <details className="group relative">
-      <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-lg border border-border/80 bg-background px-2.5 py-1.5 text-sm font-medium text-roast hover:bg-linen/35 [&::-webkit-details-marker]:hidden">
+      <summary className="flex min-h-10 cursor-pointer list-none items-center gap-1.5 rounded-lg border border-border/80 bg-background px-2.5 py-1.5 text-sm font-medium text-roast hover:bg-linen/35 [&::-webkit-details-marker]:hidden">
         {label}
         {selected.length > 0 ? (
           <span className="rounded-full bg-amber/15 px-1.5 text-xs font-bold text-primary">
@@ -216,7 +216,7 @@ function MultiSelect({
         ) : null}
         <ChevronDown className="size-3.5 text-muted-foreground transition-transform group-open:rotate-180" />
       </summary>
-      <div className="absolute z-20 mt-1 max-h-64 w-52 overflow-auto rounded-lg border border-border/80 bg-card p-1 shadow-lg shadow-roast/10">
+      <div className="absolute z-20 mt-1 hidden max-h-64 w-60 max-w-[calc(100vw-2rem)] overflow-auto rounded-lg border border-border/80 bg-card p-1 shadow-lg shadow-roast/10 group-open:block">
         {options.map((o) => (
           <label
             key={o.value}

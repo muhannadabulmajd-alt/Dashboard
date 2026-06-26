@@ -8,6 +8,7 @@ import type { ActionState } from '@/server/records/shared';
 
 const input = 'w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:border-primary';
 const disabledInput = 'cursor-not-allowed bg-muted text-muted-foreground';
+const rowLabel = (first: boolean) => first ? 'text-xs text-muted-foreground' : 'text-xs text-muted-foreground sm:hidden';
 
 type Opt = { value: string; label: string };
 export type OrderLineInput = { sku: string; quantity: string; unitGrossPrice: string; lineDiscount: string };
@@ -144,7 +145,7 @@ function InlineCustomerModal({
                 <X className="size-4" />
               </button>
             </div>
-            <form action={formAction} className="grid gap-3 sm:grid-cols-2">
+            <form action={formAction} className="grid max-h-[82vh] gap-3 overflow-y-auto sm:grid-cols-2">
               <input type="hidden" name="locale" value={locale} />
               <input type="hidden" name="segment" value="NEW" />
               <HeaderField name="nameEn" label={labels.customerName} />
@@ -154,7 +155,7 @@ function InlineCustomerModal({
               <HeaderField name="address1" label={labels.customerAddress} />
               <HeaderField name="notes" label={labels.notes} />
               {state && 'error' in state ? <p className="text-sm font-medium text-danger sm:col-span-2">{errors[state.error] ?? state.error}</p> : null}
-              <div className="flex justify-end gap-2 sm:col-span-2">
+              <div className="flex flex-col-reverse gap-2 sm:col-span-2 sm:flex-row sm:justify-end">
                 <button type="button" onClick={() => setOpen(false)} className="rounded-lg border px-3 py-2 text-sm font-medium hover:bg-muted">
                   {labels.cancel}
                 </button>
@@ -393,9 +394,9 @@ export function OrderForm({
         </div>
         <div className="space-y-2">
           {lines.map((l, i) => (
-            <div key={i} className="grid grid-cols-[2fr_0.8fr_1fr_1fr_1fr_auto] items-end gap-2">
+            <div key={i} className="grid gap-2 rounded-lg border border-border/70 bg-background/35 p-2 sm:grid-cols-[2fr_0.8fr_1fr_1fr_1fr_auto] sm:border-0 sm:bg-transparent sm:p-0">
               <div className="flex flex-col gap-1">
-                {i === 0 ? <label className="text-xs text-muted-foreground">{labels.variation ?? labels.sku}</label> : null}
+                <label className={rowLabel(i === 0)}>{labels.variation ?? labels.sku}</label>
                 {catalog.length ? (
                   <select value={l.sku} onChange={(e) => pickVariation(i, e.target.value)} className={input} required>
                     <option value="">—</option>
@@ -415,27 +416,27 @@ export function OrderForm({
                 )}
               </div>
               <div className="flex flex-col gap-1">
-                {i === 0 ? <label className="text-xs text-muted-foreground">{labels.unit}</label> : null}
+                <label className={rowLabel(i === 0)}>{labels.unit}</label>
                 <div className="min-h-10 rounded-lg border bg-muted/35 px-3 py-2 text-sm text-muted-foreground">
                   {unitBySku.get(l.sku) ?? 'unit'}
                 </div>
               </div>
               <div className="flex flex-col gap-1">
-                {i === 0 ? <label className="text-xs text-muted-foreground">{labels.qty}</label> : null}
+                <label className={rowLabel(i === 0)}>{labels.qty}</label>
                 <input type="number" value={l.quantity} onChange={(e) => setLine(i, 'quantity', e.target.value)} className={input} required min="1" step="1" />
               </div>
               <div className="flex flex-col gap-1">
-                {i === 0 ? <label className="text-xs text-muted-foreground">{labels.unitPrice}</label> : null}
+                <label className={rowLabel(i === 0)}>{labels.unitPrice}</label>
                 <input type="number" value={l.unitGrossPrice} onChange={(e) => setLine(i, 'unitGrossPrice', e.target.value)} className={input} required min="0" step="1" />
               </div>
               <div className="flex flex-col gap-1">
-                {i === 0 ? <label className="text-xs text-muted-foreground">{labels.discount}</label> : null}
+                <label className={rowLabel(i === 0)}>{labels.discount}</label>
                 <input type="number" value={l.lineDiscount} onChange={(e) => setLine(i, 'lineDiscount', e.target.value)} className={input} required min="0" step="1" />
               </div>
               <button
                 type="button"
                 onClick={() => setLines((ls) => (ls.length > 1 ? ls.filter((_, idx) => idx !== i) : ls))}
-                className="mb-1 rounded-lg border p-2 text-muted-foreground hover:bg-muted"
+                className="rounded-lg border p-2 text-muted-foreground hover:bg-muted sm:mb-1"
                 aria-label={labels.removeLine}
               >
                 <X className="size-4" />
@@ -481,7 +482,7 @@ export function OrderForm({
 
       {state?.error ? <p className="text-sm font-medium text-danger">{errors[state.error] ?? state.error}</p> : null}
 
-      <div className="flex flex-wrap items-center gap-3 rounded-[var(--radius)] border bg-card p-3 shadow-sm">
+      <div className="flex flex-col gap-3 rounded-[var(--radius)] border bg-card p-3 shadow-sm sm:flex-row sm:flex-wrap sm:items-center">
         <div className="me-auto">
           <div className="text-xs font-medium text-muted-foreground">{labels.reviewTitle}</div>
           <div className="text-lg font-bold tabular-nums text-foreground">{fmt(totals.net)}</div>
@@ -489,12 +490,12 @@ export function OrderForm({
         <button
           type="submit"
           disabled={pending}
-          className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-95 disabled:opacity-60"
+          className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-95 disabled:opacity-60 max-sm:w-full"
         >
           {pending ? <Loader2 className="size-4 animate-spin" /> : null}
           {submitLabel}
         </button>
-        <Link href={cancelHref} className="inline-flex min-h-10 items-center rounded-lg border px-4 py-2 text-sm font-medium hover:bg-muted">
+        <Link href={cancelHref} className="inline-flex min-h-10 items-center justify-center rounded-lg border px-4 py-2 text-sm font-medium hover:bg-muted max-sm:w-full">
           {labels.cancel}
         </Link>
       </div>

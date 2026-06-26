@@ -1,0 +1,68 @@
+name: Mobile smoke
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  DATABASE_URL: postgresql://postgres:postgres@localhost:5432/laheeb_mobile?schema=public
+  AUTH_SECRET: mobile-smoke-secret-at-least-32-characters
+  AUTH_TRUST_HOST: "true"
+  NEXTAUTH_URL: http://127.0.0.1:3000
+  NEXT_PUBLIC_USD_PER_IQD: "0.000667"
+  MOBILE_SMOKE_BASE_URL: http://127.0.0.1:3000
+
+jobs:
+  mobile-smoke:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: laheeb_mobile
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d laheeb_mobile"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec prisma migrate deploy
+      - run: pnpm db:seed
+      - run: pnpm add --save-dev playwright@latest
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm build
+
+      - name: Start production server
+        run: pnpm start > /tmp/laheeb-mobile-smoke.log 2>&1 &
+
+      - name: Run mobile smoke checks
+        run: node scripts/mobile-smoke.mjs
+
+      - name: Print server log on failure
+        if: failure()
+        run: cat /tmp/laheeb-mobile-smoke.log || true
+
+      - name: Upload mobile screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-smoke-screenshots
+          path: mobile-smoke-artifacts
+          if-no-files-found: ignore

@@ -44,13 +44,13 @@ export default async function DashboardLayout({
   const listOptions = { channel, governorate, productLine, grind };
 
   return (
-    <div className="app-surface flex min-h-screen">
+    <div className="app-surface flex min-h-screen overflow-x-clip">
       <Sidebar groups={navGroups} />
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar user={{ name: user.name, role: user.role }} locale={locale} navGroups={navGroups} />
         <StaleDataBanner lastUpdated={lastUpdated} locale={locale as AppLocale} />
         <FilterBar branchOptions={branchOptions} listOptions={listOptions} />
-        <main className="flex-1 space-y-6 p-4 lg:p-6">{children}</main>
+        <main className="min-w-0 flex-1 space-y-5 overflow-x-clip p-3 sm:p-4 lg:space-y-6 lg:p-6">{children}</main>
       </div>
     </div>
   );

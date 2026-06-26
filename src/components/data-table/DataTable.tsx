@@ -29,20 +29,20 @@ export function DataTable({
   caption?: string;
 }) {
   return (
-    <div className="overflow-hidden rounded-[var(--radius)] border border-border/80 bg-card shadow-[0_1px_0_rgba(83,45,31,0.05)]">
+    <div className="max-w-full overflow-hidden rounded-[var(--radius)] border border-border/80 bg-card shadow-[0_1px_0_rgba(83,45,31,0.05)]">
       {exportHref ? (
-        <div className="flex justify-end border-b bg-linen/30 p-2">
+        <div className="flex justify-stretch border-b bg-linen/30 p-2 sm:justify-end">
           <a
             href={exportHref}
-            className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-amber/25 bg-card px-2.5 py-1 text-xs font-semibold text-roast hover:bg-linen/45"
+            className="inline-flex min-h-8 w-full items-center justify-center gap-1.5 rounded-md border border-amber/25 bg-card px-2.5 py-1 text-xs font-semibold text-roast hover:bg-linen/45 sm:w-auto"
           >
             <Download className="size-3.5" />
             {exportLabel ?? 'Export CSV'}
           </a>
         </div>
       ) : null}
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+      <div className="max-w-full overflow-x-auto">
+        <table className="w-full min-w-max text-sm">
           {caption ? <caption className="sr-only">{caption}</caption> : null}
           <thead>
             <tr className="border-b bg-linen/40 text-muted-foreground">
