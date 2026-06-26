@@ -130,7 +130,7 @@ export default async function ExecutiveOverviewPage({
         </div> : null}
       </div>
 
-      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <KpiCard label={tk('netSales')} value={formatMoney(net, 'IQD', locale)} delta={M.deltaPct(net, prevNet)} locale={locale} />
         <KpiCard label={tk('orders')} value={formatNumber(orderCount, locale)} delta={M.deltaPct(orderCount, prevOrderCount)} locale={locale} />
         <KpiCard label={tk('units')} value={formatNumber(units, locale)} locale={locale} />

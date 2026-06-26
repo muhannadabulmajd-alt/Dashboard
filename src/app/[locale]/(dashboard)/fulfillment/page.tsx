@@ -56,7 +56,7 @@ export default async function FulfillmentPage({
     <>
       <PageHeader title={t('title')} subtitle={t('subtitle')} />
 
-      <section className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+      <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <KpiCard label={t('shipments')} value={formatNumber(shipments.length, locale)} locale={locale} />
         <KpiCard label={t('sla')} value={formatPercent(M.deliverySlaPct(shipments, 3), locale)} locale={locale} />
         <KpiCard label={t('avgDelivery')} value={days(M.avgDeliveryDays(shipments))} locale={locale} invertDelta />

@@ -112,7 +112,7 @@ export default async function ProductGroupDetailPage({
 
       {tab === 'overview' ? (
         <div className="space-y-4">
-          <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <KpiCard label={t('rep.unitsSold')} value={formatNumber(totalUnits, locale)} locale={locale} />
             <KpiCard label={t('rep.revenue')} value={formatMoney(totalRevenue, 'IQD', locale)} locale={locale} />
             <KpiCard label={t('rep.grossMargin')} value={formatPercent(gm.pct, locale)} sub={formatMoney(gm.amount, 'IQD', locale)} locale={locale} />

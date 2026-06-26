@@ -46,8 +46,9 @@ export function KpiCard({
 
   const body = (
     <div
+      data-kpi-card="true"
       className={cn(
-        'h-full min-h-28 rounded-[var(--radius)] border p-3 shadow-[0_1px_0_rgba(83,45,31,0.05)] transition-colors sm:min-h-32 sm:p-4',
+        'h-full min-h-28 rounded-[var(--radius)] border p-3 shadow-[0_10px_30px_rgba(83,45,31,0.06)] transition-colors sm:min-h-32 sm:p-4',
         style.card,
         href && 'hover:border-primary/45 hover:bg-linen/20',
         emphasis && 'bg-grove text-primary-foreground',
@@ -60,7 +61,7 @@ export function KpiCard({
           </div>
           <div
             className={cn(
-              'mt-1 max-w-full break-words text-[clamp(1.3rem,7vw,2rem)] font-bold leading-tight tracking-[-0.01em] tabular [overflow-wrap:anywhere] sm:text-[clamp(1.45rem,1.65vw,2rem)]',
+              'mt-1 max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-[clamp(1.65rem,8vw,2.15rem)] font-bold leading-tight tracking-[-0.01em] tabular sm:text-[clamp(1.45rem,1.65vw,2rem)]',
               emphasis ? 'text-primary-foreground' : 'text-roast',
             )}
             title={value}

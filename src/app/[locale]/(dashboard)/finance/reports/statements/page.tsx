@@ -50,7 +50,7 @@ export default async function PartyStatementsPage({
       <BackLink href="/finance/reports" label={tr('back')} />
       <PageHeader title={t('customerSupplierStatements')} subtitle={t('statementsSubtitle')} />
 
-      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <KpiCard label={t('customerStatements')} value={formatMoney(report.customerClosingTotal, 'IQD', locale)} locale={locale} />
         <KpiCard label={t('supplierStatements')} value={formatMoney(report.supplierClosingTotal, 'IQD', locale)} locale={locale} invertDelta />
         <KpiCard label={t('statementExposure')} value={formatMoney(report.customerClosingTotal + report.supplierClosingTotal, 'IQD', locale)} locale={locale} />

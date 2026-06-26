@@ -4,7 +4,7 @@ import { Link } from '@/i18n/navigation';
 type CardVariant = 'default' | 'surface' | 'accent' | 'success' | 'danger';
 
 const cardVariants: Record<CardVariant, string> = {
-  default: 'border-border/80 bg-card shadow-[0_1px_0_rgba(83,45,31,0.05)]',
+  default: 'border-border/75 bg-card shadow-[0_10px_32px_rgba(83,45,31,0.055)]',
   surface: 'border-border/70 bg-linen/35 shadow-none',
   accent: 'border-amber/25 bg-amber/10 shadow-none',
   success: 'border-success/25 bg-success-soft/80 shadow-none',
@@ -88,7 +88,7 @@ export function PageHeader({
           <div className="mb-1 text-[11px] font-bold uppercase tracking-[0.14em] text-primary">{eyebrow}</div>
         ) : null}
         <h1 className="break-words text-[clamp(1.5rem,6vw,2rem)] font-bold leading-tight tracking-tight text-roast">{title}</h1>
-        {subtitle ? <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">{subtitle}</p> : null}
+        {subtitle ? <p className="mt-1 max-w-3xl break-words text-sm leading-6 text-muted-foreground">{subtitle}</p> : null}
       </div>
       {actions ? <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:shrink-0">{actions}</div> : null}
     </div>

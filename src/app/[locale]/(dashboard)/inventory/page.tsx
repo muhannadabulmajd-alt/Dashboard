@@ -78,7 +78,7 @@ export default async function InventoryPage({
     <>
       <PageHeader title={t('title')} subtitle={t('subtitle')} />
 
-      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <KpiCard label={tk('stockValue')} value={formatMoney(totalValue, 'IQD', locale)} locale={locale} />
         <KpiCard label={tk('reorderAlerts')} value={formatNumber(reorder.length, locale)} locale={locale} invertDelta />
         <KpiCard label={tk('nearExpiry')} value={formatNumber(expiry.length, locale)} locale={locale} invertDelta />

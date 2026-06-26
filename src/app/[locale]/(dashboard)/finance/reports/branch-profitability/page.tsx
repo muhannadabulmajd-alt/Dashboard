@@ -62,7 +62,7 @@ export default async function BranchProfitabilityPage({
       <BackLink href="/finance/reports" label={tr('back')} />
       <PageHeader title={t('branchProfitability')} subtitle={t('branchProfitabilitySubtitle')} />
 
-      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <KpiCard label={t('netSales')} value={formatMoney(totals.netSales, 'IQD', locale)} locale={locale} />
         <KpiCard label={t('operatingExpenses')} value={formatMoney(totals.operatingExpenses, 'IQD', locale)} locale={locale} invertDelta />
         <KpiCard label={t('operatingProfit')} value={formatMoney(totals.operatingProfit, 'IQD', locale)} locale={locale} />

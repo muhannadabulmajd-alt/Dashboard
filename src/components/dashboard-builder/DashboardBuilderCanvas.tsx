@@ -402,7 +402,7 @@ export function DashboardBuilderCanvas({
             <div className="space-y-3">
               <div>
                 <div className="mb-1 text-xs font-bold uppercase tracking-[0.08em] text-muted-foreground">1. Widget type</div>
-                <div className="grid grid-cols-2 gap-1.5">
+                <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
                   {WIDGET_TYPES.filter((type) => type !== 'section' && type !== 'text').map((type) => (
                     <button
                       key={type}
@@ -455,7 +455,7 @@ export function DashboardBuilderCanvas({
                   {locale === 'ar' ? (metricById(draftMetric)?.dimensionAr ?? 'غير مطلوب') : (metricById(draftMetric)?.dimensionEn ?? 'Not needed')}
                 </div>
               ) : null}
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 <button
                   type="button"
                   disabled={!draftMetric}
@@ -477,7 +477,7 @@ export function DashboardBuilderCanvas({
                 </button>
               </div>
             </div>
-            <div className="mt-3 grid grid-cols-2 gap-2 border-t pt-3">
+            <div className="mt-3 grid grid-cols-1 gap-2 border-t pt-3 sm:grid-cols-2">
               <button type="button" onClick={() => addTextWidget('section')} className="rounded-lg border px-2 py-2 text-xs font-semibold hover:bg-linen/40">Section</button>
               <button type="button" onClick={() => addTextWidget('text')} className="rounded-lg border px-2 py-2 text-xs font-semibold hover:bg-linen/40">Note</button>
             </div>
@@ -529,7 +529,7 @@ export function DashboardBuilderCanvas({
               </label>
               <div className="space-y-2 rounded-lg border bg-linen/20 p-2">
                 <div className="text-xs font-bold uppercase tracking-[0.08em] text-muted-foreground">Quick size</div>
-                <div className="grid grid-cols-2 gap-1.5">
+                <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
                   {QUICK_SIZES.map((size) => (
                     <button key={size.label} type="button" disabled={!canEdit} onClick={() => updateLayoutItem(selected.id, { w: size.w, h: size.h })} className="rounded-md border bg-card px-2 py-1.5 text-xs font-semibold hover:bg-linen/45 disabled:opacity-60">
                       {size.label}

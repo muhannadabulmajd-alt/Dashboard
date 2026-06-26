@@ -52,6 +52,31 @@ async function signIn(page) {
   ]);
 }
 
+async function assertMobileNav(page, viewportName) {
+  await page.goto(`${baseUrl}/en`, { waitUntil: 'networkidle', timeout: 45_000 });
+  await page.locator('button[aria-label="Operations Atlas"]').click();
+  const dialog = page.locator('[role="dialog"][aria-modal="true"]').first();
+  await dialog.waitFor({ state: 'visible', timeout: 10_000 });
+  const drawer = dialog.locator(':scope > div').first();
+  const box = await drawer.boundingBox();
+  if (!box) throw new Error(`Mobile drawer did not render on ${viewportName}.`);
+  const viewport = page.viewportSize();
+  if (!viewport) throw new Error(`Could not read viewport for ${viewportName}.`);
+  if (box.height < viewport.height - 4) {
+    throw new Error(`Mobile drawer is too short on ${viewportName}: ${JSON.stringify(box)} viewport=${JSON.stringify(viewport)}`);
+  }
+  const navText = await dialog.textContent();
+  if (!navText || !navText.includes('Executive Overview')) {
+    throw new Error(`Mobile drawer did not include navigation links on ${viewportName}.`);
+  }
+  await page.screenshot({
+    path: path.join(screenshotDir, `${viewportName}-mobile-nav-open.png`),
+    fullPage: true,
+  });
+  await page.locator('button[aria-label="Close"]').click();
+  await dialog.waitFor({ state: 'hidden', timeout: 10_000 });
+}
+
 async function assertMobilePage(page, pageConfig, viewportName) {
   const failedResponses = [];
   const pageErrors = [];
@@ -101,6 +126,7 @@ async function assertMobilePage(page, pageConfig, viewportName) {
       bodyWidth: body.scrollWidth,
       overflowingElements: Array.from(documentElement.querySelectorAll('body *'))
         .filter((element) => {
+          if (element.closest('svg')) return false;
           const style = window.getComputedStyle(element);
           if (style.position === 'fixed' || style.visibility === 'hidden' || style.display === 'none') return false;
           const rect = element.getBoundingClientRect();
@@ -124,6 +150,28 @@ async function assertMobilePage(page, pageConfig, viewportName) {
     throw new Error(`${pageConfig.path} overflows on ${viewportName}: ${JSON.stringify(overflow)}`);
   }
 
+  const sameRowKpis = await page.evaluate(() => {
+    const cards = Array.from(document.querySelectorAll('[data-kpi-card="true"]'))
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        return { top: rect.top, left: rect.left, width: rect.width, height: rect.height };
+      })
+      .filter((rect) => rect.width > 0 && rect.height > 0);
+    for (let index = 0; index < cards.length; index += 1) {
+      for (let nextIndex = index + 1; nextIndex < cards.length; nextIndex += 1) {
+        const first = cards[index];
+        const next = cards[nextIndex];
+        if (Math.abs(first.top - next.top) < 4 && Math.abs(first.left - next.left) > 8) {
+          return { first, next };
+        }
+      }
+    }
+    return null;
+  });
+  if (sameRowKpis) {
+    throw new Error(`${pageConfig.path} has KPI cards sharing a mobile row on ${viewportName}: ${JSON.stringify(sameRowKpis)}`);
+  }
+
   page.off('response', responseHandler);
   page.off('pageerror', errorHandler);
   if (failedResponses.length) throw new Error(`${pageConfig.path} returned server errors: ${failedResponses.join(', ')}`);
@@ -144,6 +192,7 @@ try {
     const page = await context.newPage();
     await waitForServer(page);
     await signIn(page);
+    await assertMobileNav(page, viewport.name);
     for (const pageConfig of pages) {
       await assertMobilePage(page, pageConfig, viewport.name);
     }
