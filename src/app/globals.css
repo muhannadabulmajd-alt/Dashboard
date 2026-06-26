@@ -83,3 +83,38 @@ summary:focus-visible {
     linear-gradient(180deg, color-mix(in srgb, var(--color-linen) 35%, white) 0%, var(--color-background) 22rem),
     var(--color-background);
 }
+
+.dashboard-builder-grid {
+  min-height: 24rem;
+}
+
+.react-grid-item {
+  transition:
+    transform 160ms ease,
+    width 160ms ease,
+    height 160ms ease;
+}
+
+.react-grid-item.react-grid-placeholder {
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--color-amber) 22%, transparent);
+  opacity: 1;
+}
+
+.react-grid-item > .react-resizable-handle {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  width: 14px;
+  height: 14px;
+  border-right: 2px solid color-mix(in srgb, var(--color-roast) 38%, transparent);
+  border-bottom: 2px solid color-mix(in srgb, var(--color-roast) 38%, transparent);
+  cursor: se-resize;
+}
+
+[dir="rtl"] .react-grid-item > .react-resizable-handle {
+  right: auto;
+  left: 8px;
+  border-right: 0;
+  border-left: 2px solid color-mix(in srgb, var(--color-roast) 38%, transparent);
+}

@@ -28,6 +28,11 @@ enum Role {
   VIEWER
 }
 
+enum DashboardVisibility {
+  PRIVATE
+  SHARED
+}
+
 enum Channel {
   ONLINE_STORE
   POS
@@ -211,15 +216,58 @@ model User {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
-  branch          Branch?      @relation(fields: [branchId], references: [id])
-  createdBy       User?        @relation("UserCreatedBy", fields: [createdById], references: [id])
-  createdUsers    User[]       @relation("UserCreatedBy")
-  operatedBatches RoastBatch[] @relation("BatchOperator")
-  createdOrders   Order[]      @relation("OrderCreatedBy")
+  branch          Branch?          @relation(fields: [branchId], references: [id])
+  createdBy       User?            @relation("UserCreatedBy", fields: [createdById], references: [id])
+  createdUsers    User[]           @relation("UserCreatedBy")
+  operatedBatches RoastBatch[]     @relation("BatchOperator")
+  createdOrders   Order[]          @relation("OrderCreatedBy")
+  dashboards      Dashboard[]      @relation("DashboardOwner")
+  dashboardShares DashboardShare[]
   auditLogs       AuditLog[]
 
   @@index([role])
   @@index([branchId])
+}
+
+model Dashboard {
+  id          String              @id @default(cuid())
+  name        String
+  description String?
+  ownerId     String
+  visibility  DashboardVisibility @default(PRIVATE)
+  isDefault   Boolean             @default(false)
+  isPinned    Boolean             @default(false)
+  config      Json
+  draftConfig Json?
+  deletedAt   DateTime?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  owner  User             @relation("DashboardOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  shares DashboardShare[]
+
+  @@index([ownerId])
+  @@index([visibility])
+  @@index([deletedAt])
+  @@index([isPinned])
+}
+
+model DashboardShare {
+  id          String   @id @default(cuid())
+  dashboardId String
+  userId      String?
+  role        Role?
+  canEdit     Boolean  @default(false)
+  canExport   Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  dashboard Dashboard @relation(fields: [dashboardId], references: [id], onDelete: Cascade)
+  user      User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([dashboardId, userId])
+  @@unique([dashboardId, role])
+  @@index([userId])
+  @@index([role])
 }
 
 model Branch {

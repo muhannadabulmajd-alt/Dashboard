@@ -6,6 +6,7 @@
   },
   "nav": {
     "executive": "Executive Overview",
+    "dashboardBuilder": "Dashboard Builder",
     "sales": "Sales & Products",
     "inventory": "Inventory & Stock",
     "pnl": "P&L & Unit Economics",
@@ -782,7 +783,8 @@
     "english": "English",
     "selected": "{count} selected",
     "downloadDeck": "Download deck (PDF)",
-    "shareholderReport": "Generate shareholder report"
+    "shareholderReport": "Generate shareholder report",
+    "customizeDashboard": "Customize Dashboard"
   },
   "login": {
     "title": "Sign in",

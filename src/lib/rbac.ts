@@ -3,6 +3,9 @@ import type { Role } from '@prisma/client';
 // Capabilities are the single source of truth for what each role may see/do.
 export type Capability =
   | 'view:dashboard'
+  | 'view:dashboard-builder'
+  | 'manage:dashboards'
+  | 'export:dashboards'
   | 'view:sales'
   | 'view:inventory'
   | 'view:roastery'
@@ -29,6 +32,9 @@ export type Capability =
 
 const ALL: Capability[] = [
   'view:dashboard',
+  'view:dashboard-builder',
+  'manage:dashboards',
+  'export:dashboards',
   'view:sales',
   'view:inventory',
   'view:roastery',
@@ -59,6 +65,9 @@ export const ROLE_CAPABILITIES: Record<Role, Capability[]> = {
   ADMIN: ALL,
   FINANCE: [
     'view:dashboard',
+    'view:dashboard-builder',
+    'manage:dashboards',
+    'export:dashboards',
     'view:sales',
     'view:inventory',
     'view:roastery',
@@ -80,6 +89,9 @@ export const ROLE_CAPABILITIES: Record<Role, Capability[]> = {
   ],
   ROASTERY_OPS: [
     'view:dashboard',
+    'view:dashboard-builder',
+    'manage:dashboards',
+    'export:dashboards',
     'view:inventory',
     'view:roastery',
     'view:fulfillment',
@@ -91,6 +103,9 @@ export const ROLE_CAPABILITIES: Record<Role, Capability[]> = {
   ],
   SALES_CRM: [
     'view:dashboard',
+    'view:dashboard-builder',
+    'manage:dashboards',
+    'export:dashboards',
     'view:sales',
     'view:customers',
     'view:fulfillment',
@@ -103,6 +118,9 @@ export const ROLE_CAPABILITIES: Record<Role, Capability[]> = {
   ],
   BRANCH_MANAGER: [
     'view:dashboard',
+    'view:dashboard-builder',
+    'manage:dashboards',
+    'export:dashboards',
     'view:sales',
     'view:inventory',
     'view:fulfillment',
@@ -113,9 +131,10 @@ export const ROLE_CAPABILITIES: Record<Role, Capability[]> = {
     'manage:inventory',
     'export:data',
   ],
-  FRANCHISEE_VIEWER: ['view:dashboard', 'view:sales', 'view:franchise'],
+  FRANCHISEE_VIEWER: ['view:dashboard', 'view:dashboard-builder', 'view:sales', 'view:franchise'],
   VIEWER: [
     'view:dashboard',
+    'view:dashboard-builder',
     'view:sales',
     'view:inventory',
     'view:customers',
@@ -150,6 +169,7 @@ export const NAV_GROUPS: { key: NavGroupKey; defaultOpen: boolean }[] = [
 // Navigation. Each entry is gated by a capability and lives in one group.
 export const NAV_ITEMS: NavItem[] = [
   { href: '/', key: 'executive', icon: 'LayoutDashboard', capability: 'view:dashboard', group: 'overview' },
+  { href: '/dashboard-builder', key: 'dashboardBuilder', icon: 'FileBarChart2', capability: 'view:dashboard-builder', group: 'overview' },
   { href: '/compare', key: 'compare', icon: 'Scale', capability: 'view:dashboard', group: 'overview' },
   { href: '/franchise', key: 'franchise', icon: 'Store', capability: 'view:franchise', group: 'overview' },
   { href: '/sales', key: 'sales', icon: 'ShoppingBag', capability: 'view:sales', group: 'sales' },
@@ -160,7 +180,6 @@ export const NAV_ITEMS: NavItem[] = [
   { href: '/inventory', key: 'inventory', icon: 'Package', capability: 'view:inventory', group: 'operations' },
   { href: '/pnl', key: 'pnl', icon: 'TrendingUp', capability: 'view:financial', group: 'finance' },
   { href: '/finance', key: 'finance', icon: 'Wallet', capability: 'view:finance', group: 'finance' },
-  { href: '/finance/reports', key: 'reports', icon: 'FileBarChart2', capability: 'view:finance', group: 'finance' },
   { href: '/admin/records', key: 'records', icon: 'Database', capability: 'view:records', group: 'admin' },
   { href: '/admin/uploads', key: 'uploads', icon: 'Upload', capability: 'upload:data', group: 'admin' },
   { href: '/admin/connectors', key: 'connectors', icon: 'Cable', capability: 'manage:connectors', group: 'admin' },

@@ -6,6 +6,7 @@
   },
   "nav": {
     "executive": "النظرة التنفيذية",
+    "dashboardBuilder": "منشئ اللوحات",
     "sales": "المبيعات والمنتجات",
     "inventory": "المخزون والمواد",
     "pnl": "الأرباح واقتصاد الوحدة",
@@ -782,7 +783,8 @@
     "english": "English",
     "selected": "{count} محدد",
     "downloadDeck": "تنزيل العرض (PDF)",
-    "shareholderReport": "إنشاء تقرير المساهمين"
+    "shareholderReport": "إنشاء تقرير المساهمين",
+    "customizeDashboard": "تخصيص اللوحة"
   },
   "login": {
     "title": "تسجيل الدخول",

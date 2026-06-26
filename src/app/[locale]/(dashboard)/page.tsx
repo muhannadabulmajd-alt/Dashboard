@@ -1,5 +1,5 @@
 import { getTranslations } from 'next-intl/server';
-import { AlertTriangle, CalendarClock, FileDown, PackageX, TrendingDown } from 'lucide-react';
+import { AlertTriangle, CalendarClock, FileDown, LayoutDashboard, PackageX, TrendingDown } from 'lucide-react';
 import { serializeFilters } from '@/lib/filters';
 import { getPageContext } from '@/server/page-context';
 import { getOrders, getPrevOrders, getOrderLines, getCatalogForAlerts } from '@/server/db/repositories/sales.repo';
@@ -111,14 +111,22 @@ export default async function ExecutiveOverviewPage({
     <>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <PageHeader title={t('title')} subtitle={t('subtitle')} />
-        {can(user.role, 'export:data') ? <div className="flex flex-wrap items-center gap-2">
+        {can(user.role, 'export:data') || can(user.role, 'view:dashboard-builder') ? <div className="flex flex-wrap items-center gap-2">
+          {can(user.role, 'view:dashboard-builder') ? (
+            <Link href="/dashboard-builder" className="inline-flex items-center gap-1.5 rounded-lg border bg-card px-3 py-1.5 text-xs font-medium hover:bg-muted">
+              <LayoutDashboard className="size-3.5" />
+              {tc('customizeDashboard')}
+            </Link>
+          ) : null}
           {['OWNER', 'ADMIN'].includes(user.role) && can(user.role, 'export:financial') ? (
             <ShareholderReportMenu locale={locale} label={tc('shareholderReport')} />
           ) : null}
-          <a href={`/api/reports/deck?${deckQuery}`} className="inline-flex items-center gap-1.5 rounded-lg border bg-card px-3 py-1.5 text-xs font-medium hover:bg-muted">
-            <FileDown className="size-3.5" />
-            {tc('downloadDeck')}
-          </a>
+          {can(user.role, 'export:data') ? (
+            <a href={`/api/reports/deck?${deckQuery}`} className="inline-flex items-center gap-1.5 rounded-lg border bg-card px-3 py-1.5 text-xs font-medium hover:bg-muted">
+              <FileDown className="size-3.5" />
+              {tc('downloadDeck')}
+            </a>
+          ) : null}
         </div> : null}
       </div>
 
