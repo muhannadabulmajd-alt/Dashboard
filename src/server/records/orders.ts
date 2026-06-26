@@ -91,11 +91,39 @@ const refundFor = (isReturn: boolean, gross: number, discount: number, deliveryF
     ? Math.max(0, gross - discount + deliveryFee + extraCharges)
     : 0;
 
+function orderActionError(error: unknown, context: Record<string, unknown>) {
+  const err = error as { name?: string; code?: string; message?: string };
+  console.error('[orders.create]', {
+    ...context,
+    errorName: err?.name,
+    errorCode: err?.code,
+    errorMessage: err?.message,
+  });
+}
+
+function headerErrorCode(result: ReturnType<typeof parseHeader>): string {
+  if (result.success) return 'invalid';
+  const paths = result.error.issues.map((issue) => issue.path.join('.'));
+  if (paths.some((path) => path === 'placedAt')) return 'date';
+  if (paths.some((path) => path === 'financePaidAmount')) return 'partial';
+  if (paths.some((path) => path === 'financeAccountId')) return 'account';
+  return 'invalid';
+}
+
+function lineErrorCode(result: ReturnType<typeof lineSchema.safeParse>): string {
+  if (result.success) return 'invalid';
+  const paths = result.error.issues.map((issue) => issue.path.join('.'));
+  if (paths.some((path) => path.endsWith('.sku'))) return 'sku';
+  if (paths.some((path) => path.endsWith('.quantity'))) return 'quantity';
+  if (paths.some((path) => path.endsWith('.unitGrossPrice') || path.endsWith('.lineDiscount'))) return 'price';
+  return 'nolines';
+}
+
 export async function createOrder(_prev: ActionState, fd: FormData): Promise<ActionState> {
   const user = await requireCap(CAP);
   if (!user) return { error: 'forbidden' };
   const h = parseHeader(fd);
-  if (!h.success) return { error: 'invalid' };
+  if (!h.success) return { error: headerErrorCode(h) };
 
   let rawLines: unknown;
   try {
@@ -104,12 +132,13 @@ export async function createOrder(_prev: ActionState, fd: FormData): Promise<Act
     return { error: 'nolines' };
   }
   const parsedLines = lineSchema.safeParse(rawLines);
-  if (!parsedLines.success || parsedLines.data.length === 0) return { error: 'nolines' };
+  if (!parsedLines.success) return { error: lineErrorCode(parsedLines) };
+  if (parsedLines.data.length === 0) return { error: 'nolines' };
 
   const locale = reqField(fd, 'locale') || 'ar';
   if (h.data.orderNumber && await prisma.order.findUnique({ where: { orderNumber: h.data.orderNumber }, select: { id: true } }))
     return { error: 'exists' };
-  if ((h.data.financeMode === 'PAID' || h.data.financeMode === 'PARTIAL') && !h.data.financeAccountId) return { error: 'invalid' };
+  if ((h.data.financeMode === 'PAID' || h.data.financeMode === 'PARTIAL') && !h.data.financeAccountId) return { error: 'account' };
   const statusRoles = await getOrderStatusRoleMap();
   const statusRole = statusRoles.get(h.data.status) ?? 'UNKNOWN';
   const saleStatuses = [...statusRoles].filter(([, role]) => role === 'SALE').map(([code]) => code);
@@ -140,57 +169,79 @@ export async function createOrder(_prev: ActionState, fd: FormData): Promise<Act
         select: { id: true },
       })
     : null;
+  if (h.data.customerExternalId && !customer) return { error: 'customer' };
   const branch = await prisma.branch.findFirst({ orderBy: { createdAt: 'asc' }, select: { id: true } });
   const gross = lineData.reduce((s, l) => s + l.unitGrossPrice * l.quantity, 0);
   const discount = lineData.reduce((s, l) => s + l.lineDiscount, 0) + h.data.orderDiscount;
   const total = Math.max(0, gross - discount + h.data.deliveryFee + h.data.extraCharges);
   if (h.data.financeMode === 'PARTIAL' && (!h.data.financePaidAmount || h.data.financePaidAmount <= 0 || h.data.financePaidAmount >= total)) {
-    return { error: 'invalid' };
+    return { error: 'partial' };
   }
 
-  const order = await prisma.$transaction(async (tx) => {
-    const orderNumber = await generateOrderNumber(tx, h.data.placedAt, h.data.channel);
-    const o = await tx.order.create({
-      data: {
-        orderNumber,
-        placedAt: h.data.placedAt,
-        customerId: customer?.id ?? null,
-        branchId: branch?.id ?? null,
+  let order: { id: string; orderNumber: string };
+  try {
+    order = await prisma.$transaction(async (tx) => {
+      const orderNumber = await generateOrderNumber(tx, h.data.placedAt, h.data.channel);
+      const o = await tx.order.create({
+        data: {
+          orderNumber,
+          placedAt: h.data.placedAt,
+          customerId: customer?.id ?? null,
+          branchId: branch?.id ?? null,
+          createdById: user.id,
+          channel: h.data.channel,
+          governorate: h.data.governorate,
+          fulfillmentMethod: h.data.fulfillmentMethod,
+          status: h.data.status,
+          grossAmount: gross,
+          discountAmount: discount,
+          orderDiscount: h.data.orderDiscount,
+          extraCharges: h.data.extraCharges,
+          notes: h.data.notes ?? null,
+          refundAmount: refundFor(statusRole === 'RETURN', gross, discount, h.data.deliveryFee, h.data.extraCharges),
+          deliveryFee: h.data.deliveryFee,
+          deliveryCost: h.data.deliveryCost,
+          lines: { create: lineData },
+        },
+      });
+      // Only statuses mapped as completed sales consume stock. Changing the role
+      // on a later edit reverses or reapplies the linked movements atomically.
+      if (statusRole === 'SALE') await applySoldMovements(tx, o.id, h.data.placedAt, lineData);
+      await syncOrderFinance(tx, o.id, {
+        mode: h.data.financeMode as FinanceSyncMode,
+        accountId: h.data.financeAccountId,
+        dueDate: h.data.financeDueDate,
+        paidAmount: h.data.financePaidAmount,
+        paymentMethod: h.data.financePaymentMethod,
+        paymentDate: h.data.financePaymentDate,
         createdById: user.id,
-        channel: h.data.channel,
-        governorate: h.data.governorate,
-        fulfillmentMethod: h.data.fulfillmentMethod,
-        status: h.data.status,
-        grossAmount: gross,
-        discountAmount: discount,
-        orderDiscount: h.data.orderDiscount,
-        extraCharges: h.data.extraCharges,
-        notes: h.data.notes ?? null,
-        refundAmount: refundFor(statusRole === 'RETURN', gross, discount, h.data.deliveryFee, h.data.extraCharges),
-        deliveryFee: h.data.deliveryFee,
-        deliveryCost: h.data.deliveryCost,
-        lines: { create: lineData },
-      },
+        statusRole,
+      });
+      await syncCustomerStats(tx, customer?.id, saleStatuses);
+      return { id: o.id, orderNumber: o.orderNumber };
     });
-    // Only statuses mapped as completed sales consume stock. Changing the role
-    // on a later edit reverses or reapplies the linked movements atomically.
-    if (statusRole === 'SALE') await applySoldMovements(tx, o.id, h.data.placedAt, lineData);
-    await syncOrderFinance(tx, o.id, {
-      mode: h.data.financeMode as FinanceSyncMode,
-      accountId: h.data.financeAccountId,
-      dueDate: h.data.financeDueDate,
-      paidAmount: h.data.financePaidAmount,
-      paymentMethod: h.data.financePaymentMethod,
-      paymentDate: h.data.financePaymentDate,
-      createdById: user.id,
-      statusRole,
+  } catch (error) {
+    orderActionError(error, {
+      stage: 'transaction',
+      channel: h.data.channel,
+      status: h.data.status,
+      financeMode: h.data.financeMode,
+      lineCount: lineData.length,
+      total,
     });
-    await syncCustomerStats(tx, customer?.id, saleStatuses);
-    return o;
-  });
+    return { error: 'create_failed' };
+  }
   // Stock consumption changed → roll each linked item's active FIFO cost (§8).
-  await syncActiveCostForProducts(lineData.map((l) => l.productId));
-  await audit(user.id, 'CREATE', 'Order', { orderNumber: order.orderNumber, lines: lineData.length });
+  try {
+    await syncActiveCostForProducts(lineData.map((l) => l.productId));
+  } catch (error) {
+    orderActionError(error, { stage: 'active-cost-sync', orderId: order.id, orderNumber: order.orderNumber });
+  }
+  try {
+    await audit(user.id, 'CREATE', 'Order', { orderNumber: order.orderNumber, lines: lineData.length });
+  } catch (error) {
+    orderActionError(error, { stage: 'audit', orderId: order.id, orderNumber: order.orderNumber });
+  }
   revalidatePath(LIST, 'page');
   revalidatePath(FINANCE, 'page');
   revalidatePath(LEDGER, 'page');

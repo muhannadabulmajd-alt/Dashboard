@@ -8,6 +8,7 @@ import { getOrderCatalog } from '@/server/records/order-catalog';
 import { getListOptions } from '@/server/lists/resolver';
 import { createOrder } from '@/server/records/orders';
 import { createCustomerInline } from '@/server/records/customers';
+import { dateInputValue } from '@/lib/dates';
 
 export default async function NewOrderPage({
   params,
@@ -95,6 +96,13 @@ export default async function NewOrderPage({
     forbidden: t('err.forbidden'),
     sku: t('err.sku'),
     nolines: t('err.nolines'),
+    date: t('err.date'),
+    quantity: t('err.quantity'),
+    price: t('err.price'),
+    account: t('err.account'),
+    partial: t('err.partial'),
+    customer: t('err.customer'),
+    create_failed: t('err.create_failed'),
   };
 
   return (
@@ -115,6 +123,17 @@ export default async function NewOrderPage({
         cancelHref="/admin/records/orders"
         submitLabel={t('create')}
         catalog={catalog}
+        initial={{
+          header: {
+            placedAt: dateInputValue(),
+            deliveryFee: '0',
+            deliveryCost: '0',
+            orderDiscount: '0',
+            extraCharges: '0',
+            financeMode: 'CREDIT',
+          },
+          lines: [{ sku: '', quantity: '1', unitGrossPrice: '0', lineDiscount: '0' }],
+        }}
         customerOptions={customers.map((customer) => ({
           externalId: customer.externalId!,
           label: `${customer.nameEn || customer.nameAr || customer.phone || customer.externalId} (${customer.externalId})`,

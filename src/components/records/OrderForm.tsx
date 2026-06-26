@@ -27,6 +27,9 @@ function HeaderField({
   defaultValue,
   disabled,
   hint,
+  required,
+  min,
+  step,
 }: {
   name: string;
   label: string;
@@ -34,6 +37,9 @@ function HeaderField({
   defaultValue?: string;
   disabled?: boolean;
   hint?: string;
+  required?: boolean;
+  min?: string;
+  step?: string;
 }) {
   const fieldId = `${name}-field`;
   const hintId = `${name}-hint`;
@@ -46,6 +52,9 @@ function HeaderField({
         type={type}
         defaultValue={defaultValue}
         disabled={disabled}
+        required={required}
+        min={min}
+        step={step}
         aria-describedby={hint ? hintId : undefined}
         className={cn(input, disabled && disabledInput)}
       />
@@ -55,13 +64,35 @@ function HeaderField({
   );
 }
 
-function HeaderSelect({ name, label, options, defaultValue, hint }: { name: string; label: string; options: Opt[]; defaultValue?: string; hint?: string }) {
+function HeaderSelect({
+  name,
+  label,
+  options,
+  defaultValue,
+  hint,
+  required,
+}: {
+  name: string;
+  label: string;
+  options: Opt[];
+  defaultValue?: string;
+  hint?: string;
+  required?: boolean;
+}) {
   const fieldId = `${name}-field`;
   const hintId = `${name}-hint`;
   return (
     <div className="flex flex-col gap-1">
       <label htmlFor={fieldId} className="text-xs font-medium text-muted-foreground">{label}</label>
-      <select id={fieldId} name={name} className={input} defaultValue={defaultValue ?? options[0]?.value} aria-describedby={hint ? hintId : undefined}>
+      <select
+        id={fieldId}
+        name={name}
+        className={input}
+        defaultValue={defaultValue ?? options[0]?.value ?? ''}
+        required={required}
+        aria-describedby={hint ? hintId : undefined}
+      >
+        {!options.length ? <option value="">—</option> : null}
         {options.map((o) => (
           <option key={o.value} value={o.value}>
             {o.label}
@@ -252,7 +283,7 @@ export function OrderForm({
             <div className="rounded-lg border bg-muted/35 px-3 py-2 text-sm text-muted-foreground">{labels.orderNumberGenerated}</div>
           </div>
         )}
-        <HeaderField name="placedAt" label={labels.date} type="date" defaultValue={h.placedAt} />
+        <HeaderField name="placedAt" label={labels.date} type="date" defaultValue={h.placedAt} required />
         <div className="space-y-1">
           <input type="hidden" name="customerExternalId" value={selectedCustomer} />
           <label className="text-xs font-medium text-muted-foreground">{labels.customer}</label>
@@ -289,12 +320,12 @@ export function OrderForm({
             </Link>
           )}
         </div>
-        <HeaderSelect name="channel" label={labels.channel} options={channelOptions} defaultValue={h.channel} />
-        <HeaderSelect name="governorate" label={labels.governorate} options={governorateOptions} defaultValue={h.governorate} />
-        <HeaderSelect name="fulfillmentMethod" label={labels.fulfillment} options={fulfillmentOptions} defaultValue={h.fulfillmentMethod} />
-        <HeaderSelect name="status" label={labels.status} options={statusOptions} defaultValue={h.status} />
-        <HeaderField name="deliveryFee" label={labels.deliveryFee} type="number" defaultValue={h.deliveryFee} />
-        <HeaderField name="deliveryCost" label={labels.deliveryCost} type="number" defaultValue={h.deliveryCost} />
+        <HeaderSelect name="channel" label={labels.channel} options={channelOptions} defaultValue={h.channel} required />
+        <HeaderSelect name="governorate" label={labels.governorate} options={governorateOptions} defaultValue={h.governorate} required />
+        <HeaderSelect name="fulfillmentMethod" label={labels.fulfillment} options={fulfillmentOptions} defaultValue={h.fulfillmentMethod} required />
+        <HeaderSelect name="status" label={labels.status} options={statusOptions} defaultValue={h.status} required />
+        <HeaderField name="deliveryFee" label={labels.deliveryFee} type="number" defaultValue={h.deliveryFee ?? '0'} min="0" step="1" />
+        <HeaderField name="deliveryCost" label={labels.deliveryCost} type="number" defaultValue={h.deliveryCost ?? '0'} min="0" step="1" />
         <HeaderField name="notes" label={labels.notes} defaultValue={h.notes} />
       </div>
 
@@ -321,7 +352,7 @@ export function OrderForm({
         {financeMode === 'PAID' || financeMode === 'PARTIAL' ? (
           <div className="flex flex-col gap-1">
             <label htmlFor="finance-account-field" className="text-xs font-medium text-muted-foreground">{labels.paymentAccount}</label>
-            <select id="finance-account-field" name="financeAccountId" required className={input} defaultValue={h.financeAccountId}>
+            <select id="finance-account-field" name="financeAccountId" required className={input} defaultValue={h.financeAccountId ?? ''}>
               <option value="">—</option>
               {accountOptions.map((o) => (
                 <option key={o.value} value={o.value}>
@@ -332,16 +363,16 @@ export function OrderForm({
           </div>
         ) : null}
         {financeMode === 'PARTIAL' ? (
-          <HeaderField name="financePaidAmount" label={labels.financePaidAmount} type="number" defaultValue={h.financePaidAmount} />
+          <HeaderField name="financePaidAmount" label={labels.financePaidAmount} type="number" defaultValue={h.financePaidAmount} required min="1" step="1" />
         ) : null}
         {financeMode === 'PAID' || financeMode === 'PARTIAL' ? (
           <>
             <HeaderSelect name="financePaymentMethod" label={labels.paymentMethod} options={paymentMethodOptions ?? []} defaultValue={h.financePaymentMethod} />
-            <HeaderField name="financePaymentDate" label={labels.paymentDate} type="date" defaultValue={h.financePaymentDate || h.placedAt} />
+            <HeaderField name="financePaymentDate" label={labels.paymentDate} type="date" defaultValue={h.financePaymentDate || h.placedAt} required />
           </>
         ) : null}
         {financeMode === 'CREDIT' ? (
-          <HeaderField name="financeDueDate" label={labels.paymentDueDate} type="date" defaultValue={h.financeDueDate || h.placedAt} />
+          <HeaderField name="financeDueDate" label={labels.paymentDueDate} type="date" defaultValue={h.financeDueDate || h.placedAt} required />
         ) : null}
       </div>
 
@@ -366,7 +397,7 @@ export function OrderForm({
               <div className="flex flex-col gap-1">
                 {i === 0 ? <label className="text-xs text-muted-foreground">{labels.variation ?? labels.sku}</label> : null}
                 {catalog.length ? (
-                  <select value={l.sku} onChange={(e) => pickVariation(i, e.target.value)} className={input}>
+                  <select value={l.sku} onChange={(e) => pickVariation(i, e.target.value)} className={input} required>
                     <option value="">—</option>
                     {catalogByGroup.map(([group, items]) => (
                       <optgroup key={group} label={group}>
@@ -380,7 +411,7 @@ export function OrderForm({
                     {l.sku && !priceBySku.has(l.sku) ? <option value={l.sku}>{l.sku}</option> : null}
                   </select>
                 ) : (
-                  <input value={l.sku} onChange={(e) => setLine(i, 'sku', e.target.value)} className={input} />
+                  <input value={l.sku} onChange={(e) => setLine(i, 'sku', e.target.value)} className={input} required />
                 )}
               </div>
               <div className="flex flex-col gap-1">
@@ -391,15 +422,15 @@ export function OrderForm({
               </div>
               <div className="flex flex-col gap-1">
                 {i === 0 ? <label className="text-xs text-muted-foreground">{labels.qty}</label> : null}
-                <input type="number" value={l.quantity} onChange={(e) => setLine(i, 'quantity', e.target.value)} className={input} />
+                <input type="number" value={l.quantity} onChange={(e) => setLine(i, 'quantity', e.target.value)} className={input} required min="1" step="1" />
               </div>
               <div className="flex flex-col gap-1">
                 {i === 0 ? <label className="text-xs text-muted-foreground">{labels.unitPrice}</label> : null}
-                <input type="number" value={l.unitGrossPrice} onChange={(e) => setLine(i, 'unitGrossPrice', e.target.value)} className={input} />
+                <input type="number" value={l.unitGrossPrice} onChange={(e) => setLine(i, 'unitGrossPrice', e.target.value)} className={input} required min="0" step="1" />
               </div>
               <div className="flex flex-col gap-1">
                 {i === 0 ? <label className="text-xs text-muted-foreground">{labels.discount}</label> : null}
-                <input type="number" value={l.lineDiscount} onChange={(e) => setLine(i, 'lineDiscount', e.target.value)} className={input} />
+                <input type="number" value={l.lineDiscount} onChange={(e) => setLine(i, 'lineDiscount', e.target.value)} className={input} required min="0" step="1" />
               </div>
               <button
                 type="button"
@@ -421,6 +452,8 @@ export function OrderForm({
               name="orderDiscount"
               value={adj.orderDiscount}
               onChange={(e) => setAdj((a) => ({ ...a, orderDiscount: e.target.value }))}
+              min="0"
+              step="1"
               className={input}
             />
           </div>
@@ -431,6 +464,8 @@ export function OrderForm({
               name="extraCharges"
               value={adj.extraCharges}
               onChange={(e) => setAdj((a) => ({ ...a, extraCharges: e.target.value }))}
+              min="0"
+              step="1"
               className={input}
             />
           </div>

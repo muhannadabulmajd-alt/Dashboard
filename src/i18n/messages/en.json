@@ -465,7 +465,14 @@
       "forbidden": "You don't have permission to do that.",
       "notfound": "Record not found.",
       "sku": "One or more SKUs are unknown — add the product first.",
-      "nolines": "Add at least one line item."
+      "nolines": "Add at least one line item.",
+      "date": "Choose a valid order date.",
+      "quantity": "Enter a whole quantity of at least 1 for every item.",
+      "price": "Enter valid non-negative prices and discounts.",
+      "account": "Choose the payment account for paid or partially paid orders.",
+      "partial": "Partial payment must be more than 0 and less than the order total.",
+      "customer": "Choose an existing customer or create the customer first.",
+      "create_failed": "Could not create the order. Please review the fields and try again."
     },
     "entities": {
       "products": "Products",
