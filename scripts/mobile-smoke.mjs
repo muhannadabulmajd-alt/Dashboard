@@ -178,6 +178,59 @@ async function assertMobilePage(page, pageConfig, viewportName) {
   if (pageErrors.length) throw new Error(`${pageConfig.path} raised browser errors: ${pageErrors.join(', ')}`);
 }
 
+async function assertOrderCreation(page, viewportName) {
+  const failedResponses = [];
+  const pageErrors = [];
+  const responseHandler = (response) => {
+    if (response.status() >= 500) failedResponses.push(`${response.status()} ${response.url()}`);
+  };
+  const errorHandler = (error) => pageErrors.push(error.message);
+  page.on('response', responseHandler);
+  page.on('pageerror', errorHandler);
+
+  await page.goto(`${baseUrl}/en/admin/records/orders/new`, { waitUntil: 'networkidle', timeout: 45_000 });
+  await page.locator('main').first().waitFor({ state: 'visible', timeout: 20_000 });
+
+  const skuSelect = page.locator('select[data-order-line-sku="0"]').first();
+  await skuSelect.waitFor({ state: 'visible', timeout: 10_000 });
+  const sku = await skuSelect.evaluate((select) => {
+    const option = Array.from(select.options).find((item) => item.value);
+    return option?.value ?? '';
+  });
+  if (!sku) throw new Error('New order form did not expose an orderable SKU.');
+  await skuSelect.selectOption(sku);
+
+  const priceInput = page.locator('input[data-order-line-price="0"]').first();
+  await priceInput.waitFor({ state: 'visible', timeout: 10_000 });
+  const price = Number(await priceInput.inputValue());
+  if (!Number.isFinite(price) || price <= 0) await priceInput.fill('1000');
+
+  await page.locator('input[data-order-line-quantity="0"]').first().fill('1');
+  await page.locator('input[data-order-line-discount="0"]').first().fill('0');
+
+  await page.locator('[data-order-submit]').click();
+  await page.waitForFunction(
+    () => /\/en\/admin\/records\/orders\/[^/]+$/.test(window.location.pathname) || Boolean(document.querySelector('[data-order-error]')),
+    undefined,
+    { timeout: 45_000 },
+  );
+
+  if (await page.locator('[data-order-error]').count()) {
+    const errorText = await page.locator('[data-order-error]').first().textContent();
+    throw new Error(`New order form returned an error: ${errorText}`);
+  }
+  if (failedResponses.length) throw new Error(`Order creation returned server errors: ${failedResponses.join(', ')}`);
+  if (pageErrors.length) throw new Error(`Order creation raised browser errors: ${pageErrors.join(', ')}`);
+
+  await page.screenshot({
+    path: path.join(screenshotDir, `${viewportName}-order-created.png`),
+    fullPage: true,
+  });
+
+  page.off('response', responseHandler);
+  page.off('pageerror', errorHandler);
+}
+
 await mkdir(screenshotDir, { recursive: true });
 
 const browser = await chromium.launch();
@@ -193,6 +246,7 @@ try {
     await waitForServer(page);
     await signIn(page);
     await assertMobileNav(page, viewport.name);
+    await assertOrderCreation(page, viewport.name);
     for (const pageConfig of pages) {
       await assertMobilePage(page, pageConfig, viewport.name);
     }
