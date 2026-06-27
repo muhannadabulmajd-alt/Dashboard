@@ -21,7 +21,10 @@ function nextSequence(values: (string | null)[], pattern: RegExp): number {
 
 export async function generateOrderNumber(tx: Tx, placedAt: Date, channel: string): Promise<string> {
   const dateKey = laheebDateKey(placedAt);
-  await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`laheeb-order-${dateKey}`}))`;
+  await tx.$queryRaw<{ locked: number }[]>`
+    SELECT 1 AS locked
+    WHERE pg_advisory_xact_lock(hashtext(${`laheeb-order-${dateKey}`})) IS NULL
+  `;
   const rows = await tx.order.findMany({
     where: { orderNumber: { startsWith: `${ORDER_PREFIX}-${dateKey}-` } },
     select: { orderNumber: true },
@@ -32,7 +35,10 @@ export async function generateOrderNumber(tx: Tx, placedAt: Date, channel: strin
 
 export async function generateCustomerExternalId(tx: Tx, createdAt: Date = new Date()): Promise<string> {
   const dateKey = laheebDateKey(createdAt);
-  await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`laheeb-customer-${dateKey}`}))`;
+  await tx.$queryRaw<{ locked: number }[]>`
+    SELECT 1 AS locked
+    WHERE pg_advisory_xact_lock(hashtext(${`laheeb-customer-${dateKey}`})) IS NULL
+  `;
   const rows = await tx.customer.findMany({
     where: { externalId: { startsWith: `${CUSTOMER_PREFIX}-${dateKey}-` } },
     select: { externalId: true },
