@@ -5,7 +5,14 @@ import { prisma } from '@/server/db/client';
 import type { Prisma } from '@prisma/client';
 
 /** Result returned by create/update record actions (drives useActionState UIs). */
-export type ActionState = { ok?: boolean; error?: string } | undefined;
+export type ActionState = {
+  ok?: boolean;
+  error?: string;
+  formError?: string;
+  fieldErrors?: Record<string, string>;
+  stage?: string;
+  debugId?: string;
+} | undefined;
 
 /** Return the current user iff they hold the capability, else null. */
 export async function requireCap(capability: Capability) {

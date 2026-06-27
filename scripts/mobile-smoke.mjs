@@ -191,10 +191,22 @@ async function assertOrderCreation(page, viewportName) {
   await page.goto(`${baseUrl}/en/admin/records/orders/new`, { waitUntil: 'networkidle', timeout: 45_000 });
   await page.locator('main').first().waitFor({ state: 'visible', timeout: 20_000 });
 
+  await page.locator('[data-customer-picker-trigger]').first().click();
+  await page.locator('[data-customer-picker-search]').first().waitFor({ state: 'visible', timeout: 10_000 });
+  const firstCustomer = page.locator('[data-customer-picker-option]').first();
+  await firstCustomer.waitFor({ state: 'visible', timeout: 10_000 });
+  await firstCustomer.click();
+
+  const statusSelect = page.locator('select[name="status"]').first();
+  if (await statusSelect.locator('option[value="PENDING"]').count()) await statusSelect.selectOption('PENDING');
+  const financeSelect = page.locator('select[name="financeMode"]').first();
+  await financeSelect.selectOption('CREDIT');
+
   const skuSelect = page.locator('select[data-order-line-sku="0"]').first();
   await skuSelect.waitFor({ state: 'visible', timeout: 10_000 });
   const sku = await skuSelect.evaluate((select) => {
-    const option = Array.from(select.options).find((item) => item.value);
+    const preferred = Array.from(select.options).find((item) => item.value && item.textContent?.toLowerCase().includes('cardamom'));
+    const option = preferred ?? Array.from(select.options).find((item) => item.value);
     return option?.value ?? '';
   });
   if (!sku) throw new Error('New order form did not expose an orderable SKU.');
