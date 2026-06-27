@@ -1,13 +1,14 @@
 'use client';
 
-import { useActionState, useMemo, useState } from 'react';
+import { useActionState, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Loader2, Plus, X } from 'lucide-react';
+import { Check, Loader2, Plus, Search, UserRound, X } from 'lucide-react';
 import { Link } from '@/i18n/navigation';
 import { cn } from '@/lib/utils';
 import type { ActionState } from '@/server/records/shared';
 
 const input = 'w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:border-primary';
+const inputError = 'border-danger focus:border-danger';
 const disabledInput = 'cursor-not-allowed bg-muted text-muted-foreground';
 const rowLabel = (first: boolean) => first ? 'text-xs text-muted-foreground' : 'text-xs text-muted-foreground sm:hidden';
 
@@ -32,6 +33,7 @@ function HeaderField({
   required,
   min,
   step,
+  error,
 }: {
   name: string;
   label: string;
@@ -42,6 +44,7 @@ function HeaderField({
   required?: boolean;
   min?: string;
   step?: string;
+  error?: string;
 }) {
   const fieldId = `${name}-field`;
   const hintId = `${name}-hint`;
@@ -58,10 +61,12 @@ function HeaderField({
         min={min}
         step={step}
         aria-describedby={hint ? hintId : undefined}
-        className={cn(input, disabled && disabledInput)}
+        aria-invalid={Boolean(error)}
+        className={cn(input, disabled && disabledInput, error && inputError)}
       />
       {disabled ? <input type="hidden" name={name} value={defaultValue ?? ''} /> : null}
       {hint ? <p id={hintId} className="text-xs leading-5 text-muted-foreground">{hint}</p> : null}
+      {error ? <p className="text-xs font-medium text-danger">{error}</p> : null}
     </div>
   );
 }
@@ -73,6 +78,7 @@ function HeaderSelect({
   defaultValue,
   hint,
   required,
+  error,
 }: {
   name: string;
   label: string;
@@ -80,6 +86,7 @@ function HeaderSelect({
   defaultValue?: string;
   hint?: string;
   required?: boolean;
+  error?: string;
 }) {
   const fieldId = `${name}-field`;
   const hintId = `${name}-hint`;
@@ -89,10 +96,11 @@ function HeaderSelect({
       <select
         id={fieldId}
         name={name}
-        className={input}
+        className={cn(input, error && inputError)}
         defaultValue={defaultValue ?? options[0]?.value ?? ''}
         required={required}
         aria-describedby={hint ? hintId : undefined}
+        aria-invalid={Boolean(error)}
       >
         {!options.length ? <option value="">—</option> : null}
         {options.map((o) => (
@@ -102,6 +110,7 @@ function HeaderSelect({
         ))}
       </select>
       {hint ? <p id={hintId} className="text-xs leading-5 text-muted-foreground">{hint}</p> : null}
+      {error ? <p className="text-xs font-medium text-danger">{error}</p> : null}
     </div>
   );
 }
@@ -177,6 +186,143 @@ function InlineCustomerModal({
   );
 }
 
+function CustomerPicker({
+  customers,
+  selectedCustomer,
+  onSelect,
+  labels,
+  error,
+}: {
+  customers: CustomerOption[];
+  selectedCustomer: string;
+  onSelect: (customerExternalId: string) => void;
+  labels: Record<string, string>;
+  error?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const searchRef = useRef<HTMLInputElement>(null);
+  const selected = customers.find((customer) => customer.externalId === selectedCustomer);
+  const visibleCustomers = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const filtered = q
+      ? customers.filter((customer) => `${customer.label} ${customer.phone ?? ''} ${customer.externalId}`.toLowerCase().includes(q))
+      : customers;
+    return filtered.slice(0, 100);
+  }, [customers, query]);
+
+  useEffect(() => {
+    if (!open) return;
+    const id = window.setTimeout(() => searchRef.current?.focus(), 50);
+    return () => window.clearTimeout(id);
+  }, [open]);
+
+  const pick = (externalId: string) => {
+    onSelect(externalId);
+    setOpen(false);
+  };
+
+  const modal = open && typeof document !== 'undefined'
+    ? createPortal(
+        <div className="fixed inset-0 z-50 flex items-end bg-roast/35 p-0 sm:items-center sm:justify-center sm:p-4" role="dialog" aria-modal="true">
+          <div className="flex max-h-[88vh] w-full flex-col rounded-t-2xl border bg-card shadow-xl sm:max-w-2xl sm:rounded-[var(--radius)]">
+            <div className="flex items-start justify-between gap-3 border-b p-4">
+              <div>
+                <h3 className="text-base font-semibold text-foreground">{labels.customerPickerTitle ?? labels.selectCustomer}</h3>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">{labels.customerPickerHint ?? labels.customerHint}</p>
+              </div>
+              <button type="button" onClick={() => setOpen(false)} className="rounded-lg border p-2 text-muted-foreground hover:bg-muted" aria-label={labels.cancel}>
+                <X className="size-4" />
+              </button>
+            </div>
+            <div className="sticky top-0 z-10 border-b bg-card p-4">
+              <div className="relative">
+                <Search className="pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  ref={searchRef}
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder={labels.searchCustomer}
+                  className={cn(input, 'ps-9')}
+                  data-customer-picker-search
+                />
+              </div>
+            </div>
+            <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-4">
+              {visibleCustomers.length ? visibleCustomers.map((customer) => {
+                const active = customer.externalId === selectedCustomer;
+                return (
+                  <button
+                    key={customer.externalId}
+                    type="button"
+                    onClick={() => pick(customer.externalId)}
+                    className={cn(
+                      'flex w-full items-start gap-3 rounded-lg border p-3 text-start transition hover:border-primary hover:bg-primary/5',
+                      active && 'border-primary bg-primary/10',
+                    )}
+                    data-customer-picker-option={customer.externalId}
+                  >
+                    <span className="mt-0.5 rounded-lg bg-muted p-2 text-muted-foreground">
+                      <UserRound className="size-4" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block break-words text-sm font-semibold text-foreground">{customer.label}</span>
+                      {customer.phone ? <span className="mt-1 block text-xs text-muted-foreground">{customer.phone}</span> : null}
+                    </span>
+                    {active ? <Check className="mt-1 size-4 shrink-0 text-primary" /> : null}
+                  </button>
+                );
+              }) : (
+                <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+                  {labels.noCustomersFound ?? labels.customer}
+                </div>
+              )}
+            </div>
+            <div className="flex flex-col-reverse gap-2 border-t p-4 sm:flex-row sm:justify-end">
+              {selectedCustomer ? (
+                <button type="button" onClick={() => onSelect('')} className="rounded-lg border px-3 py-2 text-sm font-medium hover:bg-muted">
+                  {labels.clearCustomer ?? labels.cancel}
+                </button>
+              ) : null}
+              <button type="button" onClick={() => setOpen(false)} className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground">
+                {labels.done ?? labels.selectCustomer}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )
+    : null;
+
+  return (
+    <div className="space-y-1" data-order-customer-picker>
+      <label className="text-xs font-medium text-muted-foreground">{labels.customer}</label>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className={cn(
+          'flex min-h-10 w-full items-center justify-between gap-3 rounded-lg border bg-background px-3 py-2 text-start text-sm outline-none hover:border-primary',
+          error && inputError,
+        )}
+        aria-invalid={Boolean(error)}
+        data-customer-picker-trigger
+      >
+        <span className={cn('min-w-0 flex-1 break-words', !selected && 'text-muted-foreground')}>
+          {selected?.label ?? (selectedCustomer || labels.selectCustomer)}
+        </span>
+        <Search className="size-4 shrink-0 text-muted-foreground" />
+      </button>
+      {error ? <p className="text-xs font-medium text-danger">{error}</p> : null}
+      {selected ? (
+        <button type="button" onClick={() => onSelect('')} className="text-xs font-medium text-muted-foreground hover:text-primary">
+          {labels.clearCustomer ?? labels.cancel}
+        </button>
+      ) : null}
+      {modal}
+    </div>
+  );
+}
+
 export function OrderForm({
   action,
   locale,
@@ -217,8 +363,13 @@ export function OrderForm({
   const [state, formAction, pending] = useActionState<ActionState, FormData>(action, undefined);
   const [lines, setLines] = useState<OrderLineInput[]>(initial?.lines?.length ? initial.lines : [{ ...emptyLine }]);
   const [customers, setCustomers] = useState<CustomerOption[]>(customerOptions);
-  const [customerQuery, setCustomerQuery] = useState('');
   const [selectedCustomer, setSelectedCustomer] = useState(initial?.header?.customerExternalId ?? '');
+  const errorRef = useRef<HTMLDivElement>(null);
+  const fieldErrors = state?.fieldErrors ?? {};
+  const errorFor = (field: string) => {
+    const code = fieldErrors[field];
+    return code ? errors[code] ?? code : undefined;
+  };
 
   // Active variations grouped by parent for the picker (BRD §11–12).
   const catalogByGroup = useMemo(() => {
@@ -260,17 +411,13 @@ export function OrderForm({
     return { subtotal, discount, extra, net: subtotal - discount + extra };
   }, [lines, adj]);
   const fmt = (n: number) => new Intl.NumberFormat(locale === 'ar' ? 'ar-IQ' : 'en-US').format(n);
-  const visibleCustomers = useMemo(() => {
-    const q = customerQuery.trim().toLowerCase();
-    const list = q
-      ? customers.filter((customer) => `${customer.label} ${customer.phone ?? ''} ${customer.externalId}`.toLowerCase().includes(q))
-      : customers;
-    return list.slice(0, 80);
-  }, [customers, customerQuery]);
   const addInlineCustomer = (customer: CustomerOption) => {
     setCustomers((current) => current.some((item) => item.externalId === customer.externalId) ? current : [customer, ...current]);
     setSelectedCustomer(customer.externalId);
   };
+  useEffect(() => {
+    if (state?.error) errorRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [state?.error]);
 
   return (
     <form action={formAction} className="space-y-4">
@@ -290,27 +437,16 @@ export function OrderForm({
             <div className="rounded-lg border bg-muted/35 px-3 py-2 text-sm text-muted-foreground">{labels.orderNumberGenerated}</div>
           </div>
         )}
-        <HeaderField name="placedAt" label={labels.date} type="date" defaultValue={h.placedAt} required />
+        <HeaderField name="placedAt" label={labels.date} type="date" defaultValue={h.placedAt} required error={errorFor('placedAt')} />
         <div className="space-y-1">
           <input type="hidden" name="customerExternalId" value={selectedCustomer} />
-          <label className="text-xs font-medium text-muted-foreground">{labels.customer}</label>
-          <input
-            value={customerQuery}
-            onChange={(event) => setCustomerQuery(event.target.value)}
-            placeholder={labels.searchCustomer}
-            className={input}
+          <CustomerPicker
+            customers={customers}
+            selectedCustomer={selectedCustomer}
+            onSelect={setSelectedCustomer}
+            labels={labels}
+            error={errorFor('customerExternalId')}
           />
-          <select value={selectedCustomer} onChange={(event) => setSelectedCustomer(event.target.value)} className={input}>
-            <option value="">{labels.selectCustomer}</option>
-            {selectedCustomer && !customers.some((customer) => customer.externalId === selectedCustomer) ? (
-              <option value={selectedCustomer}>{selectedCustomer}</option>
-            ) : null}
-            {visibleCustomers.map((customer) => (
-              <option key={customer.externalId} value={customer.externalId}>
-                {customer.label}
-              </option>
-            ))}
-          </select>
           <p className="text-xs leading-5 text-muted-foreground">{labels.customerHint}</p>
           {inlineCustomerAction ? (
             <InlineCustomerModal
@@ -327,10 +463,10 @@ export function OrderForm({
             </Link>
           )}
         </div>
-        <HeaderSelect name="channel" label={labels.channel} options={channelOptions} defaultValue={h.channel} required />
-        <HeaderSelect name="governorate" label={labels.governorate} options={governorateOptions} defaultValue={h.governorate} required />
-        <HeaderSelect name="fulfillmentMethod" label={labels.fulfillment} options={fulfillmentOptions} defaultValue={h.fulfillmentMethod} required />
-        <HeaderSelect name="status" label={labels.status} options={statusOptions} defaultValue={h.status} required />
+        <HeaderSelect name="channel" label={labels.channel} options={channelOptions} defaultValue={h.channel} required error={errorFor('channel')} />
+        <HeaderSelect name="governorate" label={labels.governorate} options={governorateOptions} defaultValue={h.governorate} required error={errorFor('governorate')} />
+        <HeaderSelect name="fulfillmentMethod" label={labels.fulfillment} options={fulfillmentOptions} defaultValue={h.fulfillmentMethod} required error={errorFor('fulfillmentMethod')} />
+        <HeaderSelect name="status" label={labels.status} options={statusOptions} defaultValue={h.status} required error={errorFor('status')} />
         <HeaderField name="deliveryFee" label={labels.deliveryFee} type="number" defaultValue={h.deliveryFee ?? '0'} min="0" step="1" />
         <HeaderField name="deliveryCost" label={labels.deliveryCost} type="number" defaultValue={h.deliveryCost ?? '0'} min="0" step="1" />
         <HeaderField name="notes" label={labels.notes} defaultValue={h.notes} />
@@ -348,18 +484,27 @@ export function OrderForm({
             name="financeMode"
             value={financeMode}
             onChange={(e) => setFinanceMode(e.target.value)}
-            className={input}
+            className={cn(input, errorFor('financeMode') && inputError)}
+            aria-invalid={Boolean(errorFor('financeMode'))}
           >
             <option value="CREDIT">{labels.financeCredit}</option>
             <option value="PAID">{labels.financePaid}</option>
             <option value="PARTIAL">{labels.financePartial}</option>
             <option value="NONE">{labels.financeNone}</option>
           </select>
+          {errorFor('financeMode') ? <p className="text-xs font-medium text-danger">{errorFor('financeMode')}</p> : null}
         </div>
         {financeMode === 'PAID' || financeMode === 'PARTIAL' ? (
           <div className="flex flex-col gap-1">
             <label htmlFor="finance-account-field" className="text-xs font-medium text-muted-foreground">{labels.paymentAccount}</label>
-            <select id="finance-account-field" name="financeAccountId" required className={input} defaultValue={h.financeAccountId ?? ''}>
+            <select
+              id="finance-account-field"
+              name="financeAccountId"
+              required
+              className={cn(input, errorFor('financeAccountId') && inputError)}
+              defaultValue={h.financeAccountId ?? ''}
+              aria-invalid={Boolean(errorFor('financeAccountId'))}
+            >
               <option value="">—</option>
               {accountOptions.map((o) => (
                 <option key={o.value} value={o.value}>
@@ -367,23 +512,24 @@ export function OrderForm({
                 </option>
               ))}
             </select>
+            {errorFor('financeAccountId') ? <p className="text-xs font-medium text-danger">{errorFor('financeAccountId')}</p> : null}
           </div>
         ) : null}
         {financeMode === 'PARTIAL' ? (
-          <HeaderField name="financePaidAmount" label={labels.financePaidAmount} type="number" defaultValue={h.financePaidAmount} required min="1" step="1" />
+          <HeaderField name="financePaidAmount" label={labels.financePaidAmount} type="number" defaultValue={h.financePaidAmount} required min="1" step="1" error={errorFor('financePaidAmount')} />
         ) : null}
         {financeMode === 'PAID' || financeMode === 'PARTIAL' ? (
           <>
             <HeaderSelect name="financePaymentMethod" label={labels.paymentMethod} options={paymentMethodOptions ?? []} defaultValue={h.financePaymentMethod} />
-            <HeaderField name="financePaymentDate" label={labels.paymentDate} type="date" defaultValue={h.financePaymentDate || h.placedAt} required />
+            <HeaderField name="financePaymentDate" label={labels.paymentDate} type="date" defaultValue={h.financePaymentDate || h.placedAt} required error={errorFor('financePaymentDate')} />
           </>
         ) : null}
         {financeMode === 'CREDIT' ? (
-          <HeaderField name="financeDueDate" label={labels.paymentDueDate} type="date" defaultValue={h.financeDueDate || h.placedAt} required />
+          <HeaderField name="financeDueDate" label={labels.paymentDueDate} type="date" defaultValue={h.financeDueDate || h.placedAt} required error={errorFor('financeDueDate')} />
         ) : null}
       </div>
 
-      <div className="rounded-[var(--radius)] border bg-card p-4">
+      <div className={cn('rounded-[var(--radius)] border bg-card p-4', errorFor('lines') && 'border-danger')}>
         <div className="mb-2 flex items-center justify-between">
           <div>
             <h3 className="text-sm font-semibold">{labels.items}</h3>
@@ -404,7 +550,7 @@ export function OrderForm({
               <div className="flex flex-col gap-1">
                 <label className={rowLabel(i === 0)}>{labels.variation ?? labels.sku}</label>
                 {catalog.length ? (
-                  <select value={l.sku} onChange={(e) => pickVariation(i, e.target.value)} className={input} required data-order-line-sku={i}>
+                  <select value={l.sku} onChange={(e) => pickVariation(i, e.target.value)} className={cn(input, errorFor('lines') && inputError)} required data-order-line-sku={i}>
                     <option value="">—</option>
                     {catalogByGroup.map(([group, items]) => (
                       <optgroup key={group} label={group}>
@@ -429,15 +575,15 @@ export function OrderForm({
               </div>
               <div className="flex flex-col gap-1">
                 <label className={rowLabel(i === 0)}>{labels.qty}</label>
-                <input type="number" value={l.quantity} onChange={(e) => setLine(i, 'quantity', e.target.value)} className={input} required min="1" step="1" data-order-line-quantity={i} />
+                <input type="number" value={l.quantity} onChange={(e) => setLine(i, 'quantity', e.target.value)} className={cn(input, errorFor('lines') && inputError)} required min="1" step="1" data-order-line-quantity={i} />
               </div>
               <div className="flex flex-col gap-1">
                 <label className={rowLabel(i === 0)}>{labels.unitPrice}</label>
-                <input type="number" value={l.unitGrossPrice} onChange={(e) => setLine(i, 'unitGrossPrice', e.target.value)} className={input} required min="0" step="1" data-order-line-price={i} />
+                <input type="number" value={l.unitGrossPrice} onChange={(e) => setLine(i, 'unitGrossPrice', e.target.value)} className={cn(input, errorFor('lines') && inputError)} required min="0" step="1" data-order-line-price={i} />
               </div>
               <div className="flex flex-col gap-1">
                 <label className={rowLabel(i === 0)}>{labels.discount}</label>
-                <input type="number" value={l.lineDiscount} onChange={(e) => setLine(i, 'lineDiscount', e.target.value)} className={input} required min="0" step="1" data-order-line-discount={i} />
+                <input type="number" value={l.lineDiscount} onChange={(e) => setLine(i, 'lineDiscount', e.target.value)} className={cn(input, errorFor('lines') && inputError)} required min="0" step="1" data-order-line-discount={i} />
               </div>
               <button
                 type="button"
@@ -450,6 +596,7 @@ export function OrderForm({
             </div>
           ))}
         </div>
+        {errorFor('lines') ? <p className="mt-2 text-xs font-medium text-danger">{errorFor('lines')}</p> : null}
 
         <div className="mt-3 grid gap-2 border-t pt-3 sm:max-w-sm">
           <div className="flex flex-col gap-1">
@@ -486,7 +633,12 @@ export function OrderForm({
         </div>
       </div>
 
-      {state?.error ? <p className="text-sm font-medium text-danger" data-order-error>{errors[state.error] ?? state.error}</p> : null}
+      {state?.error ? (
+        <div ref={errorRef} className="rounded-lg border border-danger/35 bg-danger/10 p-3 text-sm font-medium text-danger" data-order-error>
+          <p>{state.formError ? errors[state.formError] ?? state.formError : errors[state.error] ?? state.error}</p>
+          {state.debugId ? <p className="mt-1 text-xs font-normal opacity-80">Debug ID: {state.debugId}</p> : null}
+        </div>
+      ) : null}
 
       <div className="flex flex-col gap-3 rounded-[var(--radius)] border bg-card p-3 shadow-sm sm:flex-row sm:flex-wrap sm:items-center">
         <div className="me-auto">

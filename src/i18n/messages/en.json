@@ -472,7 +472,11 @@
       "account": "Choose the payment account for paid or partially paid orders.",
       "partial": "Partial payment must be more than 0 and less than the order total.",
       "customer": "Choose an existing customer or create the customer first.",
-      "create_failed": "Could not create the order. Please review the fields and try again."
+      "create_failed": "Could not create the order. Please review the fields and try again.",
+      "order_create_failed": "The order details could not be saved. Try again or share the debug ID with support.",
+      "stock_sync_failed": "The order was blocked while updating stock. Check the selected items.",
+      "finance_sync_failed": "The order was blocked while creating the payment or receivable record. Review the payment section.",
+      "customer_stats_failed": "The order was blocked while updating the customer history. Choose the customer again or try another customer."
     },
     "entities": {
       "products": "Products",
@@ -637,6 +641,11 @@
       "orderNumberGenerated": "Generated after saving",
       "searchCustomer": "Search by name, phone, or customer ID",
       "selectCustomer": "Select customer",
+      "customerPickerTitle": "Select customer",
+      "customerPickerHint": "Search and choose the customer for this order.",
+      "clearCustomer": "Clear customer",
+      "noCustomersFound": "No customers found. Create the customer or change the search.",
+      "done": "Done",
       "createCustomer": "Create customer",
       "paymentTitle": "Payment and finance",
       "paymentHint": "Paid now updates cash or bank. Create receivable keeps the amount due for later collection.",

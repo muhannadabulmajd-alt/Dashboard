@@ -48,6 +48,11 @@ export default async function NewOrderPage({
     orderNumberGenerated: t('orderForm.orderNumberGenerated'),
     searchCustomer: t('orderForm.searchCustomer'),
     selectCustomer: t('orderForm.selectCustomer'),
+    customerPickerTitle: t('orderForm.customerPickerTitle'),
+    customerPickerHint: t('orderForm.customerPickerHint'),
+    clearCustomer: t('orderForm.clearCustomer'),
+    noCustomersFound: t('orderForm.noCustomersFound'),
+    done: t('orderForm.done'),
     createCustomer: t('orderForm.createCustomer'),
     saving: t('create'),
     customerName: t('f.name'),
@@ -103,6 +108,10 @@ export default async function NewOrderPage({
     partial: t('err.partial'),
     customer: t('err.customer'),
     create_failed: t('err.create_failed'),
+    order_create_failed: t('err.order_create_failed'),
+    stock_sync_failed: t('err.stock_sync_failed'),
+    finance_sync_failed: t('err.finance_sync_failed'),
+    customer_stats_failed: t('err.customer_stats_failed'),
   };
 
   return (

@@ -31,6 +31,17 @@ type LineData = {
   unitCogsSnapshot: number;
 };
 
+type OrderCreateStage =
+  | 'validation'
+  | 'customer_lookup'
+  | 'product_lookup'
+  | 'branch_lookup'
+  | 'order_number'
+  | 'order_insert'
+  | 'stock_sync'
+  | 'finance_sync'
+  | 'customer_stats';
+
 const headerSchema = z.object({
   orderNumber: z.string().optional(),
   placedAt: z.coerce.date(),
@@ -101,44 +112,67 @@ function orderActionError(error: unknown, context: Record<string, unknown>) {
   });
 }
 
-function headerErrorCode(result: ReturnType<typeof parseHeader>): string {
-  if (result.success) return 'invalid';
+function headerActionError(result: ReturnType<typeof parseHeader>): NonNullable<ActionState> {
+  if (result.success) return { error: 'invalid' };
   const paths = result.error.issues.map((issue) => issue.path.join('.'));
-  if (paths.some((path) => path === 'placedAt')) return 'date';
-  if (paths.some((path) => path === 'financePaidAmount')) return 'partial';
-  if (paths.some((path) => path === 'financeAccountId')) return 'account';
-  return 'invalid';
+  if (paths.some((path) => path === 'placedAt')) return { error: 'date', fieldErrors: { placedAt: 'date' } };
+  if (paths.some((path) => path === 'financePaidAmount')) return { error: 'partial', fieldErrors: { financePaidAmount: 'partial' } };
+  if (paths.some((path) => path === 'financeAccountId')) return { error: 'account', fieldErrors: { financeAccountId: 'account' } };
+  const fieldErrors = Object.fromEntries(paths.filter(Boolean).map((path) => [path, 'invalid']));
+  return { error: 'invalid', fieldErrors };
 }
 
-function lineErrorCode(result: ReturnType<typeof lineSchema.safeParse>): string {
-  if (result.success) return 'invalid';
+function lineActionError(result: ReturnType<typeof lineSchema.safeParse>): NonNullable<ActionState> {
+  if (result.success) return { error: 'invalid' };
   const paths = result.error.issues.map((issue) => issue.path.join('.'));
-  if (paths.some((path) => path.endsWith('.sku'))) return 'sku';
-  if (paths.some((path) => path.endsWith('.quantity'))) return 'quantity';
-  if (paths.some((path) => path.endsWith('.unitGrossPrice') || path.endsWith('.lineDiscount'))) return 'price';
-  return 'nolines';
+  if (paths.some((path) => path.endsWith('.sku'))) return { error: 'sku', fieldErrors: { lines: 'sku' } };
+  if (paths.some((path) => path.endsWith('.quantity'))) return { error: 'quantity', fieldErrors: { lines: 'quantity' } };
+  if (paths.some((path) => path.endsWith('.unitGrossPrice') || path.endsWith('.lineDiscount'))) {
+    return { error: 'price', fieldErrors: { lines: 'price' } };
+  }
+  return { error: 'nolines', fieldErrors: { lines: 'nolines' } };
+}
+
+function createOrderFailure(stage: OrderCreateStage, error: unknown, context: Record<string, unknown>): NonNullable<ActionState> {
+  const debugId = `order-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  orderActionError(error, { ...context, stage, debugId });
+  if (stage === 'order_number' || stage === 'order_insert') {
+    return { error: 'order_create_failed', formError: 'order_create_failed', stage, debugId };
+  }
+  if (stage === 'stock_sync') {
+    return { error: 'stock_sync_failed', formError: 'stock_sync_failed', fieldErrors: { lines: 'stock_sync_failed' }, stage, debugId };
+  }
+  if (stage === 'finance_sync') {
+    return { error: 'finance_sync_failed', formError: 'finance_sync_failed', fieldErrors: { financeMode: 'finance_sync_failed' }, stage, debugId };
+  }
+  if (stage === 'customer_stats') {
+    return { error: 'customer_stats_failed', formError: 'customer_stats_failed', fieldErrors: { customerExternalId: 'customer_stats_failed' }, stage, debugId };
+  }
+  return { error: 'create_failed', formError: 'create_failed', stage, debugId };
 }
 
 export async function createOrder(_prev: ActionState, fd: FormData): Promise<ActionState> {
   const user = await requireCap(CAP);
   if (!user) return { error: 'forbidden' };
   const h = parseHeader(fd);
-  if (!h.success) return { error: headerErrorCode(h) };
+  if (!h.success) return headerActionError(h);
 
   let rawLines: unknown;
   try {
     rawLines = JSON.parse(reqField(fd, 'lines') || '[]');
   } catch {
-    return { error: 'nolines' };
+    return { error: 'nolines', fieldErrors: { lines: 'nolines' } };
   }
   const parsedLines = lineSchema.safeParse(rawLines);
-  if (!parsedLines.success) return { error: lineErrorCode(parsedLines) };
-  if (parsedLines.data.length === 0) return { error: 'nolines' };
+  if (!parsedLines.success) return lineActionError(parsedLines);
+  if (parsedLines.data.length === 0) return { error: 'nolines', fieldErrors: { lines: 'nolines' } };
 
   const locale = reqField(fd, 'locale') || 'ar';
   if (h.data.orderNumber && await prisma.order.findUnique({ where: { orderNumber: h.data.orderNumber }, select: { id: true } }))
-    return { error: 'exists' };
-  if ((h.data.financeMode === 'PAID' || h.data.financeMode === 'PARTIAL') && !h.data.financeAccountId) return { error: 'account' };
+    return { error: 'exists', fieldErrors: { orderNumber: 'exists' } };
+  if ((h.data.financeMode === 'PAID' || h.data.financeMode === 'PARTIAL') && !h.data.financeAccountId) {
+    return { error: 'account', fieldErrors: { financeAccountId: 'account' } };
+  }
   const statusRoles = await getOrderStatusRoleMap();
   const statusRole = statusRoles.get(h.data.status) ?? 'UNKNOWN';
   const saleStatuses = [...statusRoles].filter(([, role]) => role === 'SALE').map(([code]) => code);
@@ -150,7 +184,7 @@ export async function createOrder(_prev: ActionState, fd: FormData): Promise<Act
       where: { sku: l.sku },
       select: { id: true, cogsPerUnit: true, sellUnit: true },
     });
-    if (!product) return { error: 'sku' };
+    if (!product) return { error: 'sku', fieldErrors: { lines: 'sku' } };
     lineData.push({
       productId: product.id,
       sku: l.sku,
@@ -166,22 +200,25 @@ export async function createOrder(_prev: ActionState, fd: FormData): Promise<Act
   const customer = h.data.customerExternalId
     ? await prisma.customer.findUnique({
         where: { externalId: h.data.customerExternalId },
-        select: { id: true },
-      })
+      select: { id: true },
+    })
     : null;
-  if (h.data.customerExternalId && !customer) return { error: 'customer' };
+  if (h.data.customerExternalId && !customer) return { error: 'customer', fieldErrors: { customerExternalId: 'customer' } };
   const branch = await prisma.branch.findFirst({ orderBy: { createdAt: 'asc' }, select: { id: true } });
   const gross = lineData.reduce((s, l) => s + l.unitGrossPrice * l.quantity, 0);
   const discount = lineData.reduce((s, l) => s + l.lineDiscount, 0) + h.data.orderDiscount;
   const total = Math.max(0, gross - discount + h.data.deliveryFee + h.data.extraCharges);
   if (h.data.financeMode === 'PARTIAL' && (!h.data.financePaidAmount || h.data.financePaidAmount <= 0 || h.data.financePaidAmount >= total)) {
-    return { error: 'partial' };
+    return { error: 'partial', fieldErrors: { financePaidAmount: 'partial' } };
   }
 
   let order: { id: string; orderNumber: string };
+  let stage: OrderCreateStage = 'order_number';
   try {
     order = await prisma.$transaction(async (tx) => {
+      stage = 'order_number';
       const orderNumber = await generateOrderNumber(tx, h.data.placedAt, h.data.channel);
+      stage = 'order_insert';
       const o = await tx.order.create({
         data: {
           orderNumber,
@@ -206,7 +243,9 @@ export async function createOrder(_prev: ActionState, fd: FormData): Promise<Act
       });
       // Only statuses mapped as completed sales consume stock. Changing the role
       // on a later edit reverses or reapplies the linked movements atomically.
+      stage = 'stock_sync';
       if (statusRole === 'SALE') await applySoldMovements(tx, o.id, h.data.placedAt, lineData);
+      stage = 'finance_sync';
       await syncOrderFinance(tx, o.id, {
         mode: h.data.financeMode as FinanceSyncMode,
         accountId: h.data.financeAccountId,
@@ -217,19 +256,21 @@ export async function createOrder(_prev: ActionState, fd: FormData): Promise<Act
         createdById: user.id,
         statusRole,
       });
+      stage = 'customer_stats';
       await syncCustomerStats(tx, customer?.id, saleStatuses);
       return { id: o.id, orderNumber: o.orderNumber };
     });
   } catch (error) {
-    orderActionError(error, {
-      stage: 'transaction',
+    return createOrderFailure(stage, error, {
       channel: h.data.channel,
+      customerExternalId: h.data.customerExternalId ?? null,
       status: h.data.status,
+      statusRole,
       financeMode: h.data.financeMode,
       lineCount: lineData.length,
+      skus: lineData.map((line) => line.sku),
       total,
     });
-    return { error: 'create_failed' };
   }
   // Stock consumption changed → roll each linked item's active FIFO cost (§8).
   try {
