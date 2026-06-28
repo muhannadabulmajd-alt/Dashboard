@@ -67,45 +67,6 @@ export function PartyStatementPdf({ data }: { data: PartyStatementData }) {
         <Text style={styles.muted}>
           {t.period}: {formatDate(data.range.start, locale)} - {formatDate(data.range.end, locale)}
         </Text>
-        <Text style={styles.muted}>
-          {[data.party.phone, data.party.email, data.party.address].filter(Boolean).join(' · ')}
-        </Text>
-
-        <View style={styles.grid}>
-          {[
-            [t.opening, data.opening],
-            [t.charges, data.charges],
-            [t.payments, data.payments],
-            [t.closing, data.closing],
-          ].map(([label, value]) => (
-            <View key={label} style={styles.box}>
-              <Text style={styles.boxLabel}>{label}</Text>
-              <Text style={styles.boxValue}>{formatMoney(Number(value), 'IQD', locale)}</Text>
-            </View>
-          ))}
-        </View>
-
-        <View style={styles.section}>
-          <View style={[styles.row, styles.head]}>
-            <Text style={styles.cDate}>{t.date}</Text>
-            <Text style={styles.cText}>{t.description}</Text>
-            <Text style={styles.cRef}>{t.reference}</Text>
-            <Text style={styles.cMoney}>{t.charge}</Text>
-            <Text style={styles.cMoney}>{t.payment}</Text>
-            <Text style={styles.cMoney}>{t.balance}</Text>
-          </View>
-          {data.entries.map((entry) => (
-            <View key={entry.id} style={styles.row} wrap={false}>
-              <Text style={styles.cDate}>{formatDate(entry.date, locale)}</Text>
-              <Text style={styles.cText}>{entry.description}</Text>
-              <Text style={styles.cRef}>{entry.reference ?? ''}</Text>
-              <Text style={styles.cMoney}>{entry.charge ? formatMoney(entry.charge, 'IQD', locale) : ''}</Text>
-              <Text style={styles.cMoney}>{entry.payment ? formatMoney(entry.payment, 'IQD', locale) : ''}</Text>
-              <Text style={styles.cMoney}>{formatMoney(entry.balance, 'IQD', locale)}</Text>
-            </View>
-          ))}
-        </View>
-        <View style={styles.footer} fixed><Text>LAHEEB ATLAS</Text><Text render={({ pageNumber, totalPages }) => `${pageNumber} / ${totalPages}`} /></View>
       </Page>
     </Document>
   );
