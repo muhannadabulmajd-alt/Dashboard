@@ -1,6 +1,7 @@
 import { PrismaClient, type Prisma } from '@prisma/client';
 import { faker } from '@faker-js/faker';
 import bcrypt from 'bcryptjs';
+import { formatProductBarcode } from '../src/lib/barcode';
 import { subDays, addDays, startOfMonth, eachMonthOfInterval } from 'date-fns';
 
 const prisma = new PrismaClient();
@@ -170,6 +171,7 @@ async function seedProducts(): Promise<SeededProduct[]> {
         data.push({
           id: `prod_${n}`,
           sku: `LH-${c.code}-${size.code}-${g.code}`,
+          barcodeValue: formatProductBarcode(n),
           nameEn: `${c.en} ${size.label}`,
           nameAr: `${c.ar} ${size.label}`,
           productLine: c.line as Prisma.ProductCreateManyInput['productLine'],
@@ -195,6 +197,7 @@ async function seedProducts(): Promise<SeededProduct[]> {
     data.push({
       id: `prod_${n}`,
       sku: `LH-DRIP-${v.code}-10-NA`,
+      barcodeValue: formatProductBarcode(n),
       nameEn: `${v.en} (10 sachets)`,
       nameAr: `${v.ar} (10 أكياس)`,
       productLine: 'DRIP_BAGS',
@@ -217,6 +220,7 @@ async function seedProducts(): Promise<SeededProduct[]> {
     data.push({
       id: `prod_${n}`,
       sku: `LH-ACC-${a.code}-NA-NA`,
+      barcodeValue: formatProductBarcode(n),
       nameEn: a.en,
       nameAr: a.ar,
       productLine: 'ACCESSORIES',

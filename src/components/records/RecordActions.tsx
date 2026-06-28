@@ -1,6 +1,7 @@
 'use client';
 
 import { Pencil, Archive, ArchiveRestore, Trash2 } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { Link } from '@/i18n/navigation';
 
 const btn =
@@ -16,12 +17,14 @@ export function RecordActions({
   archiveAction,
   deleteAction,
   labels,
+  children,
 }: {
   editHref?: string;
   isActive?: boolean;
   archiveAction?: () => Promise<void>;
   deleteAction?: () => Promise<void>;
   labels: { edit: string; archive: string; restore: string; delete: string; confirm: string };
+  children?: ReactNode;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -57,6 +60,7 @@ export function RecordActions({
           </button>
         </form>
       ) : null}
+      {children}
     </div>
   );
 }
