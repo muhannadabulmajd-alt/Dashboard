@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
-import { Plus } from 'lucide-react';
+import { Barcode, Plus } from 'lucide-react';
 import { getPageContext } from '@/server/page-context';
 import { prisma } from '@/server/db/client';
 import { enumLabel } from '@/lib/enums';
@@ -91,7 +91,12 @@ export default async function ProductDetailPage({
         archiveAction={archiveProduct.bind(null, p.id, locale, !p.isActive)}
         deleteAction={deleteProduct.bind(null, p.id, locale)}
         labels={{ edit: t('edit'), archive: t('archive'), restore: t('restore'), delete: t('delete'), confirm: t('confirmDelete') }}
-      />
+      >
+        <Link href={`${base}/label`} className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium hover:bg-muted">
+          <Barcode className="size-3.5" />
+          {t('label.action')}
+        </Link>
+      </RecordActions>
       <RecordTabs tabs={tabs} active={tab} />
 
       {tab === 'overview' ? (

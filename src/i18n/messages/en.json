@@ -422,6 +422,13 @@
     "setStockQuantityHint": "Owner/Admin only. Enter the counted total; the system records an audited adjustment and refreshes every inventory total.",
     "setStockQuantitySubmit": "Update quantity",
     "ungrouped": "Ungrouped",
+    "label": {
+      "action": "Label",
+      "title": "SKU barcode label",
+      "subtitle": "60mm × 30mm black sticker generated from the live product details.",
+      "print": "Print",
+      "downloadPdf": "Download PDF"
+    },
     "k": {
       "total": "Total",
       "revenue": "Net revenue",

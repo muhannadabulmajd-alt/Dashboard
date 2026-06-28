@@ -203,9 +203,14 @@ async function VariationsView({
     enumLabel(p.grind, locale),
     formatMoney(p.sellingPrice, p.sellingCurrency, locale),
     <Badge key="s" variant={p.isActive ? 'success' : 'muted'}>{p.isActive ? t('f.active') : t('f.inactive')}</Badge>,
-    <Link key="o" href={`/admin/records/products/${p.id}`} className="font-medium text-primary hover:underline">
-      {t('open')}
-    </Link>,
+    <span key="o" className="inline-flex flex-wrap items-center justify-end gap-3">
+      <Link href={`/admin/records/products/${p.id}/label`} className="font-medium text-primary hover:underline">
+        {t('label.action')}
+      </Link>
+      <Link href={`/admin/records/products/${p.id}`} className="font-medium text-primary hover:underline">
+        {t('open')}
+      </Link>
+    </span>,
   ]);
 
   return (

@@ -324,6 +324,7 @@ model Branch {
 model Product {
   id                 String      @id @default(cuid())
   sku                String      @unique
+  barcodeValue       String      @unique
   nameEn             String
   nameAr             String
   productLine        ProductLine

@@ -7,6 +7,7 @@ import {
   formatOrderNumber,
   laheebDateKey,
 } from '@/lib/numbering';
+import { formatProductBarcode, parseProductBarcodeSequence } from '@/lib/barcode';
 
 type Tx = Prisma.TransactionClient;
 
@@ -45,4 +46,17 @@ export async function generateCustomerExternalId(tx: Tx, createdAt: Date = new D
   });
   const sequence = nextSequence(rows.map((row) => row.externalId), new RegExp(`^${CUSTOMER_PREFIX}-${dateKey}-(\\d{4})$`));
   return formatCustomerExternalId(createdAt, sequence);
+}
+
+export async function generateProductBarcode(tx: Tx): Promise<string> {
+  await tx.$queryRaw<{ locked: number }[]>`
+    SELECT 1 AS locked
+    WHERE pg_advisory_xact_lock(hashtext('laheeb-product-barcode')) IS NULL
+  `;
+  const rows = await tx.product.findMany({
+    where: { barcodeValue: { startsWith: 'LHB' } },
+    select: { barcodeValue: true },
+  });
+  const max = rows.reduce((current, row) => Math.max(current, parseProductBarcodeSequence(row.barcodeValue) ?? 0), 0);
+  return formatProductBarcode(max + 1);
 }

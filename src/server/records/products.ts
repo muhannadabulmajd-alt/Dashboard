@@ -7,6 +7,7 @@ import { prisma } from '@/server/db/client';
 import { PRODUCT_LINES } from '@/lib/enums';
 import { decimalNumber, roundMoney } from '@/lib/decimal';
 import { requireCap, audit, reqField, optField, type ActionState } from './shared';
+import { generateProductBarcode } from './numbering';
 
 const LIST = '/[locale]/(dashboard)/admin/records/products';
 const CAP = 'manage:products' as const;
@@ -62,7 +63,10 @@ export async function createProduct(_prev: ActionState, fd: FormData): Promise<A
   const locale = reqField(fd, 'locale') || 'ar';
   if (await prisma.product.findUnique({ where: { sku: r.data.sku }, select: { id: true } }))
     return { error: 'exists' };
-  const p = await prisma.product.create({ data: withGroup(r.data) });
+  const p = await prisma.$transaction(async (tx) => {
+    const barcodeValue = await generateProductBarcode(tx);
+    return tx.product.create({ data: { ...withGroup(r.data), barcodeValue } });
+  });
   await audit(user.id, 'CREATE', 'Product', { sku: r.data.sku });
   revalidatePath(LIST, 'page');
   redirect(`/${locale}/admin/records/products/${p.id}`);
