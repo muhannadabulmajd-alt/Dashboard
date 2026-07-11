@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils';
 import { Link } from '@/i18n/navigation';
 import type { ActionState } from '@/server/records/shared';
 
-type Option = { value: string; label: string };
+type Option = { value: string; label: string; type?: string };
 type InventoryOption = Option & { unit: string; category: string; name: string };
 type QuickCreateResult = { ok: true; id: string; label: string } | { ok: false; error: string };
 type CreateAction = (prev: ActionState, fd: FormData) => Promise<ActionState>;
@@ -55,7 +55,7 @@ export type CentralEntryInitial = {
   lines?: Partial<LedgerLineRow>[];
 };
 
-type RecordKind =
+export type RecordKind =
   | 'MONEY_IN'
   | 'MONEY_OUT'
   | 'STOCK_PURCHASE'
@@ -134,8 +134,10 @@ const COPY = {
     party: 'Person or company',
     supplier: 'Supplier',
     customer: 'Customer',
+    shareholder: 'Shareholder',
     addParty: 'Add person/company',
     addCustomer: 'Add customer',
+    addShareholder: 'Add shareholder',
     paymentMode: 'Payment status',
     paidNow: 'Paid now',
     payLater: 'Pay later',
@@ -206,8 +208,10 @@ const COPY = {
     party: 'الشخص أو الشركة',
     supplier: 'المورّد',
     customer: 'العميل',
+    shareholder: 'المساهم',
     addParty: 'إضافة شخص/شركة',
     addCustomer: 'إضافة عميل',
+    addShareholder: 'إضافة مساهم',
     paymentMode: 'حالة الدفع',
     paidNow: 'مدفوع الآن',
     payLater: 'دفع لاحق',
@@ -421,8 +425,19 @@ export function CentralEntryPanel({
   const paidNow = paymentMode === 'PAID' ? purchaseTotal : moneyNumber(paidAmount);
   const remaining = paymentMode === 'CREDIT' ? purchaseTotal : Math.max(0, purchaseTotal - paidNow);
   const paidTooMuch = paymentMode === 'PARTIAL' && paidNow >= purchaseTotal && purchaseTotal > 0;
+  const shareholderRecord = ['CAPITAL_IN', 'DRAWING'].includes(recordKind);
+  const partyKind = shareholderRecord
+    ? 'SHAREHOLDER'
+    : recordKind === 'CUSTOMER_DUE'
+      ? 'CUSTOMER'
+      : ['STOCK_PURCHASE', 'ASSET_PURCHASE', 'SUPPLIER_DUE'].includes(recordKind)
+        ? 'SUPPLIER'
+        : null;
+  const visiblePartyOptions = partyKind
+    ? partyOptions.filter((option) => !option.type || option.type === partyKind)
+    : partyOptions;
   const showPaidAccount = !['CUSTOMER_DUE', 'SUPPLIER_DUE'].includes(recordKind) && (recordKind !== 'STOCK_PURCHASE' && recordKind !== 'ASSET_PURCHASE' || paymentMode === 'PAID' || paymentMode === 'PARTIAL');
-  const showParty = ['STOCK_PURCHASE', 'ASSET_PURCHASE', 'CUSTOMER_DUE', 'SUPPLIER_DUE', 'MONEY_IN', 'MONEY_OUT'].includes(recordKind);
+  const showParty = ['STOCK_PURCHASE', 'ASSET_PURCHASE', 'CUSTOMER_DUE', 'SUPPLIER_DUE', 'MONEY_IN', 'MONEY_OUT', 'CAPITAL_IN', 'DRAWING'].includes(recordKind);
 
   function updateLine(id: string, patch: Partial<LedgerLineRow>) {
     setLines((current) => current.map((row) => (row.id === id ? { ...row, ...patch } : row)));
@@ -460,11 +475,22 @@ export function CentralEntryPanel({
         setQuickError(result.error);
         return;
       }
-      setPartyOptions((current) => [...current, { value: result.id, label: result.label }].sort((a, b) => a.label.localeCompare(b.label)));
+      const createdType = popup === 'customer' ? 'CUSTOMER' : popupData.type;
+      setPartyOptions((current) => [...current, { value: result.id, label: result.label, type: createdType }].sort((a, b) => a.label.localeCompare(b.label)));
       setPartyId(result.id);
       setPopup(null);
       setPopupData({ name: '', nameAr: '', type: 'SUPPLIER', phone: '', email: '', address: '' });
     });
+  }
+
+  function openPartyPopup(type = 'SUPPLIER') {
+    setPopupData((data) => ({ ...data, type }));
+    setPopup('party');
+  }
+
+  function selectRecordKind(kind: RecordKind) {
+    setRecordKind(kind);
+    if (kind !== recordKind) setPartyId('');
   }
 
   return (
@@ -482,7 +508,7 @@ export function CentralEntryPanel({
               <button
                 key={kind}
                 type="button"
-                onClick={() => setRecordKind(kind)}
+                onClick={() => selectRecordKind(kind)}
                 className={cn(
                   'rounded-lg border px-3 py-2 text-start text-sm font-semibold transition',
                   recordKind === kind ? 'border-primary bg-primary text-primary-foreground' : 'border-border/80 bg-background hover:bg-linen/45',
@@ -562,20 +588,22 @@ export function CentralEntryPanel({
           <div className="grid gap-3 rounded-lg border border-border/80 bg-background/55 p-3 md:grid-cols-[1fr_auto_auto]">
             <SelectField
               name="partyId"
-              labelText={recordKind === 'CUSTOMER_DUE' ? c.customer : recordKind === 'SUPPLIER_DUE' || recordKind === 'STOCK_PURCHASE' ? c.supplier : c.party}
-              options={partyOptions}
+              labelText={recordKind === 'CUSTOMER_DUE' ? c.customer : shareholderRecord ? c.shareholder : recordKind === 'SUPPLIER_DUE' || recordKind === 'STOCK_PURCHASE' ? c.supplier : c.party}
+              options={visiblePartyOptions}
               value={partyId}
               onChange={setPartyId}
-              required={['CUSTOMER_DUE', 'SUPPLIER_DUE'].includes(recordKind)}
+              required={['CUSTOMER_DUE', 'SUPPLIER_DUE', 'CAPITAL_IN', 'DRAWING'].includes(recordKind)}
             />
-            <button type="button" onClick={() => setPopup('party')} className="self-end rounded-lg border px-3 py-2 text-sm font-semibold hover:bg-muted max-md:w-full">
+            <button type="button" onClick={() => openPartyPopup(partyKind ?? 'SUPPLIER')} className="self-end rounded-lg border px-3 py-2 text-sm font-semibold hover:bg-muted max-md:w-full">
               <Plus className="me-1 inline size-4" />
-              {c.addParty}
+              {shareholderRecord ? c.addShareholder : c.addParty}
             </button>
-            <button type="button" onClick={() => setPopup('customer')} className="self-end rounded-lg border px-3 py-2 text-sm font-semibold hover:bg-muted max-md:w-full">
-              <Plus className="me-1 inline size-4" />
-              {c.addCustomer}
-            </button>
+            {shareholderRecord ? null : (
+              <button type="button" onClick={() => setPopup('customer')} className="self-end rounded-lg border px-3 py-2 text-sm font-semibold hover:bg-muted max-md:w-full">
+                <Plus className="me-1 inline size-4" />
+                {c.addCustomer}
+              </button>
+            )}
           </div>
         ) : null}
 

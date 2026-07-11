@@ -5,6 +5,7 @@ import { PageHeader } from '@/components/ui/primitives';
 import { RecordForm } from '@/components/records/form';
 import { BackLink } from '@/components/records/parts';
 import { createParty } from '@/server/finance/parties';
+import { PARTY_TYPES } from '@/lib/enums';
 import { partyFields } from '../_fields';
 
 export default async function NewPartyPage({
@@ -15,6 +16,9 @@ export default async function NewPartyPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { locale } = await getPageContext(params, searchParams, 'manage:finance');
+  const rawParams = await searchParams;
+  const typeParam = Array.isArray(rawParams.type) ? rawParams.type[0] : rawParams.type;
+  const initialType = PARTY_TYPES.includes(typeParam as (typeof PARTY_TYPES)[number]) ? typeParam : undefined;
   const t = await getTranslations('finance');
   const tr = await getTranslations('records');
   const tk = (k: string) => t(k);
@@ -29,6 +33,7 @@ export default async function NewPartyPage({
       <RecordForm
         action={createParty}
         fields={partyFields(tk, locale, branchOptions)}
+        initial={{ type: initialType }}
         locale={locale}
         submitLabel={tr('create')}
         cancelHref="/finance/parties"

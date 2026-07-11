@@ -5,6 +5,7 @@ import {
   Package,
   Plus,
   TrendingDown,
+  UsersRound,
   Wallet,
 } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
@@ -220,17 +221,26 @@ export default async function FinancePage({
 
   return (
     <>
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <PageHeader title={t('title')} subtitle={t('subtitle')} eyebrow={t('commandCenter')} />
-        {canManage ? (
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
           <Link
-            href="/finance/ledger/new"
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:bg-amber/90"
+            href="/finance/shareholders"
+            className="inline-flex min-h-10 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-border/80 bg-card px-3 py-2 text-sm font-semibold text-roast hover:bg-linen/45"
           >
-            <Plus className="size-4" />
-            {t('recordEntry')}
+            <UsersRound className="size-4" />
+            {t('shareholders')}
           </Link>
-        ) : null}
+          {canManage ? (
+            <Link
+              href="/finance/ledger/new"
+              className="inline-flex min-h-10 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:bg-amber/90"
+            >
+              <Plus className="size-4" />
+              {t('recordEntry')}
+            </Link>
+          ) : null}
+        </div>
       </div>
 
       {canManage ? <RateEditor action={setUsdToIqd} locale={locale} rate={rate} label={t('rate')} apply={t('apply')} /> : null}

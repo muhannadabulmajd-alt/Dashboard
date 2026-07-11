@@ -19,6 +19,7 @@ import type { Currency, ExpenseCategoryType, FinanceType, ObligationKind, Prisma
 const FINANCE = '/[locale]/(dashboard)/finance';
 const LEDGER = '/[locale]/(dashboard)/finance/ledger';
 const DUES = '/[locale]/(dashboard)/finance/dues';
+const SHAREHOLDERS = '/[locale]/(dashboard)/finance/shareholders';
 const INVENTORY = '/[locale]/(dashboard)/admin/records/inventory';
 const AUDIT = '/[locale]/(dashboard)/admin/audit';
 
@@ -278,6 +279,7 @@ function revalidateFinancePaths(): void {
   revalidatePath(FINANCE, 'page');
   revalidatePath(LEDGER, 'page');
   revalidatePath(DUES, 'page');
+  revalidatePath(SHAREHOLDERS, 'page');
   revalidatePath(INVENTORY, 'page');
   revalidatePath(AUDIT, 'page');
 }
@@ -310,6 +312,15 @@ function baseEntryData(
     reference: optField(fd, 'reference') ?? null,
     attachmentUrl: optField(fd, 'attachmentUrl') ?? null,
   };
+}
+
+async function requireActiveShareholder(tx: Tx, partyId: string | null): Promise<void> {
+  if (!partyId) throw new Error('invalid-shareholder');
+  const party = await tx.party.findUnique({
+    where: { id: partyId },
+    select: { type: true, isActive: true },
+  });
+  if (!party || party.type !== 'SHAREHOLDER' || !party.isActive) throw new Error('invalid-shareholder');
 }
 
 async function resolveInventoryItem(
@@ -841,6 +852,9 @@ export async function createCentralRecord(_prev: ActionState, fd: FormData): Pro
       throw new Error('invalid-account');
     }
     if (mapped.obligation && !optField(fd, 'partyId')) throw new Error('invalid-party');
+    if (mapped.type === 'CAPITAL_IN' || mapped.type === 'DRAWING') {
+      await requireActiveShareholder(tx, optField(fd, 'partyId') ?? null);
+    }
     const entry = await tx.financeEntry.create({
       data: {
         ...baseEntryData(fd, date, money, mapped.type, mapped.obligation, mapped.kind),

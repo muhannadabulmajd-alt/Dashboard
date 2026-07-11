@@ -12,6 +12,7 @@ import type { Prisma } from '@prisma/client';
 
 const HUB = '/[locale]/(dashboard)/finance';
 const LIST = '/[locale]/(dashboard)/finance/ledger';
+const SHAREHOLDERS = '/[locale]/(dashboard)/finance/shareholders';
 const CAP = 'manage:finance' as const;
 const entryAuditSelect = {
   date: true,
@@ -121,6 +122,17 @@ function toData(p: Parsed, obligation: boolean, fallbackRate: number) {
 }
 
 type AuditScalar = string | number | boolean | null;
+type EntryData = Exclude<ReturnType<typeof toData>, null>;
+
+async function validateCapitalParty(data: EntryData): Promise<boolean> {
+  if (data.type !== 'CAPITAL_IN' && data.type !== 'DRAWING') return true;
+  if (!data.partyId) return false;
+  const party = await prisma.party.findUnique({
+    where: { id: data.partyId },
+    select: { type: true, isActive: true },
+  });
+  return party?.type === 'SHAREHOLDER' && party.isActive;
+}
 
 function proportionalIntegers(total: number, weights: number[]): number[] {
   const weightTotal = weights.reduce((sum, value) => sum + Math.max(0, value), 0);
@@ -253,11 +265,13 @@ export async function createEntry(_prev: ActionState, fd: FormData): Promise<Act
   if (!res.success) return { error: 'invalid' };
   const data = toData(res.data, obligation, await getUsdToIqd());
   if (!data) return { error: 'invalid' };
+  if (!(await validateCapitalParty(data))) return { error: 'invalid' };
   const locale = reqField(fd, 'locale') || 'ar';
   const row = await prisma.financeEntry.create({ data: { ...data, createdById: user.id } });
   await audit(user.id, 'CREATE', 'FinanceEntry', { id: row.id, ...auditEntrySnapshot(data) });
   revalidatePath(HUB, 'page');
   revalidatePath(LIST, 'page');
+  revalidatePath(SHAREHOLDERS, 'page');
   redirect(`/${locale}/finance/ledger/${row.id}`);
 }
 
@@ -268,6 +282,7 @@ export async function updateEntry(id: string, _prev: ActionState, fd: FormData):
   if (!res.success) return { error: 'invalid' };
   const data = toData(res.data, obligation, await getUsdToIqd());
   if (!data) return { error: 'invalid' };
+  if (!(await validateCapitalParty(data))) return { error: 'invalid' };
   const locale = reqField(fd, 'locale') || 'ar';
   const before = await prisma.financeEntry.findUnique({ where: { id }, select: entryAuditSelect });
   if (!before) return { error: 'invalid' };
@@ -282,6 +297,7 @@ export async function updateEntry(id: string, _prev: ActionState, fd: FormData):
   });
   revalidatePath(HUB, 'page');
   revalidatePath(LIST, 'page');
+  revalidatePath(SHAREHOLDERS, 'page');
   redirect(`/${locale}/finance/ledger/${id}`);
 }
 
@@ -347,6 +363,7 @@ async function reverseEntryForUser(id: string, user: { id: string }, locale: str
   revalidatePath(HUB, 'page');
   revalidatePath(LIST, 'page');
   revalidatePath('/[locale]/(dashboard)/finance/dues', 'page');
+  revalidatePath(SHAREHOLDERS, 'page');
   redirect(`/${locale}/finance/ledger`);
 }
 
@@ -434,6 +451,7 @@ export async function settleEntry(
   revalidatePath(HUB, 'page');
   revalidatePath(LIST, 'page');
   revalidatePath('/[locale]/(dashboard)/finance/dues', 'page');
+  revalidatePath(SHAREHOLDERS, 'page');
   redirect(`/${locale}/finance/dues`);
 }
 
@@ -463,5 +481,6 @@ export async function assignImportedAccount(_prev: ActionState, fd: FormData): P
   await audit(user.id, 'ASSIGN_ACCOUNT', 'FinanceEntry', { accountId, currency: account.currency });
   revalidatePath(HUB, 'page');
   revalidatePath(LIST, 'page');
+  revalidatePath(SHAREHOLDERS, 'page');
   redirect(`/${locale}/finance/ledger`);
 }
