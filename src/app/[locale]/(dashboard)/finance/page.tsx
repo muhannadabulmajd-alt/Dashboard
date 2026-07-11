@@ -218,6 +218,58 @@ export default async function FinancePage({
     { label: t('opex'), value: spendTotals.opex, icon: TrendingDown, href: filteredHref(spendBase, filters, { bucket: 'opex' }), tone: 'danger' as const },
     { label: t('cogs'), value: spendTotals.cogs, icon: Package, href: filteredHref(spendBase, filters, { bucket: 'cogs' }), tone: 'warning' as const },
   ];
+  const controlLinks = [
+    {
+      label: t('openLedger'),
+      hint: t('ledgerControlHint'),
+      href: '/finance/ledger',
+      icon: Package,
+    },
+    ...(canManage
+      ? [{
+          label: t('recordEntry'),
+          hint: t('addRecordHint'),
+          href: '/finance/ledger/new',
+          icon: Plus,
+        }]
+      : []),
+    {
+      label: t('dues'),
+      hint: t('duesControlHint'),
+      href: '/finance/dues',
+      icon: Clock,
+    },
+    {
+      label: t('accounts'),
+      hint: t('accountsControlHint'),
+      href: '/finance/accounts',
+      icon: Wallet,
+    },
+    {
+      label: t('parties'),
+      hint: t('partiesControlHint'),
+      href: '/finance/parties',
+      icon: UsersRound,
+    },
+    {
+      label: t('shareholders'),
+      hint: t('shareholdersControlHint'),
+      href: '/finance/shareholders',
+      icon: HandCoins,
+    },
+    {
+      label: t('financeSpend'),
+      hint: t('spendControlHint'),
+      href: filteredHref(spendBase, filters, { bucket: 'opex' }),
+      icon: TrendingDown,
+    },
+    {
+      label: t('balanceSheet'),
+      hint: t('balanceSheetControlHint'),
+      href: '/balance-sheet',
+      icon: Package,
+    },
+  ];
 
   return (
     <>
@@ -244,6 +296,37 @@ export default async function FinancePage({
       </div>
 
       {canManage ? <RateEditor action={setUsdToIqd} locale={locale} rate={rate} label={t('rate')} apply={t('apply')} /> : null}
+
+      <Card variant="surface">
+        <CardHeader>
+          <div>
+            <CardTitle>{t('financeControlTitle')}</CardTitle>
+            <p className="mt-1 text-sm leading-5 text-muted-foreground">{t('financeControlSubtitle')}</p>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+            {controlLinks.map((item) => {
+              const Icon = item.icon;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className="group flex min-h-24 items-start gap-3 rounded-xl border border-border/75 bg-card p-3 text-start transition-colors hover:border-primary/45 hover:bg-linen/35"
+                >
+                  <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-linen/65 text-primary group-hover:bg-primary group-hover:text-primary-foreground">
+                    <Icon className="size-5" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-bold text-roast">{item.label}</span>
+                    <span className="mt-1 block text-xs leading-5 text-muted-foreground">{item.hint}</span>
+                  </span>
+                </Link>
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
 
       <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
         {cards.map((card) => (

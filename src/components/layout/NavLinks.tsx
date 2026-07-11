@@ -61,7 +61,7 @@ export interface NavGroup {
 }
 
 function isActive(href: string, pathname: string): boolean {
-  return href === '/' ? pathname === '/' : pathname.startsWith(href);
+  return href === '/' ? pathname === '/' : pathname === href || pathname.startsWith(`${href}/`);
 }
 
 function NavLinksInner({
@@ -75,6 +75,11 @@ function NavLinksInner({
   onNavigate?: () => void;
   tone?: 'light' | 'dark';
 }) {
+  const activeHref = groups
+    .flatMap((group) => group.items)
+    .filter((item) => isActive(item.href, pathname))
+    .sort((a, b) => b.href.length - a.href.length)[0]?.href;
+
   // A group starts open when it's a default-open group or holds the active page.
   const [open, setOpen] = useState<Record<string, boolean>>(() => {
     const o: Record<string, boolean> = {};
@@ -106,7 +111,7 @@ function NavLinksInner({
               <div className="flex flex-col gap-1">
                 {group.items.map((item) => {
                   const Icon = ICONS[item.icon] ?? LayoutDashboard;
-                  const active = isActive(item.href, pathname);
+                  const active = item.href === activeHref;
                   return (
                     <Link
                       key={item.href}
