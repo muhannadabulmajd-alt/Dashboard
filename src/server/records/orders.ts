@@ -20,6 +20,16 @@ const LEDGER = '/[locale]/(dashboard)/finance/ledger';
 const DUES = '/[locale]/(dashboard)/finance/dues';
 const CAP = 'manage:orders' as const;
 
+const bulkOrderSchema = z.object({
+  orderIds: z.array(z.string().min(1)).min(1).max(100),
+  operation: z.enum(['STATUS', 'RECORD_PAID', 'ASSIGN_PROVIDER']),
+  status: z.string().optional(),
+  accountId: z.string().optional(),
+  providerKey: z.enum(['HI_EXPRESS', 'WAYL']).optional(),
+  paymentMethod: z.string().optional(),
+  date: z.coerce.date().optional(),
+});
+
 type LineData = {
   productId: string;
   sku: string;
@@ -414,6 +424,134 @@ export async function deleteOrder(id: string, locale: string): Promise<void> {
   revalidatePath(LEDGER, 'page');
   revalidatePath(DUES, 'page');
   redirect(`/${locale}/admin/records/orders`);
+}
+
+export async function bulkUpdateOrders(_prev: ActionState, fd: FormData): Promise<ActionState> {
+  const user = await requireCap(CAP);
+  if (!user) return { error: 'forbidden' };
+  let ids: unknown;
+  try {
+    ids = JSON.parse(reqField(fd, 'orderIds') || '[]');
+  } catch {
+    return { error: 'invalid' };
+  }
+  const parsed = bulkOrderSchema.safeParse({
+    orderIds: ids,
+    operation: reqField(fd, 'operation'),
+    status: optField(fd, 'status'),
+    accountId: optField(fd, 'accountId'),
+    providerKey: optField(fd, 'providerKey'),
+    paymentMethod: optField(fd, 'paymentMethod'),
+    date: optField(fd, 'date'),
+  });
+  if (!parsed.success) return { error: 'invalid' };
+  const input = parsed.data;
+  if (input.operation === 'STATUS' && !input.status) return { error: 'status' };
+  if (input.operation === 'RECORD_PAID' && (!input.accountId || !input.date)) return { error: 'account' };
+  if (input.operation === 'ASSIGN_PROVIDER' && !input.providerKey) return { error: 'provider' };
+
+  const statusRoles = await getOrderStatusRoleMap();
+  const saleStatuses = [...statusRoles].filter(([, role]) => role === 'SALE').map(([code]) => code);
+  try {
+    const summary = await prisma.$transaction(async (tx) => {
+      const orders = await tx.order.findMany({
+        where: { id: { in: input.orderIds } },
+        include: { lines: { select: { productId: true, quantity: true } } },
+        orderBy: [{ placedAt: 'asc' }, { createdAt: 'asc' }],
+      });
+      if (orders.length !== input.orderIds.length) throw new Error('notfound');
+      const changedCustomers = new Set<string>();
+      let amountApplied = 0;
+
+      if (input.operation === 'STATUS') {
+        const nextRole = statusRoles.get(input.status as string) ?? 'UNKNOWN';
+        for (const order of orders) {
+          const oldRole = statusRoles.get(order.status) ?? 'UNKNOWN';
+          if (oldRole !== nextRole) {
+            await tx.stockMovement.deleteMany({ where: { orderId: order.id, reason: 'SOLD' } });
+            if (nextRole === 'SALE' && order.inventorySyncMode === 'NORMAL') {
+              await applySoldMovements(tx, order.id, order.placedAt, order.lines);
+            }
+          }
+          await tx.order.update({ where: { id: order.id }, data: { status: input.status } });
+          if (order.customerId) changedCustomers.add(order.customerId);
+        }
+      }
+
+      if (input.operation === 'ASSIGN_PROVIDER') {
+        const provider = await tx.party.findUnique({ where: { externalKey: input.providerKey }, select: { id: true } });
+        if (!provider) throw new Error('provider');
+        for (const order of orders) {
+          const updated = await tx.financeEntry.updateMany({
+            where: {
+              orderId: order.id,
+              obligation: true,
+              obligationKind: 'RECEIVABLE',
+              archivedAt: null,
+              reversedAt: null,
+              reversalOfId: null,
+            },
+            data: { partyId: provider.id },
+          });
+          if (!updated.count) throw new Error('receivable');
+        }
+      }
+
+      if (input.operation === 'RECORD_PAID') {
+        const account = await tx.financeAccount.findUnique({ where: { id: input.accountId }, select: { id: true, currency: true } });
+        if (!account || account.currency !== 'IQD') throw new Error('account');
+        for (const order of orders) {
+          const entries = await tx.financeEntry.findMany({
+            where: { OR: [{ orderId: order.id }, { settles: { is: { orderId: order.id } } }] },
+            select: { id: true, orderId: true, type: true, amount: true, obligation: true, obligationKind: true, settlesId: true, archivedAt: true, reversedAt: true, reversalOfId: true },
+          });
+          const payment = invoicePaymentSnapshot(order, entries);
+          if (payment.remaining <= 0) continue;
+          if (!payment.receivableIds.length) throw new Error('receivable');
+          const receivable = await tx.financeEntry.findUnique({ where: { id: payment.receivableIds[0] }, select: { partyId: true } });
+          await tx.financeEntry.create({
+            data: {
+              date: input.date as Date,
+              type: 'PAYMENT_IN',
+              amount: payment.remaining,
+              currency: 'IQD',
+              obligation: false,
+              accountId: account.id,
+              partyId: receivable?.partyId ?? null,
+              paymentMethod: input.paymentMethod ?? null,
+              settlesId: payment.receivableIds[0],
+              branchId: order.branchId,
+              orderId: order.id,
+              reference: order.orderNumber,
+              description: `Bulk order payment: ${order.orderNumber}`,
+              createdById: user.id,
+            },
+          });
+          amountApplied += payment.remaining;
+        }
+      }
+
+      for (const customerId of changedCustomers) await syncCustomerStats(tx, customerId, saleStatuses);
+      await tx.auditLog.create({
+        data: {
+          userId: user.id,
+          action: `BULK_ORDER_${input.operation}`,
+          entity: 'Order',
+          metadata: { orderIds: input.orderIds, count: orders.length, status: input.status ?? null, providerKey: input.providerKey ?? null, accountId: input.accountId ?? null, amountApplied },
+        },
+      });
+      return { count: orders.length, amountApplied };
+    }, { timeout: 60_000 });
+    await audit(user.id, 'BULK_ORDER_COMPLETE', 'Order', summary);
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'invalid' };
+  }
+
+  revalidatePath(LIST, 'page');
+  revalidatePath(FINANCE, 'page');
+  revalidatePath(LEDGER, 'page');
+  revalidatePath(DUES, 'page');
+  return { ok: true };
 }
 
 const invoicePaymentSchema = z.object({

@@ -238,6 +238,42 @@ async function main(): Promise<void> {
   });
 
   checks.push({
+    name: 'provider settlement arithmetic',
+    failures: await count`
+      SELECT COUNT(*) AS count
+      FROM "ProviderSettlement" s
+      WHERE s."grossCleared" <> s."amountReceived" + s."feesOffset"
+         OR s."grossCleared" < 0 OR s."amountReceived" < 0 OR s."feesOffset" < 0
+    `,
+  });
+
+  checks.push({
+    name: 'provider cash entry totals',
+    failures: await count`
+      SELECT COUNT(*) AS count FROM (
+        SELECT s.id
+        FROM "ProviderSettlement" s
+        LEFT JOIN "FinanceEntry" e ON e."providerSettlementId" = s.id
+          AND e.type = 'PAYMENT_IN' AND e."accountId" = s."accountId"
+          AND e."archivedAt" IS NULL AND e."reversedAt" IS NULL AND e."reversalOfId" IS NULL
+        WHERE s."reference" NOT LIKE 'RECON-20260712-HI-FEES'
+        GROUP BY s.id, s."amountReceived"
+        HAVING COALESCE(SUM(e.amount), 0) <> s."amountReceived"
+      ) mismatches
+    `,
+  });
+
+  checks.push({
+    name: 'historical orders do not move finished stock',
+    failures: await count`
+      SELECT COUNT(*) AS count
+      FROM "Order" o
+      JOIN "StockMovement" m ON m."orderId" = o.id AND m.reason = 'SOLD'
+      WHERE o."inventorySyncMode" = 'SKIP_HISTORICAL'
+    `,
+  });
+
+  checks.push({
     name: 'customer cached order statistics',
     failures: await count`
       SELECT COUNT(*) AS count

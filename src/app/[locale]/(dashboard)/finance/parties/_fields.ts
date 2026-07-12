@@ -7,6 +7,7 @@ export function partyFields(
   t: (key: string) => string,
   locale: AppLocale,
   branchOptions: { value: string; label: string }[],
+  accountOptions: { value: string; label: string }[],
 ): FieldDef[] {
   const opts = (vals: readonly string[]) => vals.map((v) => ({ value: v, label: enumLabel(v, locale) }));
   return [
@@ -18,6 +19,8 @@ export function partyFields(
     { name: 'branchId', label: t('f.branch'), type: 'select', options: branchOptions, hint: t('h.branch') },
     { name: 'openingPayable', label: t('f.openingPayable'), type: 'number', hint: t('h.openingPayable') },
     { name: 'openingReceivable', label: t('f.openingReceivable'), type: 'number', hint: t('h.openingReceivable') },
+    { name: 'defaultSettlementAccountId', label: t('f.defaultSettlementAccount'), type: 'select', options: accountOptions, hint: t('h.defaultSettlementAccount'), showWhen: { field: 'type', in: ['SERVICE_PROVIDER', 'SUPPLIER'] } },
+    { name: 'netFeesFromRemittance', label: t('f.netFeesFromRemittance'), type: 'checkbox', hint: t('h.netFeesFromRemittance'), showWhen: { field: 'type', in: ['SERVICE_PROVIDER', 'SUPPLIER'] } },
     { name: 'equityShare', label: t('f.equityShare'), type: 'number', step: '0.1', hint: t('h.equityShare') },
     { name: 'notes', label: t('f.notes'), type: 'text', hint: t('h.notes') },
   ];
