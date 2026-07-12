@@ -33,6 +33,7 @@ export default async function ProviderSettlementPage({
     { name: 'accountId', label: t('f.account'), type: 'select', required: true, options: accounts.map((account) => ({ value: account.id, label: account.name })) },
     { name: 'amountReceived', label: t('providerSettlement.received'), type: 'number', required: true, hint: t('providerSettlement.hint') },
     { name: 'paymentMethod', label: t('f.paymentMethod'), type: 'select', options: paymentMethods },
+    { name: 'reference', label: t('f.reference'), type: 'text', hint: t('providerSettlement.referenceHint') },
     { name: 'date', label: t('f.date'), type: 'date', required: true },
   ];
   return (

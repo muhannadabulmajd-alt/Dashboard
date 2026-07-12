@@ -224,6 +224,7 @@ model User {
   dashboards      Dashboard[]      @relation("DashboardOwner")
   dashboardShares DashboardShare[]
   auditLogs       AuditLog[]
+  providerSettlements ProviderSettlement[]
 
   @@index([role])
   @@index([branchId])
@@ -962,6 +963,8 @@ model FinanceAccount {
 
   entries   FinanceEntry[] @relation("AccountEntries")
   transfers FinanceEntry[] @relation("TransferTo")
+  providerSettlements ProviderSettlement[]
+  settlementParties Party[] @relation("PartyDefaultSettlementAccount")
 
   @@index([type])
 }
@@ -979,15 +982,43 @@ model Party {
   openingReceivable Int       @default(0)
   notes             String?
   equityShare       Float? // ownership % (shareholders)
+  defaultSettlementAccountId String?
+  netFeesFromRemittance Boolean @default(false)
   isActive          Boolean   @default(true)
   createdAt         DateTime  @default(now())
 
   entries     FinanceEntry[]
   fixedAssets FixedAsset[]
   shipments   Shipment[]
+  defaultSettlementAccount FinanceAccount? @relation("PartyDefaultSettlementAccount", fields: [defaultSettlementAccountId], references: [id], onDelete: SetNull)
+  providerSettlements ProviderSettlement[]
 
   @@index([type])
   @@index([branchId])
+  @@index([defaultSettlementAccountId])
+}
+
+model ProviderSettlement {
+  id             String   @id @default(cuid())
+  providerPartyId String
+  accountId      String
+  date           DateTime
+  grossCleared   Int
+  feesOffset     Int      @default(0)
+  amountReceived Int
+  paymentMethod  String?
+  reference      String?  @unique
+  createdById    String?
+  createdAt      DateTime @default(now())
+
+  provider Party @relation(fields: [providerPartyId], references: [id])
+  account FinanceAccount @relation(fields: [accountId], references: [id])
+  createdBy User? @relation(fields: [createdById], references: [id])
+  entries FinanceEntry[]
+
+  @@index([providerPartyId, date])
+  @@index([accountId])
+  @@index([createdById])
 }
 
 model FinanceEntry {
@@ -1022,6 +1053,7 @@ model FinanceEntry {
   branchId       String?
   orderId        String?
   createdById    String?
+  providerSettlementId String?
   archivedAt     DateTime?
   archivedById   String?
   archiveReason  String?
@@ -1040,6 +1072,7 @@ model FinanceEntry {
   costLayers     InventoryCostLayer[]
   ledgerLines    LedgerEntryLine[]
   fixedAssets    FixedAsset[]
+  providerSettlement ProviderSettlement? @relation(fields: [providerSettlementId], references: [id], onDelete: SetNull)
 
   @@index([date])
   @@index([type])
@@ -1052,6 +1085,7 @@ model FinanceEntry {
   @@index([branchId])
   @@index([orderId])
   @@index([createdById])
+  @@index([providerSettlementId])
   @@index([archivedAt])
   @@index([reversalOfId])
 }

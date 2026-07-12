@@ -5,9 +5,9 @@ import { prisma } from '@/server/db/client';
 import { enumLabel } from '@/lib/enums';
 import { getListOptions, getOrderStatusRoleMap } from '@/server/lists/resolver';
 import { formatMoney, formatNumber } from '@/lib/money';
-import { invoicePaymentSnapshot, type InvoicePaymentStatus } from '@/lib/invoice';
-import { Badge, PageHeader } from '@/components/ui/primitives';
-import { DataTable, type Column } from '@/components/data-table/DataTable';
+import { invoicePaymentSnapshot } from '@/lib/invoice';
+import { PageHeader } from '@/components/ui/primitives';
+import { OrdersBulkTable, type BulkOrderRow } from '@/components/records/OrdersBulkTable';
 import { RecordsSummary, type SummaryStat } from '@/components/records/Summary';
 import { TableToolbar } from '@/components/records/TableToolbar';
 import { BackLink } from '@/components/records/parts';
@@ -15,6 +15,7 @@ import { SectionGuide } from '@/components/records/SectionGuide';
 import { Link } from '@/i18n/navigation';
 import { formatDate } from '@/lib/dates';
 import { Plus } from 'lucide-react';
+import { bulkUpdateOrders } from '@/server/records/orders';
 
 const ORDER_SORTS: Record<string, Prisma.OrderOrderByWithRelationInput> = {
   newest: { placedAt: 'desc' },
@@ -22,21 +23,6 @@ const ORDER_SORTS: Record<string, Prisma.OrderOrderByWithRelationInput> = {
   amountDesc: { grossAmount: 'desc' },
   amountAsc: { grossAmount: 'asc' },
 };
-
-const STATUS_VARIANT: Record<string, 'success' | 'warning' | 'muted' | 'danger'> = {
-  COMPLETED: 'success',
-  PENDING: 'warning',
-  CANCELLED: 'muted',
-  RETURNED: 'danger',
-  REFUNDED: 'danger',
-};
-
-function paymentVariant(status: InvoicePaymentStatus): 'success' | 'warning' | 'muted' | 'danger' {
-  if (status === 'PAID') return 'success';
-  if (status === 'PARTIAL') return 'warning';
-  if (status === 'REFUNDED' || status === 'CANCELED') return 'danger';
-  return 'muted';
-}
 
 export default async function OrdersRecordsPage({
   params,
@@ -153,61 +139,26 @@ export default async function OrdersRecordsPage({
   ];
 
   const sortOpts = ['newest', 'oldest', 'amountDesc', 'amountAsc'].map((v) => ({ value: v, label: t(`tools.${v}`) }));
-  const [statusOpts, channels, branches, paymentMethods] = await Promise.all([
+  const [statusOpts, channels, branches, paymentMethods, accounts] = await Promise.all([
     getListOptions('orderStatus', locale),
     getListOptions('channel', locale),
     prisma.branch.findMany({ where: { isActive: true }, orderBy: { code: 'asc' }, select: { id: true, code: true, nameEn: true, nameAr: true } }),
     getListOptions('paymentMethod', locale),
+    prisma.financeAccount.findMany({ where: { isActive: true, currency: 'IQD' }, orderBy: { name: 'asc' }, select: { id: true, name: true } }),
   ]);
   const paymentStatusOpts = (['PAID', 'UNPAID', 'PARTIAL', 'REFUNDED', 'CANCELED'] as const).map((value) => ({
     value,
     label: ti(`paymentStatus.${value}`),
   }));
 
-  const cols: Column[] = [
-    { label: t('f.orderNumber') },
-    { label: t('f.date') },
-    { label: t('f.customer') },
-    { label: t('f.channel') },
-    { label: t('f.total'), align: 'end' },
-    { label: ti('payment'), align: 'end' },
-    { label: t('f.status') },
-    { label: '', align: 'end' },
-  ];
-
-  const rows = orders.flatMap((o) => {
+  const rows = orders.flatMap<BulkOrderRow>((o) => {
     const entries = financeEntries.filter((entry) => entry.orderId === o.id || (entry.settlesId && financeEntries.some((base) => base.id === entry.settlesId && base.orderId === o.id)));
     const payment = invoicePaymentSnapshot(o, entries);
     if (paymentStatusFilter && payment.status !== paymentStatusFilter) return [];
     if (paymentMethodFilter && !entries.some((entry) => entry.paymentMethod === paymentMethodFilter)) return [];
     if (amountMin != null && payment.total < amountMin) return [];
     if (amountMax != null && payment.total > amountMax) return [];
-    return [
-      [
-        o.orderNumber,
-        formatDate(o.placedAt, locale),
-        customerName(o.customer),
-        enumLabel(o.channel, locale),
-        formatMoney(payment.total, o.currency, locale),
-        <Badge key="p" variant={paymentVariant(payment.status)}>{ti(`paymentStatus.${payment.status}`)}</Badge>,
-        <Badge key="s" variant={STATUS_VARIANT[o.status] ?? 'muted'}>
-          {enumLabel(o.status, locale)}
-        </Badge>,
-        <span key="a" className="flex items-center justify-end gap-3">
-          <a
-            href={`/${locale}/invoice/${o.id}?print=1`}
-            target="_blank"
-            rel="noopener"
-            className="font-medium text-primary hover:underline"
-          >
-            {ti('title')}
-          </a>
-          <Link href={`/admin/records/orders/${o.id}`} className="font-medium text-primary hover:underline">
-            {t('open')}
-          </Link>
-        </span>,
-      ],
-    ];
+    return [{ id: o.id, orderNumber: o.orderNumber, date: formatDate(o.placedAt, locale), customer: customerName(o.customer), channel: enumLabel(o.channel, locale), total: formatMoney(payment.total, o.currency, locale), totalValue: payment.total, paymentStatus: ti(`paymentStatus.${payment.status}`), status: enumLabel(o.status, locale) }];
   });
 
   return (
@@ -243,7 +194,17 @@ export default async function OrdersRecordsPage({
         sorts={sortOpts}
         sortLabel={t('tools.sort')}
       />
-      <DataTable columns={cols} rows={rows} emptyLabel={t('none')} />
+      <OrdersBulkTable
+        rows={rows}
+        action={bulkUpdateOrders}
+        locale={locale}
+        statuses={statusOpts}
+        accounts={accounts.map((account) => ({ value: account.id, label: account.name }))}
+        paymentMethods={paymentMethods}
+        labels={{
+          selectAll: t('bulk.selectAll'), selected: t.raw('bulk.selected') as string, select: t('bulk.select'), order: t('f.orderNumber'), date: t('f.date'), customer: t('f.customer'), channel: t('f.channel'), total: t('f.total'), payment: ti('payment'), status: t('f.status'), open: t('open'), reviewTotal: t('bulk.reviewTotal'), bulkActions: t('bulk.title'), action: t('bulk.action'), updateStatus: t('bulk.updateStatus'), recordPaid: t('bulk.recordPaid'), assignProvider: t('bulk.assignProvider'), account: t('f.account'), paymentMethod: ti('paymentMethod'), provider: t('bulk.provider'), apply: t('bulk.apply'), success: t('bulk.success'), invalid: t('err.invalid'), forbidden: t('err.forbidden'), notfound: t('err.notfound'), accountError: t('err.account'), receivableError: t('bulk.receivableError'), providerError: t('bulk.providerError'), statusError: t('bulk.statusError'), amount_exceeds_open: t('bulk.amountError'),
+        }}
+      />
     </>
   );
 }

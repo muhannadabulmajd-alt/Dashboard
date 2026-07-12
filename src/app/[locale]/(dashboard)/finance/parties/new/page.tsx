@@ -23,8 +23,12 @@ export default async function NewPartyPage({
   const tr = await getTranslations('records');
   const tk = (k: string) => t(k);
   const errors = { invalid: tr('err.invalid'), exists: tr('err.exists'), forbidden: tr('err.forbidden') };
-  const branches = await prisma.branch.findMany({ where: { isActive: true }, orderBy: { nameEn: 'asc' }, select: { id: true, nameEn: true, nameAr: true } });
+  const [branches, accounts] = await Promise.all([
+    prisma.branch.findMany({ where: { isActive: true }, orderBy: { nameEn: 'asc' }, select: { id: true, nameEn: true, nameAr: true } }),
+    prisma.financeAccount.findMany({ where: { isActive: true, currency: 'IQD' }, orderBy: { name: 'asc' }, select: { id: true, name: true } }),
+  ]);
   const branchOptions = branches.map((b) => ({ value: b.id, label: locale === 'ar' ? b.nameAr : b.nameEn }));
+  const accountOptions = accounts.map((account) => ({ value: account.id, label: account.name }));
 
   return (
     <>
@@ -32,7 +36,7 @@ export default async function NewPartyPage({
       <PageHeader title={tr('newTitle', { entity: t('parties') })} />
       <RecordForm
         action={createParty}
-        fields={partyFields(tk, locale, branchOptions)}
+        fields={partyFields(tk, locale, branchOptions, accountOptions)}
         initial={{ type: initialType }}
         locale={locale}
         submitLabel={tr('create')}

@@ -21,6 +21,8 @@ const schema = z.object({
   openingReceivable: z.coerce.number().int().default(0),
   notes: z.string().optional(),
   equityShare: z.coerce.number().optional(),
+  defaultSettlementAccountId: z.string().optional(),
+  netFeesFromRemittance: z.coerce.boolean().default(false),
 });
 
 function parse(fd: FormData) {
@@ -35,6 +37,8 @@ function parse(fd: FormData) {
     openingReceivable: optField(fd, 'openingReceivable'),
     notes: optField(fd, 'notes'),
     equityShare: optField(fd, 'equityShare'),
+    defaultSettlementAccountId: optField(fd, 'defaultSettlementAccountId'),
+    netFeesFromRemittance: fd.get('netFeesFromRemittance') === 'on',
   });
 }
 
@@ -44,7 +48,7 @@ export async function createParty(_prev: ActionState, fd: FormData): Promise<Act
   const r = parse(fd);
   if (!r.success) return { error: 'invalid' };
   const locale = reqField(fd, 'locale') || 'ar';
-  const row = await prisma.party.create({ data: { ...r.data, branchId: r.data.branchId ?? null } });
+  const row = await prisma.party.create({ data: { ...r.data, branchId: r.data.branchId ?? null, defaultSettlementAccountId: r.data.defaultSettlementAccountId ?? null } });
   await audit(user.id, 'CREATE', 'Party', { id: row.id, name: row.name });
   revalidatePath(LIST, 'page');
   redirect(`/${locale}/finance/parties/${row.id}`);
@@ -60,7 +64,7 @@ export async function updateParty(
   const r = parse(fd);
   if (!r.success) return { error: 'invalid' };
   const locale = reqField(fd, 'locale') || 'ar';
-  await prisma.party.update({ where: { id }, data: { ...r.data, branchId: r.data.branchId ?? null } });
+  await prisma.party.update({ where: { id }, data: { ...r.data, branchId: r.data.branchId ?? null, defaultSettlementAccountId: r.data.defaultSettlementAccountId ?? null } });
   await audit(user.id, 'UPDATE', 'Party', { id, name: r.data.name });
   revalidatePath(LIST, 'page');
   redirect(`/${locale}/finance/parties/${id}`);
