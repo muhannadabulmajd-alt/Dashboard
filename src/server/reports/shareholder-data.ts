@@ -401,7 +401,10 @@ export async function buildShareholderReportData(
     if (allocated !== entry.amount) allocationMismatchIds.push(entry.id);
   }
   for (const asset of fixedAssets) {
-    if (sum(asset.costAllocations.map((allocation) => allocation.amount)) !== asset.totalCost) {
+    if (
+      asset.costAllocations
+      && sum(asset.costAllocations.map((allocation) => allocation.amount)) !== asset.totalCost
+    ) {
       assetMismatchIds.push(asset.id);
     }
   }
