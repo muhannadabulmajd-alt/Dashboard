@@ -27,6 +27,7 @@ export function OrdersBulkTable({
   action,
   locale,
   statuses,
+  saleStatusValues,
   accounts,
   paymentMethods,
   labels,
@@ -35,12 +36,15 @@ export function OrdersBulkTable({
   action: BulkAction;
   locale: string;
   statuses: Option[];
+  saleStatusValues: string[];
   accounts: Option[];
   paymentMethods: Option[];
   labels: Record<string, string>;
 }) {
   const [selected, setSelected] = useState<string[]>([]);
   const [operation, setOperation] = useState('STATUS');
+  const [selectedStatus, setSelectedStatus] = useState(statuses[0]?.value ?? '');
+  const [completionMode, setCompletionMode] = useState('DIRECT');
   const [open, setOpen] = useState(false);
   const [state, formAction, pending] = useActionState<ActionState, FormData>(action, undefined);
   const selectedRows = useMemo(() => rows.filter((row) => selected.includes(row.id)), [rows, selected]);
@@ -99,7 +103,67 @@ export function OrdersBulkTable({
           <div className="mb-4 flex items-center justify-between"><div><h2 className="text-lg font-bold">{labels.bulkActions}</h2><p className="text-xs text-muted-foreground">{labels.selected.replace('{count}', String(selected.length))}</p></div><button type="button" onClick={() => setOpen(false)} className="grid size-11 place-items-center rounded-lg border"><X className="size-5" /></button></div>
           <div className="grid gap-4">
             <label className="grid gap-1 text-sm font-semibold">{labels.action}<select name="operation" value={operation} onChange={(event) => setOperation(event.target.value)} className={control}><option value="STATUS">{labels.updateStatus}</option><option value="RECORD_PAID">{labels.recordPaid}</option><option value="ASSIGN_PROVIDER">{labels.assignProvider}</option></select></label>
-            {operation === 'STATUS' ? <label className="grid gap-1 text-sm font-semibold">{labels.status}<select name="status" className={control}>{statuses.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label> : null}
+            {operation === 'STATUS' ? (
+              <>
+                <label className="grid gap-1 text-sm font-semibold">
+                  {labels.status}
+                  <select
+                    name="status"
+                    value={selectedStatus}
+                    onChange={(event) => setSelectedStatus(event.target.value)}
+                    className={control}
+                  >
+                    {statuses.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  </select>
+                </label>
+                {saleStatusValues.includes(selectedStatus) ? (
+                  <>
+                    <div className="rounded-lg border border-warning/25 bg-warning-soft p-3 text-xs leading-5 text-foreground">
+                      {labels.completionPaymentHint}
+                    </div>
+                    <label className="grid gap-1 text-sm font-semibold">
+                      {labels.completionMode}
+                      <select
+                        name="completionMode"
+                        value={completionMode}
+                        onChange={(event) => setCompletionMode(event.target.value)}
+                        className={control}
+                      >
+                        <option value="DIRECT">{labels.directPayment}</option>
+                        <option value="PROVIDER">{labels.providerCollection}</option>
+                      </select>
+                    </label>
+                    {completionMode === 'DIRECT' ? (
+                      <label className="grid gap-1 text-sm font-semibold">
+                        {labels.account}
+                        <select name="accountId" className={control}>
+                          <option value="">—</option>
+                          {accounts.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                        </select>
+                      </label>
+                    ) : (
+                      <label className="grid gap-1 text-sm font-semibold">
+                        {labels.provider}
+                        <select name="providerKey" className={control}>
+                          <option value="HI_EXPRESS">Hi-Express</option>
+                          <option value="WAYL">Wayl</option>
+                        </select>
+                      </label>
+                    )}
+                    <label className="grid gap-1 text-sm font-semibold">
+                      {labels.paymentMethod}
+                      <select name="paymentMethod" className={control}>
+                        {paymentMethods.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                      </select>
+                    </label>
+                    <label className="grid gap-1 text-sm font-semibold">
+                      {labels.date}
+                      <input name="date" type="date" defaultValue={new Date().toISOString().slice(0, 10)} className={control} />
+                    </label>
+                  </>
+                ) : null}
+              </>
+            ) : null}
             {operation === 'RECORD_PAID' ? <><label className="grid gap-1 text-sm font-semibold">{labels.account}<select name="accountId" className={control}>{accounts.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label><label className="grid gap-1 text-sm font-semibold">{labels.paymentMethod}<select name="paymentMethod" className={control}>{paymentMethods.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label><label className="grid gap-1 text-sm font-semibold">{labels.date}<input name="date" type="date" defaultValue={new Date().toISOString().slice(0, 10)} className={control} /></label></> : null}
             {operation === 'ASSIGN_PROVIDER' ? <label className="grid gap-1 text-sm font-semibold">{labels.provider}<select name="providerKey" className={control}><option value="HI_EXPRESS">Hi-Express</option><option value="WAYL">Wayl</option></select></label> : null}
             {state?.error ? <p role="alert" className="rounded-lg border border-danger/20 bg-danger-soft p-3 text-sm font-semibold text-danger">{labels[`${state.error}Error`] ?? labels[state.error] ?? state.error}</p> : null}

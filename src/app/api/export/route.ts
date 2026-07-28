@@ -11,6 +11,7 @@ import type { AppLocale } from '@/lib/money';
 import { enumLabel } from '@/lib/enums';
 import { formatDate } from '@/lib/dates';
 import { prisma } from '@/server/db/client';
+import { groupInvoiceFinanceEntries, invoicePaymentSnapshot } from '@/lib/invoice';
 
 const DATASET_CAPABILITY: Record<string, Capability> = {
   orders: 'view:sales',
@@ -87,9 +88,10 @@ export async function GET(req: NextRequest) {
         orderBy: { sku: 'asc' },
         include: { group: { select: { nameEn: true, nameAr: true } } },
       });
-      headers = ['SKU', 'Product', 'Group', 'Size', 'Grind', 'SellingPrice_IQD', 'Cost_IQD', 'Status'];
+      headers = ['SKU', 'Retail_EAN13', 'Product', 'Group', 'Size', 'Grind', 'SellingPrice_IQD', 'Cost_IQD', 'Status'];
       rows = products.map((p) => [
         p.sku,
+        p.retailBarcode,
         locale === 'ar' ? p.nameAr : p.nameEn,
         p.group ? (locale === 'ar' ? p.group.nameAr : p.group.nameEn) : '',
         p.sizeLabel,
@@ -107,18 +109,103 @@ export async function GET(req: NextRequest) {
       break;
     }
     default: {
-      const orders = await getOrders(filters, scope, range);
-      headers = ['OrderDate', 'Channel', 'City', 'Status', 'Gross_IQD', 'Discount_IQD', 'Refund_IQD', 'Net_IQD'];
-      rows = orders.map((o) => [
-        formatDate(o.placedAt, locale),
-        enumLabel(o.channel, locale),
-        enumLabel(o.governorate, locale),
-        enumLabel(o.status, locale),
-        o.grossAmount,
-        o.discountAmount,
-        o.refundAmount,
-        o.grossAmount - o.discountAmount - o.refundAmount,
-      ]);
+      const matchedOrders = await getOrders(filters, scope, range);
+      const orderIds = matchedOrders.map((order) => order.id);
+      const fullOrders = orderIds.length
+        ? await prisma.order.findMany({
+            where: { id: { in: orderIds } },
+            select: {
+              id: true,
+              orderNumber: true,
+              placedAt: true,
+              status: true,
+              channel: true,
+              governorate: true,
+              grossAmount: true,
+              discountAmount: true,
+              refundAmount: true,
+              deliveryFee: true,
+              extraCharges: true,
+            },
+          })
+        : [];
+      const fullOrderById = new Map(fullOrders.map((order) => [order.id, order]));
+      const orders = orderIds.flatMap((id) => {
+        const order = fullOrderById.get(id);
+        return order ? [order] : [];
+      });
+      const financeEntries = orderIds.length
+        ? await prisma.financeEntry.findMany({
+            where: {
+              OR: [
+                { orderId: { in: orderIds } },
+                { settles: { is: { orderId: { in: orderIds } } } },
+              ],
+            },
+            select: {
+              id: true,
+              orderId: true,
+              type: true,
+              amount: true,
+              obligation: true,
+              obligationKind: true,
+              settlesId: true,
+              archivedAt: true,
+              reversedAt: true,
+              reversalOfId: true,
+              date: true,
+              paymentMethod: true,
+              account: { select: { name: true } },
+              party: { select: { id: true, name: true, collectsOrderPayments: true } },
+            },
+          })
+        : [];
+      const entriesByOrder = groupInvoiceFinanceEntries(financeEntries);
+      headers = [
+        'OrderNumber',
+        'OrderDate',
+        'Channel',
+        'City',
+        'OperationalStatus',
+        'PaymentStatus',
+        'PaymentRoute',
+        'Gross_IQD',
+        'Discount_IQD',
+        'Refund_IQD',
+        'Delivery_IQD',
+        'Extra_IQD',
+        'InvoiceTotal_IQD',
+        'Paid_IQD',
+        'Remaining_IQD',
+        'ProviderCollected_IQD',
+        'ProviderCashReceived_IQD',
+        'ProviderFeesOffset_IQD',
+        'ProviderOutstanding_IQD',
+      ];
+      rows = orders.map((order) => {
+        const payment = invoicePaymentSnapshot(order, entriesByOrder.get(order.id) ?? []);
+        return [
+          order.orderNumber,
+          formatDate(order.placedAt, locale),
+          enumLabel(order.channel, locale),
+          enumLabel(order.governorate, locale),
+          enumLabel(order.status, locale),
+          payment.status,
+          payment.route,
+          order.grossAmount,
+          order.discountAmount,
+          order.refundAmount,
+          order.deliveryFee,
+          order.extraCharges,
+          payment.total,
+          payment.paid,
+          payment.remaining,
+          payment.providerCollected,
+          payment.providerRemitted,
+          payment.providerFeesOffset,
+          payment.providerOutstanding,
+        ];
+      });
     }
   }
 

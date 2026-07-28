@@ -6,6 +6,12 @@ const LABEL_KEYS = [
   'invoiceNo',
   'date',
   'paymentStatusLabel',
+  'paymentRoute',
+  'provider',
+  'providerCollected',
+  'providerRemitted',
+  'providerFeesOffset',
+  'providerOutstanding',
   'brand',
   'tagline',
   'customerDetails',
@@ -23,6 +29,7 @@ const LABEL_KEYS = [
   'orderDiscount',
   'delivery',
   'extraCharges',
+  'refunds',
   'grandTotal',
   'paid',
   'remaining',
@@ -33,6 +40,10 @@ const LABEL_KEYS = [
   'paymentStatus.PARTIAL',
   'paymentStatus.REFUNDED',
   'paymentStatus.CANCELED',
+  'route.DIRECT',
+  'route.PROVIDER',
+  'route.CREDIT',
+  'route.NONE',
 ] as const;
 
 export async function getInvoiceLabels(locale: string): Promise<Record<string, string>> {

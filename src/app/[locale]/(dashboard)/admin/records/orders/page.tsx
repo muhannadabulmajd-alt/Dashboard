@@ -5,7 +5,7 @@ import { prisma } from '@/server/db/client';
 import { enumLabel } from '@/lib/enums';
 import { getListOptions, getOrderStatusRoleMap } from '@/server/lists/resolver';
 import { formatMoney, formatNumber } from '@/lib/money';
-import { invoicePaymentSnapshot } from '@/lib/invoice';
+import { activeInvoiceFinanceEntry, groupInvoiceFinanceEntries, invoicePaymentSnapshot } from '@/lib/invoice';
 import { PageHeader } from '@/components/ui/primitives';
 import { OrdersBulkTable, type BulkOrderRow } from '@/components/records/OrdersBulkTable';
 import { RecordsSummary, type SummaryStat } from '@/components/records/Summary';
@@ -114,6 +114,9 @@ export default async function OrdersRecordsPage({
           obligationKind: true,
           settlesId: true,
           paymentMethod: true,
+          date: true,
+          account: { select: { name: true } },
+          party: { select: { name: true, collectsOrderPayments: true } },
           archivedAt: true,
           reversedAt: true,
           reversalOfId: true,
@@ -151,11 +154,15 @@ export default async function OrdersRecordsPage({
     label: ti(`paymentStatus.${value}`),
   }));
 
+  const financeEntriesByOrder = groupInvoiceFinanceEntries(financeEntries);
   const rows = orders.flatMap<BulkOrderRow>((o) => {
-    const entries = financeEntries.filter((entry) => entry.orderId === o.id || (entry.settlesId && financeEntries.some((base) => base.id === entry.settlesId && base.orderId === o.id)));
+    const entries = financeEntriesByOrder.get(o.id) ?? [];
     const payment = invoicePaymentSnapshot(o, entries);
     if (paymentStatusFilter && payment.status !== paymentStatusFilter) return [];
-    if (paymentMethodFilter && !entries.some((entry) => entry.paymentMethod === paymentMethodFilter)) return [];
+    if (
+      paymentMethodFilter &&
+      !entries.some((entry) => activeInvoiceFinanceEntry(entry) && entry.paymentMethod === paymentMethodFilter)
+    ) return [];
     if (amountMin != null && payment.total < amountMin) return [];
     if (amountMax != null && payment.total > amountMax) return [];
     return [{ id: o.id, orderNumber: o.orderNumber, date: formatDate(o.placedAt, locale), customer: customerName(o.customer), channel: enumLabel(o.channel, locale), total: formatMoney(payment.total, o.currency, locale), totalValue: payment.total, paymentStatus: ti(`paymentStatus.${payment.status}`), status: enumLabel(o.status, locale) }];
@@ -199,10 +206,11 @@ export default async function OrdersRecordsPage({
         action={bulkUpdateOrders}
         locale={locale}
         statuses={statusOpts}
+        saleStatusValues={saleStatuses}
         accounts={accounts.map((account) => ({ value: account.id, label: account.name }))}
         paymentMethods={paymentMethods}
         labels={{
-          selectAll: t('bulk.selectAll'), selected: t.raw('bulk.selected') as string, select: t('bulk.select'), order: t('f.orderNumber'), date: t('f.date'), customer: t('f.customer'), channel: t('f.channel'), total: t('f.total'), payment: ti('payment'), status: t('f.status'), open: t('open'), reviewTotal: t('bulk.reviewTotal'), bulkActions: t('bulk.title'), action: t('bulk.action'), updateStatus: t('bulk.updateStatus'), recordPaid: t('bulk.recordPaid'), assignProvider: t('bulk.assignProvider'), account: t('f.account'), paymentMethod: ti('paymentMethod'), provider: t('bulk.provider'), apply: t('bulk.apply'), success: t('bulk.success'), invalid: t('err.invalid'), forbidden: t('err.forbidden'), notfound: t('err.notfound'), accountError: t('err.account'), receivableError: t('bulk.receivableError'), providerError: t('bulk.providerError'), statusError: t('bulk.statusError'), amount_exceeds_open: t('bulk.amountError'),
+          selectAll: t('bulk.selectAll'), selected: t.raw('bulk.selected') as string, select: t('bulk.select'), order: t('f.orderNumber'), date: t('f.date'), customer: t('f.customer'), channel: t('f.channel'), total: t('f.total'), payment: ti('payment'), status: t('f.status'), open: t('open'), reviewTotal: t('bulk.reviewTotal'), bulkActions: t('bulk.title'), action: t('bulk.action'), updateStatus: t('bulk.updateStatus'), recordPaid: t('bulk.recordPaid'), assignProvider: t('bulk.assignProvider'), account: t('f.account'), paymentMethod: ti('paymentMethod'), provider: t('bulk.provider'), apply: t('bulk.apply'), success: t('bulk.success'), invalid: t('err.invalid'), forbidden: t('err.forbidden'), notfound: t('err.notfound'), accountError: t('err.account'), receivableError: t('bulk.receivableError'), providerError: t('bulk.providerError'), statusError: t('bulk.statusError'), amount_exceeds_open: t('bulk.amountError'), payment_requiredError: t('err.payment_required'), completionPaymentHint: t('bulk.completionPaymentHint'), completionMode: t('bulk.completionMode'), directPayment: t('bulk.directPayment'), providerCollection: t('bulk.providerCollection'),
         }}
       />
     </>

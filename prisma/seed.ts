@@ -1,7 +1,7 @@
 import { PrismaClient, type Prisma } from '@prisma/client';
 import { faker } from '@faker-js/faker';
 import bcrypt from 'bcryptjs';
-import { formatProductBarcode } from '../src/lib/barcode';
+import { formatProductBarcode, formatRetailBarcode } from '../src/lib/barcode';
 import { subDays, addDays, startOfMonth, eachMonthOfInterval } from 'date-fns';
 
 const prisma = new PrismaClient();
@@ -119,7 +119,8 @@ async function seedBranchesAndUsers() {
   ];
   await prisma.user.createMany({ data: users });
   const ops = await prisma.user.findUnique({ where: { email: 'ops@laheeb.coffee' } });
-  return { hq, branches: [hq, karada, erbil], opsId: ops!.id };
+  const owner = await prisma.user.findUnique({ where: { email: 'owner@laheeb.coffee' } });
+  return { hq, branches: [hq, karada, erbil], opsId: ops!.id, ownerId: owner!.id };
 }
 
 // ---------------------------------------------------------------------------
@@ -172,6 +173,7 @@ async function seedProducts(): Promise<SeededProduct[]> {
           id: `prod_${n}`,
           sku: `LH-${c.code}-${size.code}-${g.code}`,
           barcodeValue: formatProductBarcode(n),
+          retailBarcode: formatRetailBarcode(n),
           nameEn: `${c.en} ${size.label}`,
           nameAr: `${c.ar} ${size.label}`,
           productLine: c.line as Prisma.ProductCreateManyInput['productLine'],
@@ -198,6 +200,7 @@ async function seedProducts(): Promise<SeededProduct[]> {
       id: `prod_${n}`,
       sku: `LH-DRIP-${v.code}-10-NA`,
       barcodeValue: formatProductBarcode(n),
+      retailBarcode: formatRetailBarcode(n),
       nameEn: `${v.en} (10 sachets)`,
       nameAr: `${v.ar} (10 أكياس)`,
       productLine: 'DRIP_BAGS',
@@ -221,6 +224,7 @@ async function seedProducts(): Promise<SeededProduct[]> {
       id: `prod_${n}`,
       sku: `LH-ACC-${a.code}-NA-NA`,
       barcodeValue: formatProductBarcode(n),
+      retailBarcode: formatRetailBarcode(n),
       nameEn: a.en,
       nameAr: a.ar,
       productLine: 'ACCESSORIES',
@@ -309,6 +313,7 @@ async function seedOrders(
   customerIds: string[],
   offerIds: string[],
   branches: { value: string; weight: number }[],
+  createdById: string,
 ) {
   const orders: Prisma.OrderCreateManyInput[] = [];
   const lines: Prisma.OrderLineCreateManyInput[] = [];
@@ -385,6 +390,7 @@ async function seedOrders(
         placedAt,
         customerId,
         branchId: weighted(branches),
+        createdById,
         channel,
         governorate,
         fulfillmentMethod,
@@ -397,8 +403,8 @@ async function seedOrders(
         offerId,
       });
 
-      // customer stats (count paid-ish orders)
-      if (status !== 'CANCELLED') {
+      // Customer statistics use the same completed-sale contract as reports.
+      if (status === 'COMPLETED') {
         const s = custStats.get(customerId);
         if (!s) custStats.set(customerId, { count: 1, first: placedAt, last: placedAt });
         else {
@@ -438,6 +444,46 @@ async function seedOrders(
     await prisma.orderLine.createMany({ data: lines.slice(i, i + 1000) });
   }
   await prisma.shipment.createMany({ data: shipments });
+
+  const seedCashAccount = await prisma.financeAccount.upsert({
+    where: { externalKey: 'SEED_CASH_ON_HANDS' },
+    update: { isActive: true },
+    create: {
+      externalKey: 'SEED_CASH_ON_HANDS',
+      name: 'Seed cash on hands',
+      type: 'CASH',
+      currency: 'IQD',
+      branchId: branches[0]?.value,
+    },
+  });
+  const completedPayments: Prisma.FinanceEntryCreateManyInput[] = orders
+    .filter((order) => order.status === 'COMPLETED')
+    .map((order): Prisma.FinanceEntryCreateManyInput => ({
+      date: order.placedAt,
+      type: 'INCOME',
+      amount: Math.max(
+        0,
+        (order.grossAmount ?? 0) -
+          (order.discountAmount ?? 0) -
+          (order.refundAmount ?? 0) +
+          (order.deliveryFee ?? 0) +
+          (order.extraCharges ?? 0),
+      ),
+      currency: 'IQD',
+      obligation: false,
+      accountId: seedCashAccount.id,
+      branchId: order.branchId,
+      orderId: order.id,
+      createdById,
+      paymentMethod: 'Cash',
+      importKey: `SEED:ORDER:${order.id}:PAID`,
+      reference: order.orderNumber,
+      description: `Seed payment for ${order.orderNumber}`,
+    }))
+    .filter((entry) => entry.amount > 0);
+  for (let i = 0; i < completedPayments.length; i += 1000) {
+    await prisma.financeEntry.createMany({ data: completedPayments.slice(i, i + 1000) });
+  }
 
   // Update customer aggregates + segment
   await Promise.all(
@@ -649,7 +695,7 @@ async function main() {
   await clear();
 
   console.log('Seeding branches and users…');
-  const { hq, branches, opsId } = await seedBranchesAndUsers();
+  const { hq, branches, opsId, ownerId } = await seedBranchesAndUsers();
   // HQ takes the bulk of orders; the two franchise cafes share the rest.
   const branchWeights = [
     { value: branches[0].id, weight: 68 },
@@ -666,7 +712,13 @@ async function main() {
   const offerIds = await seedOffers();
 
   console.log('Seeding orders (this can take a moment)…');
-  const { orderCount, lineCount } = await seedOrders(products, customerIds, offerIds, branchWeights);
+  const { orderCount, lineCount } = await seedOrders(
+    products,
+    customerIds,
+    offerIds,
+    branchWeights,
+    ownerId,
+  );
   console.log(`  ${orderCount} orders, ${lineCount} lines`);
 
   console.log('Seeding roast batches…');

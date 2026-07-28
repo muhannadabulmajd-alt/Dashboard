@@ -65,8 +65,12 @@ export default async function InvoicePage({
   const receivable = financeEntries.find((entry) => payment.receivableIds.includes(entry.id));
   const paymentRows = financeEntries.filter((entry) => {
     if (!activeInvoiceFinanceEntry(entry)) return false;
+    if (payment.providerReceivableIds.includes(entry.id)) return true;
     if (entry.type === 'INCOME' && !entry.obligation && entry.orderId === o.id) return true;
-    return entry.type === 'PAYMENT_IN' && Boolean(entry.settlesId && payment.receivableIds.includes(entry.settlesId));
+    return entry.type === 'PAYMENT_IN' && Boolean(
+      entry.settlesId &&
+      [...payment.receivableIds, ...payment.providerReceivableIds].includes(entry.settlesId),
+    );
   });
   const canManageFinance = can(user.role, 'manage:finance');
   const canManageOrders = can(user.role, 'manage:orders');
@@ -181,7 +185,7 @@ export default async function InvoicePage({
                     <tr key={entry.id} className="border-t">
                       <td className="py-1">{formatDate(entry.date, loc)}</td>
                       <td className="py-1">{methodLabel(entry.paymentMethod)}</td>
-                      <td className="py-1">{entry.account?.name ?? '—'}</td>
+                      <td className="py-1">{entry.account?.name ?? (payment.providerReceivableIds.includes(entry.id) ? entry.party?.name : '—')}</td>
                       <td className="py-1 text-end tabular-nums">{m(entry.amount)}</td>
                     </tr>
                   )) : (
@@ -221,6 +225,16 @@ export default async function InvoicePage({
               <SummaryRow label={t('paid')} value={m(payment.paid)} />
               <SummaryRow label={t('remaining')} value={m(payment.remaining)} strong={payment.remaining > 0} />
               <SummaryRow label={t('paymentStatusLabel')} value={t(`paymentStatus.${payment.status}`)} />
+              <SummaryRow label={t('paymentRoute')} value={t(`route.${payment.route}`)} />
+              {payment.providerName ? <SummaryRow label={t('provider')} value={payment.providerName} /> : null}
+              {payment.providerCollected > 0 ? (
+                <>
+                  <SummaryRow label={t('providerCollected')} value={m(payment.providerCollected)} />
+                  <SummaryRow label={t('providerRemitted')} value={m(payment.providerRemitted)} />
+                  <SummaryRow label={t('providerFeesOffset')} value={m(payment.providerFeesOffset)} />
+                  <SummaryRow label={t('providerOutstanding')} value={m(payment.providerOutstanding)} />
+                </>
+              ) : null}
               {receivable?.dueDate ? <SummaryRow label={t('dueDate')} value={formatDate(receivable.dueDate, loc)} /> : null}
             </div>
           </section>

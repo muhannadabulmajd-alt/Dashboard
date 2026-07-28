@@ -94,6 +94,7 @@ export default async function FinancePartyDetailPage({
     { label: t('f.branch'), value: branchName },
     { label: t('f.openingPayable'), value: formatMoney(p.openingPayable, 'IQD', locale) },
     { label: t('f.openingReceivable'), value: formatMoney(p.openingReceivable, 'IQD', locale) },
+    { label: t('f.collectsOrderPayments'), value: p.collectsOrderPayments ? tr('f.active') : tr('f.inactive') },
     { label: t('payables'), value: formatMoney(balances.payables, 'IQD', locale) },
     { label: t('receivables'), value: formatMoney(balances.receivables, 'IQD', locale) },
     { label: t('f.equityShare'), value: p.equityShare != null ? `${p.equityShare}%` : '—' },

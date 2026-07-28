@@ -326,6 +326,7 @@ model Product {
   id                 String      @id @default(cuid())
   sku                String      @unique
   barcodeValue       String      @unique
+  retailBarcode      String      @unique
   nameEn             String
   nameAr             String
   productLine        ProductLine
@@ -984,6 +985,7 @@ model Party {
   equityShare       Float? // ownership % (shareholders)
   defaultSettlementAccountId String?
   netFeesFromRemittance Boolean @default(false)
+  collectsOrderPayments Boolean @default(false)
   isActive          Boolean   @default(true)
   createdAt         DateTime  @default(now())
 

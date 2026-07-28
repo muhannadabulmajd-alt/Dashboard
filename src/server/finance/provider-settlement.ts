@@ -6,8 +6,6 @@ import { z } from 'zod';
 import { prisma } from '@/server/db/client';
 import { toMinor } from '@/lib/money';
 import { allocateProviderDeposit } from '@/lib/provider-settlement';
-import { getOrderStatusRoleMap } from '@/server/lists/resolver';
-import { syncCustomerStats } from '@/server/orders/sync';
 import { audit, optField, reqField, requireCap, type ActionState } from '@/server/records/shared';
 
 const schema = z.object({
@@ -34,9 +32,6 @@ export async function settleProvider(_prev: ActionState, fd: FormData): Promise<
   const locale = reqField(fd, 'locale') || 'ar';
   const input = parsed.data;
   const amountReceived = toMinor(input.amountReceived, 'IQD');
-  const statusRoles = await getOrderStatusRoleMap();
-  const saleStatuses = [...statusRoles].filter(([, role]) => role === 'SALE').map(([code]) => code);
-
   try {
     const summary = await prisma.$transaction(async (tx) => {
       const party = await tx.party.findUnique({
@@ -102,8 +97,6 @@ export async function settleProvider(_prev: ActionState, fd: FormData): Promise<
           createdById: user.id,
         },
       });
-      const changedCustomers = new Set<string>();
-
       for (const allocation of allocations) {
         const obligation = receivables.find((row) => row.obligation.id === allocation.receivableId)?.obligation;
         if (!obligation) continue;
@@ -160,18 +153,7 @@ export async function settleProvider(_prev: ActionState, fd: FormData): Promise<
             createdById: user.id,
           }] });
         }
-        if (allocation.fullySettled && obligation.orderId) {
-          const order = await tx.order.findUnique({
-            where: { id: obligation.orderId },
-            select: { status: true, customerId: true },
-          });
-          if (order && statusRoles.get(order.status) === 'OPEN') {
-            await tx.order.update({ where: { id: obligation.orderId }, data: { status: 'COMPLETED' } });
-            if (order.customerId) changedCustomers.add(order.customerId);
-          }
-        }
       }
-      for (const customerId of changedCustomers) await syncCustomerStats(tx, customerId, saleStatuses);
       await tx.auditLog.create({
         data: {
           userId: user.id,

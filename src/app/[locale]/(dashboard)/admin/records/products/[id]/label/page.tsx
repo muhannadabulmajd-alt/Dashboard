@@ -22,70 +22,6 @@ export default async function ProductLabelPage({
 
   return (
     <>
-      <style>{`
-        @page { size: 60mm 30mm; margin: 0; }
-        @media print {
-          html,
-          body {
-            width: 60mm !important;
-            height: 30mm !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            overflow: hidden !important;
-            background: #fff !important;
-          }
-          .app-surface {
-            display: block !important;
-            width: 60mm !important;
-            min-height: 30mm !important;
-            overflow: hidden !important;
-            background: #fff !important;
-          }
-          .app-surface > aside,
-          .app-surface > div > :not(main),
-          main > :not(.sku-label-print-page) {
-            display: none !important;
-          }
-          .app-surface > div,
-          main,
-          .sku-label-print-page,
-          .sku-label-print-shell,
-          .sku-label-print-inner {
-            display: block !important;
-            width: 60mm !important;
-            height: 30mm !important;
-            min-height: 30mm !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            border: 0 !important;
-            border-radius: 0 !important;
-            box-shadow: none !important;
-            overflow: hidden !important;
-            background: #fff !important;
-          }
-          .sku-label-printable {
-            position: static !important;
-            width: 60mm !important;
-            height: 30mm !important;
-            margin: 0 !important;
-            border: 0 !important;
-            box-shadow: none !important;
-            break-after: avoid !important;
-            break-before: avoid !important;
-            break-inside: avoid !important;
-            page-break-after: avoid !important;
-            page-break-before: avoid !important;
-            page-break-inside: avoid !important;
-            print-color-adjust: exact !important;
-            -webkit-print-color-adjust: exact !important;
-          }
-          .sku-label-printable svg,
-          .sku-label-printable rect {
-            print-color-adjust: exact !important;
-            -webkit-print-color-adjust: exact !important;
-          }
-        }
-      `}</style>
       <BackLink href={`/admin/records/products/${id}`} label={t('back')} />
       <PageHeader
         title={t('label.title')}
@@ -95,6 +31,8 @@ export default async function ProductLabelPage({
             pdfHref={`/api/products/${id}/label/pdf?locale=${locale}`}
             printLabel={t('label.print')}
             downloadLabel={t('label.downloadPdf')}
+            copiesLabel={t('label.copies')}
+            copiesHint={t('label.copiesHint')}
           />
         }
       />
@@ -104,6 +42,7 @@ export default async function ProductLabelPage({
             <ProductLabelPreview label={label} locale={locale} />
           </div>
         </div>
+        <p className="mt-3 text-sm text-muted-foreground">{t('label.printHint')}</p>
       </div>
     </>
   );

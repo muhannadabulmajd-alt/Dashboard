@@ -42,6 +42,7 @@ export default async function EditPartyPage({
     notes: p.notes ?? '',
     defaultSettlementAccountId: p.defaultSettlementAccountId ?? '',
     netFeesFromRemittance: p.netFeesFromRemittance,
+    collectsOrderPayments: p.collectsOrderPayments,
   };
   const errors = { invalid: tr('err.invalid'), exists: tr('err.exists'), forbidden: tr('err.forbidden') };
 

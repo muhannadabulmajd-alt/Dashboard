@@ -28,5 +28,7 @@ export async function getOrderCatalog(locale: string, ungroupedLabel: string): P
     group: p.group ? (locale === 'ar' ? p.group.nameAr : p.group.nameEn) : ungroupedLabel,
     price: effectivePrice(p.prices, p.sellingPrice, now),
     unit: p.sellUnit,
+    barcodeValue: p.barcodeValue,
+    retailBarcode: p.retailBarcode,
   }));
 }

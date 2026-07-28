@@ -21,6 +21,39 @@ export type InvoiceFinanceEntryLike = {
   archivedAt?: Date | null;
   reversedAt?: Date | null;
   reversalOfId?: string | null;
+  date?: Date;
+  paymentMethod?: string | null;
+  party?: {
+    id?: string;
+    name?: string | null;
+    collectsOrderPayments?: boolean;
+  } | null;
+  account?: {
+    name?: string | null;
+  } | null;
+};
+
+export type InvoicePaymentRoute = 'DIRECT' | 'PROVIDER' | 'CREDIT' | 'NONE';
+
+export type InvoicePaymentSnapshot = {
+  total: number;
+  paid: number;
+  paidRaw: number;
+  remaining: number;
+  status: InvoicePaymentStatus;
+  route: InvoicePaymentRoute;
+  receivableIds: string[];
+  providerReceivableIds: string[];
+  providerCollected: number;
+  providerRemitted: number;
+  providerFeesOffset: number;
+  providerCleared: number;
+  providerOutstanding: number;
+  providerPartyId: string | null;
+  providerName: string | null;
+  accountName: string | null;
+  paymentMethod: string | null;
+  paymentDate: Date | null;
 };
 
 export function invoiceTotal(order: Pick<InvoiceOrderLike, 'grossAmount' | 'discountAmount' | 'refundAmount' | 'deliveryFee' | 'extraCharges'>): number {
@@ -34,33 +67,124 @@ export function activeInvoiceFinanceEntry(entry: InvoiceFinanceEntryLike): boole
 export function invoicePaymentSnapshot(
   order: InvoiceOrderLike,
   entries: InvoiceFinanceEntryLike[],
-): {
-  total: number;
-  paid: number;
-  remaining: number;
-  status: InvoicePaymentStatus;
-  receivableIds: string[];
-} {
+): InvoicePaymentSnapshot {
   const total = invoiceTotal(order);
   const active = entries.filter(activeInvoiceFinanceEntry);
-  const receivables = active.filter((entry) => entry.orderId === order.id && entry.obligation && entry.obligationKind === 'RECEIVABLE');
-  const receivableIds = receivables.map((entry) => entry.id);
-  const paidFromSettlements = active
-    .filter((entry) => entry.type === 'PAYMENT_IN' && entry.settlesId != null && receivableIds.includes(entry.settlesId))
+  const orderReceivables = active.filter(
+    (entry) =>
+      entry.orderId === order.id &&
+      entry.obligation &&
+      entry.obligationKind === 'RECEIVABLE',
+  );
+  const providerReceivables = orderReceivables.filter(
+    (entry) => entry.party?.collectsOrderPayments === true,
+  );
+  const customerReceivables = orderReceivables.filter(
+    (entry) => entry.party?.collectsOrderPayments !== true,
+  );
+  const providerReceivableIds = providerReceivables.map((entry) => entry.id);
+  const receivableIds = customerReceivables.map((entry) => entry.id);
+  const providerIdSet = new Set(providerReceivableIds);
+  const customerIdSet = new Set(receivableIds);
+  const providerSettlements = active.filter(
+    (entry) =>
+      entry.type === 'PAYMENT_IN' &&
+      entry.settlesId != null &&
+      providerIdSet.has(entry.settlesId),
+  );
+  const customerSettlements = active.filter(
+    (entry) =>
+      entry.type === 'PAYMENT_IN' &&
+      entry.settlesId != null &&
+      customerIdSet.has(entry.settlesId),
+  );
+  const directPayments = active.filter(
+    (entry) =>
+      entry.orderId === order.id &&
+      !entry.obligation &&
+      entry.type === 'INCOME' &&
+      !entry.settlesId,
+  );
+  const providerCollected = providerReceivables.reduce((sum, entry) => sum + entry.amount, 0);
+  const providerRemittedRaw = providerSettlements
+    .filter((entry) => Boolean(entry.account))
     .reduce((sum, entry) => sum + entry.amount, 0);
-  const paidDirectly = active
-    .filter((entry) => entry.orderId === order.id && !entry.obligation && entry.type === 'INCOME' && !entry.settlesId)
+  const providerFeesOffsetRaw = providerSettlements
+    .filter((entry) => !entry.account)
     .reduce((sum, entry) => sum + entry.amount, 0);
-  const paid = Math.min(total, paidDirectly + paidFromSettlements);
+  const providerCleared = Math.min(
+    providerCollected,
+    providerRemittedRaw + providerFeesOffsetRaw,
+  );
+  const providerRemitted = Math.min(providerCollected, providerRemittedRaw);
+  const providerFeesOffset = Math.min(
+    Math.max(0, providerCollected - providerRemitted),
+    providerFeesOffsetRaw,
+  );
+  const paidFromSettlements = customerSettlements.reduce((sum, entry) => sum + entry.amount, 0);
+  const paidDirectly = directPayments.reduce((sum, entry) => sum + entry.amount, 0);
+  const paidRaw = paidDirectly + paidFromSettlements + providerCollected;
+  const paid = Math.min(total, paidRaw);
   const terminal = order.status === 'CANCELLED' || order.status === 'RETURNED' || order.status === 'REFUNDED';
   const remaining = terminal ? 0 : Math.max(0, total - paid);
+  const paymentEvents = [...directPayments, ...customerSettlements, ...providerReceivables]
+    .filter((entry) => entry.date)
+    .sort((a, b) => (a.date?.getTime() ?? 0) - (b.date?.getTime() ?? 0));
+  const latestPayment = paymentEvents.at(-1) ?? null;
+  const provider = providerReceivables.find((entry) => entry.party?.name)?.party ?? null;
+  const accountPayment = [...directPayments, ...customerSettlements]
+    .reverse()
+    .find((entry) => entry.account?.name);
   return {
     total,
     paid,
+    paidRaw,
     remaining,
-    status: invoicePaymentStatus(order.status, total, paid, receivables.length > 0),
+    status: invoicePaymentStatus(order.status, total, paid, orderReceivables.length > 0),
+    route:
+      providerCollected > 0
+        ? 'PROVIDER'
+        : paidDirectly + paidFromSettlements > 0
+          ? 'DIRECT'
+          : customerReceivables.length > 0
+            ? 'CREDIT'
+            : 'NONE',
     receivableIds,
+    providerReceivableIds,
+    providerCollected,
+    providerRemitted,
+    providerFeesOffset,
+    providerCleared,
+    providerOutstanding: Math.max(0, providerCollected - providerCleared),
+    providerPartyId: provider?.id ?? null,
+    providerName: provider?.name ?? null,
+    accountName: accountPayment?.account?.name ?? null,
+    paymentMethod: latestPayment?.paymentMethod ?? null,
+    paymentDate: latestPayment?.date ?? null,
   };
+}
+
+/**
+ * Index a mixed set of order entries and settlements once. This avoids each
+ * order repeatedly scanning the complete finance-entry collection.
+ */
+export function groupInvoiceFinanceEntries<T extends InvoiceFinanceEntryLike>(
+  entries: T[],
+): Map<string, T[]> {
+  const orderByEntryId = new Map<string, string>();
+  for (const entry of entries) {
+    if (entry.orderId) orderByEntryId.set(entry.id, entry.orderId);
+  }
+
+  const grouped = new Map<string, T[]>();
+  for (const entry of entries) {
+    const orderId = entry.orderId ?? (entry.settlesId ? orderByEntryId.get(entry.settlesId) : null);
+    if (!orderId) continue;
+    const rows = grouped.get(orderId) ?? [];
+    if (!rows.some((row) => row.id === entry.id)) rows.push(entry);
+    grouped.set(orderId, rows);
+  }
+  return grouped;
 }
 
 export function invoicePaymentStatus(

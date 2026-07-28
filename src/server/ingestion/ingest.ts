@@ -26,7 +26,7 @@ import { upsertImportedOrder } from '@/server/orders/import-sync';
 import { upsertImportedShipment } from '@/server/shipments/import-sync';
 import { upsertImportedRoastBatch } from '@/server/roastery/import-sync';
 import { getOrderStatusRoleMap } from '@/server/lists/resolver';
-import { generateProductBarcode } from '@/server/records/numbering';
+import { generateProductBarcode, generateRetailBarcode } from '@/server/records/numbering';
 
 const DATASET_TYPE: Record<ImportDataset, DatasetType> = {
   products: 'PRODUCTS',
@@ -376,7 +376,8 @@ export async function ingestCsv(
         } else {
           await prisma.$transaction(async (tx) => {
             const barcodeValue = await generateProductBarcode(tx);
-            await tx.product.create({ data: { sku, ...data, barcodeValue } });
+            const retailBarcode = await generateRetailBarcode(tx);
+            await tx.product.create({ data: { sku, ...data, barcodeValue, retailBarcode } });
           });
           inserted += 1;
         }
