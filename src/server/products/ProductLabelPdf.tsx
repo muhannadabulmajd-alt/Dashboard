@@ -4,6 +4,7 @@ import {
   PRODUCT_LABEL_COLUMN_GAP_MM,
   PRODUCT_LABEL_DETAILS_PERCENT,
   PRODUCT_LABEL_SAFE_MARGIN_MM,
+  productLabelPdfLineHeight,
   productLabelTypography,
   softWrapLabelText,
 } from '@/lib/product-label-layout';
@@ -47,20 +48,17 @@ const styles = StyleSheet.create({
     width: '100%',
     color: '#000000',
     fontWeight: 700,
-    lineHeight: 1.05,
   },
   variation: {
     width: '100%',
     color: '#000000',
     fontWeight: 700,
-    lineHeight: 1.08,
     marginTop: 1.8,
   },
   specs: {
     width: '100%',
     color: '#000000',
-    lineHeight: 1.08,
-    marginTop: 1,
+    marginTop: 0.8,
   },
   barcodePanel: {
     width: BARCODE_WIDTH,
@@ -93,22 +91,45 @@ export function ProductLabelPdf({ label, copies = 1 }: { label: ProductLabelData
           <View style={styles.label}>
             <PdfBarcode value={label.retailBarcode} />
             <View style={styles.details}>
-              <Text style={[styles.main, { fontSize: typography.titlePt, textAlign }]}>
+              <Text
+                style={[
+                  styles.main,
+                  {
+                    fontSize: typography.titlePt,
+                    lineHeight: productLabelPdfLineHeight(typography.titlePt, 1.12),
+                    textAlign,
+                  },
+                ]}
+              >
                 {softWrapLabelText(label.mainName)}
               </Text>
               {label.variationName ? (
-                <Text style={[styles.variation, { fontSize: typography.variationPt, textAlign }]}>
+                <Text
+                  style={[
+                    styles.variation,
+                    {
+                      fontSize: typography.variationPt,
+                      lineHeight: productLabelPdfLineHeight(typography.variationPt, 1.18),
+                      textAlign,
+                    },
+                  ]}
+                >
                   {softWrapLabelText(label.variationName)}
                 </Text>
               ) : null}
               {label.specItems.map((item) => (
                 <Text
                   key={`${item.label}-${item.value}`}
-                  style={[styles.specs, { fontSize: typography.specsPt, textAlign }]}
+                  style={[
+                    styles.specs,
+                    {
+                      fontSize: typography.specsPt,
+                      lineHeight: productLabelPdfLineHeight(typography.specsPt, 1.28),
+                      textAlign,
+                    },
+                  ]}
                 >
-                  <Text style={{ fontWeight: 700 }}>{softWrapLabelText(item.label)}:</Text>
-                  {' '}
-                  {softWrapLabelText(item.value)}
+                  {softWrapLabelText(`${item.label}: ${item.value}`)}
                 </Text>
               ))}
             </View>

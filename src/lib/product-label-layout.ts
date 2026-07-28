@@ -8,6 +8,10 @@ export interface ProductLabelTypography {
   specsPt: number;
 }
 
+export function productLabelPdfLineHeight(fontSize: number, multiplier = 1.2) {
+  return Number((fontSize * multiplier).toFixed(2));
+}
+
 function visibleLength(value: string) {
   return Array.from(value.replace(/\s+/g, ' ').trim()).length;
 }
