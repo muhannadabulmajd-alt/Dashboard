@@ -7,7 +7,7 @@ import { prisma } from '@/server/db/client';
 import { PRODUCT_LINES } from '@/lib/enums';
 import { requireCap, audit, reqField, optField, type ActionState } from './shared';
 import { nextGroupCode } from './product-groups';
-import { generateProductBarcode } from './numbering';
+import { generateProductBarcode, generateRetailBarcode } from './numbering';
 
 const LIST = '/[locale]/(dashboard)/admin/records/products';
 const CAP = 'manage:products' as const;
@@ -77,12 +77,14 @@ export async function createProductWizard(_prev: ActionState, fd: FormData): Pro
     try {
       productId = await prisma.$transaction(async (tx) => {
         const barcodeValue = await generateProductBarcode(tx);
+        const retailBarcode = await generateRetailBarcode(tx);
         const group = await tx.productGroup.create({
           data: { code, nameEn: d.nameEn, nameAr: d.nameAr, productLine: d.productLine, productType: d.productType ?? null, description: d.description ?? null },
         });
         const product = await tx.product.create({
           data: {
             barcodeValue,
+            retailBarcode,
             sku: d.sku,
             nameEn: d.nameEn,
             nameAr: d.nameAr,

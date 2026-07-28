@@ -164,6 +164,8 @@ async function VariationsView({
         ? {
             OR: [
               { sku: { contains: q, mode: 'insensitive' } },
+              { barcodeValue: { contains: q, mode: 'insensitive' } },
+              { retailBarcode: { contains: q, mode: 'insensitive' } },
               { nameEn: { contains: q, mode: 'insensitive' } },
               { nameAr: { contains: q, mode: 'insensitive' } },
             ],
@@ -197,7 +199,10 @@ async function VariationsView({
     { label: '', align: 'end' },
   ];
   const rows = products.map((p) => [
-    p.sku,
+    <span key="code" className="flex flex-col gap-0.5">
+      <span>{p.sku}</span>
+      <span className="font-mono text-xs text-muted-foreground" dir="ltr">{p.retailBarcode}</span>
+    </span>,
     locale === 'ar' ? p.nameAr : p.nameEn,
     enumLabel(p.productLine, locale),
     enumLabel(p.grind, locale),

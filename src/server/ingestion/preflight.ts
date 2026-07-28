@@ -51,7 +51,10 @@ export async function preflightImport(dataset: ImportDataset, rows: Raw[]): Prom
       ? await prisma.product.findMany({ where: { sku: { in: skus }, isActive: true }, select: { sku: true } })
       : [];
     const parties = partyKeys.length
-      ? await prisma.party.findMany({ where: { externalKey: { in: partyKeys }, isActive: true }, select: { externalKey: true } })
+      ? await prisma.party.findMany({
+          where: { externalKey: { in: partyKeys }, isActive: true },
+          select: { externalKey: true, collectsOrderPayments: true },
+        })
       : [];
     const accounts = accountKeys.length
       ? await prisma.financeAccount.findMany({ where: { externalKey: { in: accountKeys }, isActive: true }, select: { externalKey: true } })
@@ -59,6 +62,12 @@ export async function preflightImport(dataset: ImportDataset, rows: Raw[]): Prom
     const foundCustomers = new Set(customers.map((customer) => customer.externalId));
     const foundProducts = new Set(products.map((product) => product.sku));
     const foundParties = new Set(parties.map((party) => party.externalKey).filter(Boolean));
+    const collectionProviders = new Set(
+      parties
+        .filter((party) => party.collectsOrderPayments)
+        .map((party) => party.externalKey)
+        .filter((key): key is string => Boolean(key)),
+    );
     const foundAccounts = new Set(accounts.map((account) => account.externalKey).filter(Boolean));
     for (const key of customerKeys) if (!foundCustomers.has(key)) errors.push({ row: 0, message: `unknown customer ${key}` });
     for (const sku of skus) if (!foundProducts.has(sku)) errors.push({ row: 0, message: `unknown or inactive SKU ${sku}` });
@@ -76,6 +85,16 @@ export async function preflightImport(dataset: ImportDataset, rows: Raw[]): Prom
       }
       if (order.paymentMode === 'CREDIT' && !order.paymentPartyKey) {
         errors.push({ row: 0, message: `${order.orderNumber}: credit order is missing paymentPartyKey` });
+      }
+      if (
+        role === 'SALE' &&
+        order.paymentMode === 'CREDIT' &&
+        (!order.paymentPartyKey || !collectionProviders.has(order.paymentPartyKey))
+      ) {
+        errors.push({
+          row: 0,
+          message: `${order.orderNumber}: completed orders must be paid directly or collected by a configured provider`,
+        });
       }
     }
     return errors;

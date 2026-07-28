@@ -20,7 +20,7 @@ export async function getInvoiceData(orderId: string) {
     },
     include: {
       account: { select: { name: true, currency: true } },
-      party: { select: { name: true } },
+      party: { select: { name: true, collectsOrderPayments: true } },
       settles: { select: { id: true, orderId: true, reference: true } },
     },
     orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],

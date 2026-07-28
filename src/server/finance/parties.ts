@@ -23,6 +23,7 @@ const schema = z.object({
   equityShare: z.coerce.number().optional(),
   defaultSettlementAccountId: z.string().optional(),
   netFeesFromRemittance: z.coerce.boolean().default(false),
+  collectsOrderPayments: z.coerce.boolean().default(false),
 });
 
 function parse(fd: FormData) {
@@ -39,6 +40,7 @@ function parse(fd: FormData) {
     equityShare: optField(fd, 'equityShare'),
     defaultSettlementAccountId: optField(fd, 'defaultSettlementAccountId'),
     netFeesFromRemittance: fd.get('netFeesFromRemittance') === 'on',
+    collectsOrderPayments: fd.get('collectsOrderPayments') === 'on',
   });
 }
 

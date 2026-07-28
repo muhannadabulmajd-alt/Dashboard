@@ -16,21 +16,32 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   if (!can(user.role, 'manage:products')) return new NextResponse('Forbidden', { status: 403 });
 
   const { id } = await params;
-  const locale = (req.nextUrl.searchParams.get('locale') ?? 'en') as AppLocale;
+  const localeParam = req.nextUrl.searchParams.get('locale');
+  const locale: AppLocale = localeParam === 'ar' ? 'ar' : 'en';
+  const requestedCopies = Number.parseInt(req.nextUrl.searchParams.get('copies') ?? '1', 10);
+  const copies = Number.isFinite(requestedCopies) ? Math.min(24, Math.max(1, requestedCopies)) : 1;
+  const disposition = req.nextUrl.searchParams.get('disposition') === 'inline' ? 'inline' : 'attachment';
   const label = await getProductLabelData(id, locale);
   if (!label) return new NextResponse('Not found', { status: 404 });
 
-  const element = createElement(ProductLabelPdf, { label }) as Parameters<typeof renderToBuffer>[0];
+  const element = createElement(ProductLabelPdf, { label, copies }) as Parameters<typeof renderToBuffer>[0];
   const buffer = await renderToBuffer(element);
 
   await prisma.auditLog.create({
-    data: { userId: user.id, action: 'EXPORT', entity: 'product_label_pdf', entityId: id, metadata: { barcodeValue: label.barcodeValue } },
+    data: {
+      userId: user.id,
+      action: 'EXPORT',
+      entity: 'product_label_pdf',
+      entityId: id,
+      metadata: { retailBarcode: label.retailBarcode, copies, disposition },
+    },
   });
 
   return new NextResponse(new Uint8Array(buffer), {
     headers: {
       'Content-Type': 'application/pdf',
-      'Content-Disposition': `attachment; filename="laheeb-product-label-${label.barcodeValue}.pdf"`,
+      'Content-Disposition': `${disposition}; filename="laheeb-product-label-${label.retailBarcode}.pdf"`,
+      'Cache-Control': 'private, no-store',
     },
   });
 }

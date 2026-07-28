@@ -8,7 +8,12 @@ import { FULFILLMENT_METHODS } from '@/lib/enums';
 import { invoicePaymentSnapshot, invoiceTotal } from '@/lib/invoice';
 import { toMinor } from '@/lib/money';
 import { syncActiveCostForProducts } from '@/server/inventory/fifo';
-import { closeOrderFinance, syncOrderFinance, type FinanceSyncMode } from '@/server/finance/sync';
+import {
+  closeOrderFinance,
+  syncOrderCustomerBalance,
+  syncOrderFinance,
+  type FinanceSyncMode,
+} from '@/server/finance/sync';
 import { getOrderStatusRoleMap } from '@/server/lists/resolver';
 import { applySoldMovements, syncCustomerStats } from '@/server/orders/sync';
 import { generateOrderNumber } from '@/server/records/numbering';
@@ -24,6 +29,7 @@ const bulkOrderSchema = z.object({
   orderIds: z.array(z.string().min(1)).min(1).max(100),
   operation: z.enum(['STATUS', 'RECORD_PAID', 'ASSIGN_PROVIDER']),
   status: z.string().optional(),
+  completionMode: z.enum(['DIRECT', 'PROVIDER']).optional(),
   accountId: z.string().optional(),
   providerKey: z.enum(['HI_EXPRESS', 'WAYL']).optional(),
   paymentMethod: z.string().optional(),
@@ -67,8 +73,9 @@ const headerSchema = z.object({
   orderDiscount: z.coerce.number().int().nonnegative().default(0),
   extraCharges: z.coerce.number().int().nonnegative().default(0),
   notes: z.string().optional(),
-  financeMode: z.enum(['NONE', 'CREDIT', 'PAID', 'PARTIAL']).default('CREDIT'),
+  financeMode: z.enum(['NONE', 'CREDIT', 'PAID', 'PARTIAL', 'PROVIDER', 'KEEP']).default('CREDIT'),
   financeAccountId: z.string().optional(),
+  financeProviderId: z.string().optional(),
   financePaidAmount: z.coerce.number().int().nonnegative().optional(),
   financePaymentMethod: z.string().optional(),
   financePaymentDate: z.coerce.date().optional(),
@@ -100,6 +107,7 @@ function parseHeader(fd: FormData) {
     notes: optField(fd, 'notes'),
     financeMode: optField(fd, 'financeMode') || 'CREDIT',
     financeAccountId: optField(fd, 'financeAccountId'),
+    financeProviderId: optField(fd, 'financeProviderId'),
     financePaidAmount: optField(fd, 'financePaidAmount'),
     financePaymentMethod: optField(fd, 'financePaymentMethod'),
     financePaymentDate: optField(fd, 'financePaymentDate'),
@@ -180,12 +188,31 @@ export async function createOrder(_prev: ActionState, fd: FormData): Promise<Act
   const locale = reqField(fd, 'locale') || 'ar';
   if (h.data.orderNumber && await prisma.order.findUnique({ where: { orderNumber: h.data.orderNumber }, select: { id: true } }))
     return { error: 'exists', fieldErrors: { orderNumber: 'exists' } };
+  if (h.data.financeMode === 'KEEP') {
+    return { error: 'invalid', fieldErrors: { financeMode: 'invalid' } };
+  }
   if ((h.data.financeMode === 'PAID' || h.data.financeMode === 'PARTIAL') && !h.data.financeAccountId) {
     return { error: 'account', fieldErrors: { financeAccountId: 'account' } };
+  }
+  if (h.data.financeMode === 'PROVIDER' && !h.data.financeProviderId) {
+    return { error: 'provider', fieldErrors: { financeProviderId: 'provider' } };
   }
   const statusRoles = await getOrderStatusRoleMap();
   const statusRole = statusRoles.get(h.data.status) ?? 'UNKNOWN';
   const saleStatuses = [...statusRoles].filter(([, role]) => role === 'SALE').map(([code]) => code);
+  const provider = h.data.financeMode === 'PROVIDER'
+    ? await prisma.party.findFirst({
+        where: {
+          id: h.data.financeProviderId,
+          isActive: true,
+          collectsOrderPayments: true,
+        },
+        select: { id: true },
+      })
+    : null;
+  if (h.data.financeMode === 'PROVIDER' && !provider) {
+    return { error: 'provider', fieldErrors: { financeProviderId: 'provider' } };
+  }
 
   // Resolve products by SKU and build line rows (mirrors the CSV importer).
   const lineData: LineData[] = [];
@@ -220,6 +247,18 @@ export async function createOrder(_prev: ActionState, fd: FormData): Promise<Act
   const total = Math.max(0, gross - discount + h.data.deliveryFee + h.data.extraCharges);
   if (h.data.financeMode === 'PARTIAL' && (!h.data.financePaidAmount || h.data.financePaidAmount <= 0 || h.data.financePaidAmount >= total)) {
     return { error: 'partial', fieldErrors: { financePaidAmount: 'partial' } };
+  }
+  if (
+    statusRole === 'SALE' &&
+    total > 0 &&
+    h.data.financeMode !== 'PAID' &&
+    h.data.financeMode !== 'PROVIDER'
+  ) {
+    return {
+      error: 'payment_required',
+      formError: 'payment_required',
+      fieldErrors: { status: 'payment_required', financeMode: 'payment_required' },
+    };
   }
 
   let order: { id: string; orderNumber: string };
@@ -264,6 +303,7 @@ export async function createOrder(_prev: ActionState, fd: FormData): Promise<Act
         paymentMethod: h.data.financePaymentMethod,
         paymentDate: h.data.financePaymentDate,
         createdById: user.id,
+        partyId: provider?.id ?? null,
         statusRole,
       });
       stage = 'customer_stats';
@@ -304,9 +344,14 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
   const user = await requireCap(CAP);
   if (!user) return { error: 'forbidden' };
   const h = parseHeader(fd);
-  if (!h.success) return { error: 'invalid' };
+  if (!h.success) return headerActionError(h);
   const locale = reqField(fd, 'locale') || 'ar';
-  if ((h.data.financeMode === 'PAID' || h.data.financeMode === 'PARTIAL') && !h.data.financeAccountId) return { error: 'invalid' };
+  if ((h.data.financeMode === 'PAID' || h.data.financeMode === 'PARTIAL') && !h.data.financeAccountId) {
+    return { error: 'account', fieldErrors: { financeAccountId: 'account' } };
+  }
+  if (h.data.financeMode === 'PROVIDER' && !h.data.financeProviderId) {
+    return { error: 'provider', fieldErrors: { financeProviderId: 'provider' } };
+  }
   const statusRoles = await getOrderStatusRoleMap();
   const statusRole = statusRoles.get(h.data.status) ?? 'UNKNOWN';
   const saleStatuses = [...statusRoles].filter(([, role]) => role === 'SALE').map(([code]) => code);
@@ -320,14 +365,46 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
     return { error: 'nolines' };
   }
   const parsedLines = lineSchema.safeParse(rawLines);
-  if (!parsedLines.success || parsedLines.data.length === 0) return { error: 'nolines' };
+  if (!parsedLines.success) return lineActionError(parsedLines);
+  if (parsedLines.data.length === 0) return { error: 'nolines', fieldErrors: { lines: 'nolines' } };
 
   const existing = await prisma.order.findUnique({
     where: { id },
-    select: { id: true, customerId: true, inventorySyncMode: true, lines: { select: { productId: true } } },
+    select: {
+      id: true,
+      status: true,
+      customerId: true,
+      inventorySyncMode: true,
+      grossAmount: true,
+      discountAmount: true,
+      refundAmount: true,
+      deliveryFee: true,
+      extraCharges: true,
+      lines: { select: { productId: true } },
+    },
   });
   if (!existing) return { error: 'notfound' };
   const oldProductIds = existing.lines.map((l) => l.productId);
+  const existingFinanceEntries = await prisma.financeEntry.findMany({
+    where: { OR: [{ orderId: id }, { settles: { is: { orderId: id } } }] },
+    select: {
+      id: true,
+      orderId: true,
+      type: true,
+      amount: true,
+      obligation: true,
+      obligationKind: true,
+      settlesId: true,
+      archivedAt: true,
+      reversedAt: true,
+      reversalOfId: true,
+      date: true,
+      paymentMethod: true,
+      account: { select: { name: true } },
+      party: { select: { id: true, name: true, collectsOrderPayments: true } },
+    },
+  });
+  const paymentBefore = invoicePaymentSnapshot(existing, existingFinanceEntries);
 
   const lineData: LineData[] = [];
   for (const l of parsedLines.data) {
@@ -347,59 +424,148 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
   const customer = h.data.customerExternalId
     ? await prisma.customer.findUnique({ where: { externalId: h.data.customerExternalId }, select: { id: true } })
     : null;
+  if (h.data.customerExternalId && !customer) {
+    return { error: 'customer', fieldErrors: { customerExternalId: 'customer' } };
+  }
   const gross = lineData.reduce((s, l) => s + l.unitGrossPrice * l.quantity, 0);
   const discount = lineData.reduce((s, l) => s + l.lineDiscount, 0) + h.data.orderDiscount;
   const total = Math.max(0, gross - discount + h.data.deliveryFee + h.data.extraCharges);
   if (h.data.financeMode === 'PARTIAL' && (!h.data.financePaidAmount || h.data.financePaidAmount <= 0 || h.data.financePaidAmount >= total)) {
-    return { error: 'invalid' };
+    return { error: 'partial', fieldErrors: { financePaidAmount: 'partial' } };
   }
+  if (total < paymentBefore.paid) {
+    return {
+      error: 'payment_exceeds_total',
+      formError: 'payment_exceeds_total',
+      fieldErrors: { lines: 'payment_exceeds_total' },
+    };
+  }
+  if (statusRole === 'RETURN' && paymentBefore.paid > 0) {
+    return {
+      error: 'refund_required',
+      formError: 'refund_required',
+      fieldErrors: { status: 'refund_required' },
+    };
+  }
+  const needsCompletionPayment = statusRole === 'SALE' && total > paymentBefore.paid;
+  if (
+    needsCompletionPayment &&
+    h.data.financeMode !== 'PAID' &&
+    h.data.financeMode !== 'PROVIDER'
+  ) {
+    return {
+      error: 'payment_required',
+      formError: 'payment_required',
+      fieldErrors: { status: 'payment_required', financeMode: 'payment_required' },
+    };
+  }
+  if (!needsCompletionPayment && h.data.financeMode !== 'KEEP') {
+    return {
+      error: 'payment_read_only',
+      formError: 'payment_read_only',
+      fieldErrors: { financeMode: 'payment_read_only' },
+    };
+  }
+  const provider = h.data.financeMode === 'PROVIDER'
+    ? await prisma.party.findFirst({
+        where: {
+          id: h.data.financeProviderId,
+          isActive: true,
+          collectsOrderPayments: true,
+        },
+        select: { id: true },
+      })
+    : null;
+  if (h.data.financeMode === 'PROVIDER' && !provider) {
+    return { error: 'provider', fieldErrors: { financeProviderId: 'provider' } };
+  }
+  const previousTotal = invoiceTotal(existing);
 
   // Replace lines + update header + recompute totals atomically, and reverse +
   // reapply the order's stock deductions. orderNumber is immutable (CR-5).
-  await prisma.$transaction(async (tx) => {
-    await tx.orderLine.deleteMany({ where: { orderId: id } });
-    await tx.stockMovement.deleteMany({ where: { orderId: id } });
-    await tx.order.update({
-      where: { id },
-      data: {
-        placedAt: h.data.placedAt,
-        customerId: customer?.id ?? null,
-        channel: h.data.channel,
-        governorate: h.data.governorate,
-        fulfillmentMethod: h.data.fulfillmentMethod,
-        status: h.data.status,
-        grossAmount: gross,
-        discountAmount: discount,
-        orderDiscount: h.data.orderDiscount,
-        extraCharges: h.data.extraCharges,
-        notes: h.data.notes ?? null,
-        refundAmount: refundFor(statusRole === 'RETURN', gross, discount, h.data.deliveryFee, h.data.extraCharges),
-        deliveryFee: h.data.deliveryFee,
-        deliveryCost: h.data.deliveryCost,
-        lines: { create: lineData },
-      },
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.orderLine.deleteMany({ where: { orderId: id } });
+      await tx.stockMovement.deleteMany({ where: { orderId: id } });
+      await tx.order.update({
+        where: { id },
+        data: {
+          placedAt: h.data.placedAt,
+          customerId: customer?.id ?? null,
+          channel: h.data.channel,
+          governorate: h.data.governorate,
+          fulfillmentMethod: h.data.fulfillmentMethod,
+          status: h.data.status,
+          grossAmount: gross,
+          discountAmount: discount,
+          orderDiscount: h.data.orderDiscount,
+          extraCharges: h.data.extraCharges,
+          notes: h.data.notes ?? null,
+          refundAmount: refundFor(statusRole === 'RETURN', gross, discount, h.data.deliveryFee, h.data.extraCharges),
+          deliveryFee: h.data.deliveryFee,
+          deliveryCost: h.data.deliveryCost,
+          lines: { create: lineData },
+        },
+      });
+      // Prior deductions were cleared above; re-apply only for a completed-sale role.
+      if (statusRole === 'SALE' && existing.inventorySyncMode === 'NORMAL') {
+        await applySoldMovements(tx, id, h.data.placedAt, lineData);
+      }
+      if (needsCompletionPayment) {
+        await syncOrderFinance(tx, id, {
+          mode: h.data.financeMode as FinanceSyncMode,
+          accountId: h.data.financeAccountId,
+          dueDate: h.data.financeDueDate,
+          paymentMethod: h.data.financePaymentMethod,
+          paymentDate: h.data.financePaymentDate,
+          createdById: user.id,
+          partyId: provider?.id ?? null,
+          statusRole,
+        });
+      } else if (total !== previousTotal && (statusRole === 'OPEN' || statusRole === 'SALE')) {
+        if (paymentBefore.route === 'PROVIDER' && paymentBefore.providerPartyId) {
+          await syncOrderFinance(tx, id, {
+            mode: 'PROVIDER',
+            partyId: paymentBefore.providerPartyId,
+            dueDate: h.data.financeDueDate,
+            paymentMethod: paymentBefore.paymentMethod,
+            createdById: user.id,
+            statusRole,
+          });
+        } else if (
+          paymentBefore.receivableIds.length > 0 ||
+          paymentBefore.route === 'DIRECT'
+        ) {
+          await syncOrderCustomerBalance(tx, id, {
+            dueDate: h.data.financeDueDate,
+            createdById: user.id,
+          });
+        }
+      }
+      await syncCustomerStats(tx, existing.customerId, saleStatuses);
+      if (customer?.id !== existing.customerId) await syncCustomerStats(tx, customer?.id, saleStatuses);
     });
-    // Prior deductions were cleared above; re-apply only for a completed-sale role.
-    if (statusRole === 'SALE' && existing.inventorySyncMode === 'NORMAL') {
-      await applySoldMovements(tx, id, h.data.placedAt, lineData);
-    }
-    await syncOrderFinance(tx, id, {
-      mode: h.data.financeMode as FinanceSyncMode,
-      accountId: h.data.financeAccountId,
-      dueDate: h.data.financeDueDate,
-      paidAmount: h.data.financePaidAmount,
-      paymentMethod: h.data.financePaymentMethod,
-      paymentDate: h.data.financePaymentDate,
-      createdById: user.id,
-      statusRole,
-    });
-    await syncCustomerStats(tx, existing.customerId, saleStatuses);
-    if (customer?.id !== existing.customerId) await syncCustomerStats(tx, customer?.id, saleStatuses);
-  });
+  } catch (error) {
+    const debugId = `order-edit-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    orderActionError(error, { stage: 'order_update', debugId, orderId: id, total, previousTotal });
+    return {
+      error: error instanceof Error ? error.message : 'order_update_failed',
+      formError: 'order_update_failed',
+      debugId,
+    };
+  }
   // Re-derive FIFO cost for items touched before or after the edit (a removed
   // line reverses its consumption; an added line consumes), §8.
   await syncActiveCostForProducts([...oldProductIds, ...lineData.map((l) => l.productId)]);
-  await audit(user.id, 'UPDATE', 'Order', { id, lines: lineData.length, gross, discount });
+  await audit(user.id, 'UPDATE', 'Order', {
+    id,
+    lines: lineData.length,
+    gross,
+    discount,
+    paymentBefore,
+    totalAfter: total,
+    paymentCapture: needsCompletionPayment ? h.data.financeMode : 'KEEP',
+  });
   revalidatePath(LIST, 'page');
   revalidatePath(FINANCE, 'page');
   revalidatePath(LEDGER, 'page');
@@ -439,6 +605,7 @@ export async function bulkUpdateOrders(_prev: ActionState, fd: FormData): Promis
     orderIds: ids,
     operation: reqField(fd, 'operation'),
     status: optField(fd, 'status'),
+    completionMode: optField(fd, 'completionMode'),
     accountId: optField(fd, 'accountId'),
     providerKey: optField(fd, 'providerKey'),
     paymentMethod: optField(fd, 'paymentMethod'),
@@ -462,10 +629,58 @@ export async function bulkUpdateOrders(_prev: ActionState, fd: FormData): Promis
       if (orders.length !== input.orderIds.length) throw new Error('notfound');
       const changedCustomers = new Set<string>();
       let amountApplied = 0;
+      const account = input.accountId
+        ? await tx.financeAccount.findUnique({
+            where: { id: input.accountId },
+            select: { id: true, currency: true },
+          })
+        : null;
+      if (input.accountId && (!account || account.currency !== 'IQD')) throw new Error('account');
+      const provider = input.providerKey
+        ? await tx.party.findUnique({
+            where: { externalKey: input.providerKey },
+            select: { id: true, collectsOrderPayments: true, isActive: true },
+          })
+        : null;
+      if (
+        input.providerKey &&
+        (!provider?.isActive || !provider.collectsOrderPayments)
+      ) {
+        throw new Error('provider');
+      }
 
       if (input.operation === 'STATUS') {
         const nextRole = statusRoles.get(input.status as string) ?? 'UNKNOWN';
         for (const order of orders) {
+          const entries = await tx.financeEntry.findMany({
+            where: { OR: [{ orderId: order.id }, { settles: { is: { orderId: order.id } } }] },
+            select: {
+              id: true,
+              orderId: true,
+              type: true,
+              amount: true,
+              obligation: true,
+              obligationKind: true,
+              settlesId: true,
+              archivedAt: true,
+              reversedAt: true,
+              reversalOfId: true,
+              date: true,
+              paymentMethod: true,
+              account: { select: { name: true } },
+              party: { select: { id: true, name: true, collectsOrderPayments: true } },
+            },
+          });
+          const payment = invoicePaymentSnapshot(order, entries);
+          if (nextRole === 'SALE' && payment.remaining > 0) {
+            if (input.completionMode === 'DIRECT') {
+              if (!account || !input.date) throw new Error('account');
+            } else if (input.completionMode === 'PROVIDER') {
+              if (!provider) throw new Error('provider');
+            } else {
+              throw new Error('payment_required');
+            }
+          }
           const oldRole = statusRoles.get(order.status) ?? 'UNKNOWN';
           if (oldRole !== nextRole) {
             await tx.stockMovement.deleteMany({ where: { orderId: order.id, reason: 'SOLD' } });
@@ -474,58 +689,71 @@ export async function bulkUpdateOrders(_prev: ActionState, fd: FormData): Promis
             }
           }
           await tx.order.update({ where: { id: order.id }, data: { status: input.status } });
+          if (nextRole === 'SALE' && payment.remaining > 0) {
+            await syncOrderFinance(tx, order.id, {
+              mode: input.completionMode === 'PROVIDER' ? 'PROVIDER' : 'PAID',
+              accountId: account?.id ?? null,
+              partyId: provider?.id ?? null,
+              paymentMethod: input.paymentMethod ?? null,
+              paymentDate: input.date ?? null,
+              createdById: user.id,
+              statusRole: nextRole,
+            });
+            amountApplied += payment.remaining;
+          }
           if (order.customerId) changedCustomers.add(order.customerId);
         }
       }
 
       if (input.operation === 'ASSIGN_PROVIDER') {
-        const provider = await tx.party.findUnique({ where: { externalKey: input.providerKey }, select: { id: true } });
         if (!provider) throw new Error('provider');
         for (const order of orders) {
-          const updated = await tx.financeEntry.updateMany({
-            where: {
-              orderId: order.id,
-              obligation: true,
-              obligationKind: 'RECEIVABLE',
-              archivedAt: null,
-              reversedAt: null,
-              reversalOfId: null,
-            },
-            data: { partyId: provider.id },
+          const role = statusRoles.get(order.status) ?? 'UNKNOWN';
+          if (role !== 'OPEN' && role !== 'SALE') throw new Error('status');
+          await syncOrderFinance(tx, order.id, {
+            mode: 'PROVIDER',
+            partyId: provider.id,
+            paymentMethod: input.paymentMethod ?? null,
+            paymentDate: input.date ?? null,
+            createdById: user.id,
+            statusRole: role,
           });
-          if (!updated.count) throw new Error('receivable');
         }
       }
 
       if (input.operation === 'RECORD_PAID') {
-        const account = await tx.financeAccount.findUnique({ where: { id: input.accountId }, select: { id: true, currency: true } });
-        if (!account || account.currency !== 'IQD') throw new Error('account');
+        if (!account || !input.date) throw new Error('account');
         for (const order of orders) {
           const entries = await tx.financeEntry.findMany({
             where: { OR: [{ orderId: order.id }, { settles: { is: { orderId: order.id } } }] },
-            select: { id: true, orderId: true, type: true, amount: true, obligation: true, obligationKind: true, settlesId: true, archivedAt: true, reversedAt: true, reversalOfId: true },
+            select: {
+              id: true,
+              orderId: true,
+              type: true,
+              amount: true,
+              obligation: true,
+              obligationKind: true,
+              settlesId: true,
+              archivedAt: true,
+              reversedAt: true,
+              reversalOfId: true,
+              date: true,
+              paymentMethod: true,
+              account: { select: { name: true } },
+              party: { select: { id: true, name: true, collectsOrderPayments: true } },
+            },
           });
           const payment = invoicePaymentSnapshot(order, entries);
           if (payment.remaining <= 0) continue;
-          if (!payment.receivableIds.length) throw new Error('receivable');
-          const receivable = await tx.financeEntry.findUnique({ where: { id: payment.receivableIds[0] }, select: { partyId: true } });
-          await tx.financeEntry.create({
-            data: {
-              date: input.date as Date,
-              type: 'PAYMENT_IN',
-              amount: payment.remaining,
-              currency: 'IQD',
-              obligation: false,
-              accountId: account.id,
-              partyId: receivable?.partyId ?? null,
-              paymentMethod: input.paymentMethod ?? null,
-              settlesId: payment.receivableIds[0],
-              branchId: order.branchId,
-              orderId: order.id,
-              reference: order.orderNumber,
-              description: `Bulk order payment: ${order.orderNumber}`,
-              createdById: user.id,
-            },
+          const role = statusRoles.get(order.status) ?? 'UNKNOWN';
+          if (role !== 'OPEN' && role !== 'SALE') throw new Error('status');
+          await syncOrderFinance(tx, order.id, {
+            mode: 'PAID',
+            accountId: account.id,
+            paymentMethod: input.paymentMethod ?? null,
+            paymentDate: input.date,
+            createdById: user.id,
+            statusRole: role,
           });
           amountApplied += payment.remaining;
         }
@@ -537,7 +765,15 @@ export async function bulkUpdateOrders(_prev: ActionState, fd: FormData): Promis
           userId: user.id,
           action: `BULK_ORDER_${input.operation}`,
           entity: 'Order',
-          metadata: { orderIds: input.orderIds, count: orders.length, status: input.status ?? null, providerKey: input.providerKey ?? null, accountId: input.accountId ?? null, amountApplied },
+          metadata: {
+            orderIds: input.orderIds,
+            count: orders.length,
+            status: input.status ?? null,
+            completionMode: input.completionMode ?? null,
+            providerKey: input.providerKey ?? null,
+            accountId: input.accountId ?? null,
+            amountApplied,
+          },
         },
       });
       return { count: orders.length, amountApplied };
@@ -593,57 +829,77 @@ export async function recordInvoicePayment(
   });
   if (!order) return;
 
-  const entries = await prisma.financeEntry.findMany({
-    where: {
-      OR: [{ orderId }, { settles: { is: { orderId } } }],
-    },
-    select: {
-      id: true,
-      orderId: true,
-      type: true,
-      amount: true,
-      obligation: true,
-      obligationKind: true,
-      settlesId: true,
-      archivedAt: true,
-      reversedAt: true,
-      reversalOfId: true,
-    },
+  const result = await prisma.$transaction(async (tx) => {
+    const account = await tx.financeAccount.findUnique({
+      where: { id: parsed.data.accountId },
+      select: { id: true, currency: true },
+    });
+    if (!account || account.currency !== order.currency) throw new Error('account');
+    const readSnapshot = async () => {
+      const entries = await tx.financeEntry.findMany({
+        where: { OR: [{ orderId }, { settles: { is: { orderId } } }] },
+        select: {
+          id: true,
+          orderId: true,
+          type: true,
+          amount: true,
+          obligation: true,
+          obligationKind: true,
+          settlesId: true,
+          archivedAt: true,
+          reversedAt: true,
+          reversalOfId: true,
+          date: true,
+          paymentMethod: true,
+          account: { select: { name: true } },
+          party: { select: { id: true, name: true, collectsOrderPayments: true } },
+        },
+      });
+      return invoicePaymentSnapshot(order, entries);
+    };
+    let snapshot = await readSnapshot();
+    if (snapshot.remaining <= 0) return null;
+    if (!snapshot.receivableIds.length) {
+      await syncOrderCustomerBalance(tx, orderId, {
+        dueDate: parsed.data.date,
+        createdById: user.id,
+      });
+      snapshot = await readSnapshot();
+    }
+    const receivableId = snapshot.receivableIds[0];
+    if (!receivableId) throw new Error('receivable');
+    const amount = Math.min(toMinor(parsed.data.amount, order.currency), snapshot.remaining);
+    const receivable = await tx.financeEntry.findUnique({
+      where: { id: receivableId },
+      select: { partyId: true },
+    });
+    const payment = await tx.financeEntry.create({
+      data: {
+        date: parsed.data.date,
+        type: 'PAYMENT_IN',
+        amount,
+        currency: order.currency,
+        obligation: false,
+        accountId: account.id,
+        partyId: receivable?.partyId ?? null,
+        paymentMethod: parsed.data.paymentMethod ?? null,
+        settlesId: receivableId,
+        branchId: order.branchId,
+        orderId: order.id,
+        reference: order.orderNumber,
+        description: `Invoice payment: ${order.orderNumber}`,
+        createdById: user.id,
+      },
+    });
+    return { payment, amount, remainingBefore: snapshot.remaining };
   });
-  const snapshot = invoicePaymentSnapshot(order, entries);
-  if (snapshot.remaining <= 0 || snapshot.receivableIds.length === 0) return;
-
-  const amount = Math.min(toMinor(parsed.data.amount, order.currency), snapshot.remaining);
-  const receivableId = snapshot.receivableIds[0];
-  const receivable = await prisma.financeEntry.findUnique({
-    where: { id: receivableId },
-    select: { partyId: true },
-  });
-
-  const payment = await prisma.financeEntry.create({
-    data: {
-      date: parsed.data.date,
-      type: 'PAYMENT_IN',
-      amount,
-      currency: order.currency,
-      obligation: false,
-      accountId: parsed.data.accountId,
-      partyId: receivable?.partyId ?? null,
-      paymentMethod: parsed.data.paymentMethod ?? null,
-      settlesId: receivableId,
-      branchId: order.branchId,
-      orderId: order.id,
-      reference: order.orderNumber,
-      description: `Invoice payment: ${order.orderNumber}`,
-      createdById: user.id,
-    },
-  });
+  if (!result) return;
   await audit(user.id, 'INVOICE_PAYMENT', 'FinanceEntry', {
-    id: payment.id,
+    id: result.payment.id,
     orderId,
-    amount,
+    amount: result.amount,
     total: invoiceTotal(order),
-    remainingBefore: snapshot.remaining,
+    remainingBefore: result.remainingBefore,
     paymentMethod: parsed.data.paymentMethod ?? null,
   });
   revalidatePath(FINANCE, 'page');

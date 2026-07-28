@@ -5,14 +5,29 @@ on:
     branches: [main]
   pull_request:
 
-# prisma generate (postinstall) reads the datasource env even though it does not
-# connect; a dummy URL keeps it from erroring in CI.
 env:
-  DATABASE_URL: postgresql://user:pass@localhost:5432/db
+  DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/laheeb_ci?schema=public
+  AUTH_SECRET: github-ci-secret-at-least-32-characters
+  AUTH_TRUST_HOST: "true"
+  NEXT_PUBLIC_USD_PER_IQD: "0.000667"
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: laheeb_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d laheeb_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -23,5 +38,13 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm exec prisma validate
+      - run: pnpm exec prisma generate
+      - run: pnpm lint
       - run: pnpm typecheck
+      - run: pnpm exec vitest run tests/barcode.test.ts tests/invoice.test.ts tests/provider-settlement.test.ts
       - run: pnpm test
+      - run: pnpm exec prisma migrate deploy
+      - run: pnpm db:seed
+      - run: pnpm check:reconciliation
+      - run: pnpm build

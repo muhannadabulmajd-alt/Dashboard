@@ -6,9 +6,10 @@ import { PageHeader } from '@/components/ui/primitives';
 import { BackLink } from '@/components/records/parts';
 import { OrderForm, type OrderLineInput } from '@/components/records/OrderForm';
 import { getOrderCatalog } from '@/server/records/order-catalog';
-import { getListOptions } from '@/server/lists/resolver';
+import { getListOptions, getOrderStatusRoleMap } from '@/server/lists/resolver';
 import { updateOrder } from '@/server/records/orders';
 import { createCustomerInline } from '@/server/records/customers';
+import { invoicePaymentSnapshot } from '@/lib/invoice';
 
 export default async function EditOrderPage({
   params,
@@ -20,7 +21,8 @@ export default async function EditOrderPage({
   const { locale } = await getPageContext(params, searchParams, 'manage:orders');
   const { id } = await params;
   const t = await getTranslations('records');
-  const [catalog, channels, governorates, fulfillment, statuses, accounts, paymentMethods, financeEntries, customers] = await Promise.all([
+  const ti = await getTranslations('invoice');
+  const [catalog, channels, governorates, fulfillment, statuses, accounts, paymentMethods, financeEntries, customers, providers, statusRoles] = await Promise.all([
     getOrderCatalog(locale, t('ungrouped')),
     getListOptions('channel', locale),
     getListOptions('governorate', locale),
@@ -29,8 +31,26 @@ export default async function EditOrderPage({
     prisma.financeAccount.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true, currency: true } }),
     getListOptions('paymentMethod', locale),
     prisma.financeEntry.findMany({
-      where: { orderId: id, importKey: { startsWith: `ORD:${id}:` }, reversedAt: null, reversalOfId: null },
-      select: { importKey: true, obligation: true, accountId: true, dueDate: true, amount: true, paymentMethod: true, date: true },
+      where: { OR: [{ orderId: id }, { settles: { is: { orderId: id } } }] },
+      select: {
+        id: true,
+        orderId: true,
+        importKey: true,
+        type: true,
+        amount: true,
+        obligation: true,
+        obligationKind: true,
+        settlesId: true,
+        accountId: true,
+        dueDate: true,
+        paymentMethod: true,
+        date: true,
+        archivedAt: true,
+        reversedAt: true,
+        reversalOfId: true,
+        account: { select: { name: true } },
+        party: { select: { id: true, name: true, collectsOrderPayments: true } },
+      },
     }),
     prisma.customer.findMany({
       where: { isActive: true, externalId: { not: null } },
@@ -38,6 +58,12 @@ export default async function EditOrderPage({
       take: 500,
       select: { externalId: true, nameEn: true, nameAr: true, phone: true },
     }),
+    prisma.party.findMany({
+      where: { isActive: true, collectsOrderPayments: true },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true },
+    }),
+    getOrderStatusRoleMap(),
   ]);
 
   const o = await prisma.order.findUnique({
@@ -45,11 +71,11 @@ export default async function EditOrderPage({
     include: { customer: { select: { externalId: true } }, lines: { orderBy: { id: 'asc' } } },
   });
   if (!o) notFound();
-  const financeAr = financeEntries.find((entry) => entry.importKey === `ORD:${id}:AR`);
-  const financePay = financeEntries.find((entry) => entry.importKey === `ORD:${id}:PAY`);
-  const financePartial = financeEntries.find((entry) => entry.importKey === `ORD:${id}:PARTIAL`);
-  const activeFinance = financePartial ?? financePay ?? financeAr;
-  const financeMode = financePartial ? 'PARTIAL' : financePay ? 'PAID' : financeAr ? 'CREDIT' : 'CREDIT';
+  const payment = invoicePaymentSnapshot(o, financeEntries);
+  const financeAr = financeEntries.find((entry) => payment.receivableIds.includes(entry.id));
+  const saleStatusValues = [...statusRoles]
+    .filter(([, role]) => role === 'SALE')
+    .map(([code]) => code);
 
   const initial = {
     header: {
@@ -65,11 +91,12 @@ export default async function EditOrderPage({
       orderDiscount: String(o.orderDiscount),
       extraCharges: String(o.extraCharges),
       notes: o.notes ?? '',
-      financeMode,
-      financeAccountId: activeFinance?.accountId ?? '',
-      financePaidAmount: financePartial ? String(financePartial.amount) : '',
-      financePaymentMethod: activeFinance?.paymentMethod ?? '',
-      financePaymentDate: activeFinance?.date ? activeFinance.date.toISOString().slice(0, 10) : o.placedAt.toISOString().slice(0, 10),
+      financeMode: 'KEEP',
+      financeAccountId: '',
+      financeProviderId: payment.providerPartyId ?? '',
+      financePaidAmount: '',
+      financePaymentMethod: payment.paymentMethod ?? '',
+      financePaymentDate: payment.paymentDate ? payment.paymentDate.toISOString().slice(0, 10) : o.placedAt.toISOString().slice(0, 10),
       financeDueDate: financeAr?.dueDate ? financeAr.dueDate.toISOString().slice(0, 10) : o.placedAt.toISOString().slice(0, 10),
     },
     lines: o.lines.map(
@@ -128,12 +155,27 @@ export default async function EditOrderPage({
     financeCredit: t('f.financeCredit'),
     financePaid: t('f.financePaid'),
     financePartial: t('f.financePartial'),
+    financeProvider: t('f.financeProvider'),
     financeNone: t('f.financeNone'),
     financePaidAmount: t('f.financePaidAmount'),
     paymentAccount: t('f.paymentAccount'),
     paymentMethod: t('f.paymentMethod'),
     paymentDate: t('f.paymentDate'),
     paymentDueDate: t('f.paymentDueDate'),
+    provider: t('f.provider'),
+    paid: t('f.paid'),
+    remaining: t('f.remaining'),
+    paymentStatus: t('f.paymentStatus'),
+    paymentRoute: t('f.paymentRoute'),
+    providerOutstanding: t('f.providerOutstanding'),
+    paymentReadOnlyHint: t('orderForm.paymentReadOnlyHint'),
+    choosePaymentRoute: t('orderForm.choosePaymentRoute'),
+    completionPaymentHint: t('orderForm.completionPaymentHint'),
+    scanBarcode: t('orderForm.scanBarcode'),
+    scanBarcodeHint: t('orderForm.scanBarcodeHint'),
+    addScannedItem: t('orderForm.addScannedItem'),
+    scanAdded: t('orderForm.scanAdded'),
+    scanNotFound: t('orderForm.scanNotFound'),
     addLine: t('addLine'),
     removeLine: t('removeLine'),
     itemsHint: t('orderForm.itemsHint'),
@@ -158,6 +200,12 @@ export default async function EditOrderPage({
     finance_sync_failed: t('err.finance_sync_failed'),
     customer_stats_failed: t('err.customer_stats_failed'),
     notfound: t('err.notfound'),
+    provider: t('err.provider'),
+    payment_required: t('err.payment_required'),
+    payment_read_only: t('err.payment_read_only'),
+    payment_exceeds_total: t('err.payment_exceeds_total'),
+    refund_required: t('err.refund_required'),
+    order_update_failed: t('err.order_update_failed'),
   };
 
   return (
@@ -172,6 +220,8 @@ export default async function EditOrderPage({
         fulfillmentOptions={fulfillment}
         statusOptions={statuses}
         accountOptions={accounts.map((a) => ({ value: a.id, label: `${a.name} (${a.currency})` }))}
+        providerOptions={providers.map((provider) => ({ value: provider.id, label: provider.name }))}
+        saleStatusValues={saleStatusValues}
         paymentMethodOptions={paymentMethods}
         labels={labels}
         errors={errors}
@@ -186,6 +236,17 @@ export default async function EditOrderPage({
           phone: customer.phone,
         }))}
         inlineCustomerAction={createCustomerInline}
+        paymentSummary={{
+          total: payment.total,
+          paid: payment.paid,
+          remaining: payment.remaining,
+          status: payment.status,
+          statusLabel: ti(`paymentStatus.${payment.status}`),
+          route: payment.route,
+          routeLabel: ti(`route.${payment.route}`),
+          providerName: payment.providerName,
+          providerOutstanding: payment.providerOutstanding,
+        }}
       />
     </>
   );

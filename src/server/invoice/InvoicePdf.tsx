@@ -3,10 +3,13 @@ import { activeInvoiceFinanceEntry } from '@/lib/invoice';
 import { enumLabel } from '@/lib/enums';
 import { formatDate } from '@/lib/dates';
 import { formatMoney, type AppLocale } from '@/lib/money';
+import { registerLaheebPdfFonts } from '@/server/pdf/laheeb-pdf';
 import type { InvoiceData } from './data';
 
+registerLaheebPdfFonts();
+
 const styles = StyleSheet.create({
-  page: { padding: 32, fontSize: 9, color: '#2f211b' },
+  page: { padding: 32, fontFamily: 'Amiri', fontSize: 9, color: '#2f211b' },
   header: { flexDirection: 'row', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: '#e7ded2', paddingBottom: 14 },
   brand: { fontSize: 15, fontWeight: 'bold', color: '#532d1f' },
   title: { fontSize: 20, fontWeight: 'bold', color: '#9b3a22', textAlign: 'right' },
@@ -35,8 +38,12 @@ export function InvoicePdf({ data, labels, locale }: { data: InvoiceData; labels
     labels.walkIn;
   const paymentRows = financeEntries.filter((entry) => {
     if (!activeInvoiceFinanceEntry(entry)) return false;
+    if (payment.providerReceivableIds.includes(entry.id)) return true;
     if (entry.type === 'INCOME' && !entry.obligation && entry.orderId === order.id) return true;
-    return entry.type === 'PAYMENT_IN' && Boolean(entry.settlesId && payment.receivableIds.includes(entry.settlesId));
+    return entry.type === 'PAYMENT_IN' && Boolean(
+      entry.settlesId &&
+      [...payment.receivableIds, ...payment.providerReceivableIds].includes(entry.settlesId),
+    );
   });
   const lineDiscount = Math.max(0, order.discountAmount - order.orderDiscount);
 
@@ -93,15 +100,28 @@ export function InvoicePdf({ data, labels, locale }: { data: InvoiceData; labels
           {order.orderDiscount ? <Summary label={labels.orderDiscount} value={`- ${m(order.orderDiscount)}`} /> : null}
           {order.deliveryFee ? <Summary label={labels.delivery} value={m(order.deliveryFee)} /> : null}
           {order.extraCharges ? <Summary label={labels.extraCharges} value={m(order.extraCharges)} /> : null}
+          {order.refundAmount ? <Summary label={labels.refunds} value={`- ${m(order.refundAmount)}`} /> : null}
           <Summary label={labels.grandTotal} value={m(payment.total)} strong />
           <Summary label={labels.paid} value={m(payment.paid)} />
           <Summary label={labels.remaining} value={m(payment.remaining)} strong />
+          <Summary label={labels.paymentRoute} value={labels[`route.${payment.route}`]} />
+          {payment.providerName ? <Summary label={labels.provider} value={payment.providerName} /> : null}
+          {payment.providerCollected > 0 ? (
+            <>
+              <Summary label={labels.providerCollected} value={m(payment.providerCollected)} />
+              <Summary label={labels.providerRemitted} value={m(payment.providerRemitted)} />
+              <Summary label={labels.providerFeesOffset} value={m(payment.providerFeesOffset)} />
+              <Summary label={labels.providerOutstanding} value={m(payment.providerOutstanding)} />
+            </>
+          ) : null}
         </View>
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>{labels.paymentHistory}</Text>
           {paymentRows.length ? paymentRows.map((entry) => (
-            <Text key={entry.id}>{formatDate(entry.date, locale)} - {m(entry.amount)} - {entry.account?.name ?? ''}</Text>
+            <Text key={entry.id}>
+              {formatDate(entry.date, locale)} - {m(entry.amount)} - {entry.account?.name ?? entry.party?.name ?? ''}
+            </Text>
           )) : <Text style={styles.muted}>{labels.noPayments}</Text>}
         </View>
       </Page>

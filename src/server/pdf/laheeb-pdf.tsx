@@ -7,7 +7,15 @@ let fontsRegistered = false;
 
 export function registerLaheebPdfFonts() {
   if (fontsRegistered) return;
-  Font.register({ family: 'Amiri', src: path.join(process.cwd(), 'public/fonts/Amiri-Regular.ttf') });
+  const amiriRegular = path.join(process.cwd(), 'public/fonts/Amiri-Regular.ttf');
+  const amiriBold = path.join(process.cwd(), 'public/fonts/Amiri-Bold.ttf');
+  Font.register({
+    family: 'Amiri',
+    fonts: [
+      { src: amiriRegular, fontWeight: 400 },
+      { src: amiriBold, fontWeight: 700 },
+    ],
+  });
   fontsRegistered = true;
 }
 

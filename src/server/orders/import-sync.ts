@@ -58,13 +58,25 @@ export async function upsertImportedOrder(
     ? await tx.financeAccount.findUnique({ where: { externalKey: order.paymentAccountKey }, select: { id: true } })
     : null;
   const party = order.paymentPartyKey
-    ? await tx.party.findUnique({ where: { externalKey: order.paymentPartyKey }, select: { id: true } })
+    ? await tx.party.findUnique({
+        where: { externalKey: order.paymentPartyKey },
+        select: { id: true, collectsOrderPayments: true },
+      })
     : null;
   if (order.paymentMode === 'PAID' && !account) {
     throw new Error(`${order.orderNumber}: paid orders require a valid payment account key`);
   }
   if (order.paymentMode === 'CREDIT' && !party) {
     throw new Error(`${order.orderNumber}: credit orders require a valid payment party key`);
+  }
+  if (
+    input.statusRole === 'SALE' &&
+    order.paymentMode === 'CREDIT' &&
+    !party?.collectsOrderPayments
+  ) {
+    throw new Error(
+      `${order.orderNumber}: completed orders must be paid directly or collected by a configured provider`,
+    );
   }
 
   const existing = await tx.order.findUnique({

@@ -20,6 +20,7 @@ export function partyFields(
     { name: 'openingPayable', label: t('f.openingPayable'), type: 'number', hint: t('h.openingPayable') },
     { name: 'openingReceivable', label: t('f.openingReceivable'), type: 'number', hint: t('h.openingReceivable') },
     { name: 'defaultSettlementAccountId', label: t('f.defaultSettlementAccount'), type: 'select', options: accountOptions, hint: t('h.defaultSettlementAccount'), showWhen: { field: 'type', in: ['SERVICE_PROVIDER', 'SUPPLIER'] } },
+    { name: 'collectsOrderPayments', label: t('f.collectsOrderPayments'), type: 'checkbox', hint: t('h.collectsOrderPayments'), showWhen: { field: 'type', in: ['SERVICE_PROVIDER'] } },
     { name: 'netFeesFromRemittance', label: t('f.netFeesFromRemittance'), type: 'checkbox', hint: t('h.netFeesFromRemittance'), showWhen: { field: 'type', in: ['SERVICE_PROVIDER', 'SUPPLIER'] } },
     { name: 'equityShare', label: t('f.equityShare'), type: 'number', step: '0.1', hint: t('h.equityShare') },
     { name: 'notes', label: t('f.notes'), type: 'text', hint: t('h.notes') },

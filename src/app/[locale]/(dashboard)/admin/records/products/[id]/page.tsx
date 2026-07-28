@@ -110,6 +110,7 @@ export default async function ProductDetailPage({
             items={
               [
                 { label: t('f.sku'), value: p.sku },
+                { label: t('f.retailBarcode'), value: <span className="font-mono" dir="ltr">{p.retailBarcode}</span> },
                 { label: t('f.name'), value: `${p.nameEn} / ${p.nameAr}` },
                 { label: t('f.mainProduct'), value: p.group ? `${p.group.code} · ${locale === 'ar' ? p.group.nameAr : p.group.nameEn}` : '—' },
                 { label: t('f.variationType'), value: p.variationType },

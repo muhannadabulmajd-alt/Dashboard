@@ -5,7 +5,7 @@ import { PageHeader } from '@/components/ui/primitives';
 import { BackLink } from '@/components/records/parts';
 import { OrderForm } from '@/components/records/OrderForm';
 import { getOrderCatalog } from '@/server/records/order-catalog';
-import { getListOptions } from '@/server/lists/resolver';
+import { getListOptions, getOrderStatusRoleMap } from '@/server/lists/resolver';
 import { createOrder } from '@/server/records/orders';
 import { createCustomerInline } from '@/server/records/customers';
 import { dateInputValue } from '@/lib/dates';
@@ -21,7 +21,7 @@ export default async function NewOrderPage({
   const t = await getTranslations('records');
   // Dropdowns come from the managed system lists (§9) — relabels, reordering
   // and user-added values all apply here.
-  const [catalog, channels, governorates, fulfillment, statuses, accounts, paymentMethods, customers] = await Promise.all([
+  const [catalog, channels, governorates, fulfillment, statuses, accounts, paymentMethods, customers, providers, statusRoles] = await Promise.all([
     getOrderCatalog(locale, t('ungrouped')),
     getListOptions('channel', locale),
     getListOptions('governorate', locale),
@@ -35,7 +35,16 @@ export default async function NewOrderPage({
       take: 500,
       select: { externalId: true, nameEn: true, nameAr: true, phone: true },
     }),
+    prisma.party.findMany({
+      where: { isActive: true, collectsOrderPayments: true },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true },
+    }),
+    getOrderStatusRoleMap(),
   ]);
+  const saleStatusValues = [...statusRoles]
+    .filter(([, role]) => role === 'SALE')
+    .map(([code]) => code);
 
   const labels = {
     detailsTitle: t('orderForm.detailsTitle'),
@@ -83,12 +92,27 @@ export default async function NewOrderPage({
     financeCredit: t('f.financeCredit'),
     financePaid: t('f.financePaid'),
     financePartial: t('f.financePartial'),
+    financeProvider: t('f.financeProvider'),
     financeNone: t('f.financeNone'),
     financePaidAmount: t('f.financePaidAmount'),
     paymentAccount: t('f.paymentAccount'),
     paymentMethod: t('f.paymentMethod'),
     paymentDate: t('f.paymentDate'),
     paymentDueDate: t('f.paymentDueDate'),
+    provider: t('f.provider'),
+    paid: t('f.paid'),
+    remaining: t('f.remaining'),
+    paymentStatus: t('f.paymentStatus'),
+    paymentRoute: t('f.paymentRoute'),
+    providerOutstanding: t('f.providerOutstanding'),
+    paymentReadOnlyHint: t('orderForm.paymentReadOnlyHint'),
+    choosePaymentRoute: t('orderForm.choosePaymentRoute'),
+    completionPaymentHint: t('orderForm.completionPaymentHint'),
+    scanBarcode: t('orderForm.scanBarcode'),
+    scanBarcodeHint: t('orderForm.scanBarcodeHint'),
+    addScannedItem: t('orderForm.addScannedItem'),
+    scanAdded: t('orderForm.scanAdded'),
+    scanNotFound: t('orderForm.scanNotFound'),
     addLine: t('addLine'),
     removeLine: t('removeLine'),
     itemsHint: t('orderForm.itemsHint'),
@@ -112,6 +136,12 @@ export default async function NewOrderPage({
     stock_sync_failed: t('err.stock_sync_failed'),
     finance_sync_failed: t('err.finance_sync_failed'),
     customer_stats_failed: t('err.customer_stats_failed'),
+    provider: t('err.provider'),
+    payment_required: t('err.payment_required'),
+    payment_read_only: t('err.payment_read_only'),
+    payment_exceeds_total: t('err.payment_exceeds_total'),
+    refund_required: t('err.refund_required'),
+    order_update_failed: t('err.order_update_failed'),
   };
 
   return (
@@ -126,6 +156,8 @@ export default async function NewOrderPage({
         fulfillmentOptions={fulfillment}
         statusOptions={statuses}
         accountOptions={accounts.map((a) => ({ value: a.id, label: `${a.name} (${a.currency})` }))}
+        providerOptions={providers.map((provider) => ({ value: provider.id, label: provider.name }))}
+        saleStatusValues={saleStatusValues}
         paymentMethodOptions={paymentMethods}
         labels={labels}
         errors={errors}

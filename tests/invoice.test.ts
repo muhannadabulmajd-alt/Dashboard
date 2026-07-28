@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { invoicePaymentSnapshot, invoiceTotal, type InvoiceFinanceEntryLike, type InvoiceOrderLike } from '@/lib/invoice';
+import {
+  groupInvoiceFinanceEntries,
+  invoicePaymentSnapshot,
+  invoiceTotal,
+  type InvoiceFinanceEntryLike,
+  type InvoiceOrderLike,
+} from '@/lib/invoice';
 
 const order = (over: Partial<InvoiceOrderLike> = {}): InvoiceOrderLike => ({
   id: 'ord1',
@@ -26,10 +32,24 @@ describe('invoice helpers', () => {
   });
 
   it('marks a direct paid invoice as paid', () => {
-    const snapshot = invoicePaymentSnapshot(order(), [entry({ id: 'pay', type: 'INCOME', amount: 95_000 })]);
+    const paidAt = new Date('2026-07-28T09:00:00.000Z');
+    const snapshot = invoicePaymentSnapshot(order(), [
+      entry({
+        id: 'pay',
+        type: 'INCOME',
+        amount: 95_000,
+        date: paidAt,
+        paymentMethod: 'CASH',
+        account: { name: 'Cash on Hands' },
+      }),
+    ]);
     expect(snapshot.status).toBe('PAID');
     expect(snapshot.paid).toBe(95_000);
     expect(snapshot.remaining).toBe(0);
+    expect(snapshot.route).toBe('DIRECT');
+    expect(snapshot.accountName).toBe('Cash on Hands');
+    expect(snapshot.paymentMethod).toBe('CASH');
+    expect(snapshot.paymentDate).toEqual(paidAt);
   });
 
   it('marks a receivable with no payments as unpaid', () => {
@@ -77,5 +97,91 @@ describe('invoice helpers', () => {
     ]);
     expect(snapshot.status).toBe('UNPAID');
     expect(snapshot.paid).toBe(0);
+  });
+
+  it('treats provider collection as customer payment while tracking remittance separately', () => {
+    const providerReceivable = entry({
+      id: 'provider-ar',
+      type: 'INCOME',
+      amount: 95_000,
+      obligation: true,
+      obligationKind: 'RECEIVABLE',
+      party: { id: 'hi', name: 'Hi-Express', collectsOrderPayments: true },
+    });
+    const collected = invoicePaymentSnapshot(order(), [providerReceivable]);
+    expect(collected.status).toBe('PAID');
+    expect(collected.route).toBe('PROVIDER');
+    expect(collected.paid).toBe(95_000);
+    expect(collected.providerOutstanding).toBe(95_000);
+
+    const remitted = invoicePaymentSnapshot(order(), [
+      providerReceivable,
+      entry({
+        id: 'provider-cash',
+        type: 'PAYMENT_IN',
+        amount: 80_000,
+        orderId: 'ord1',
+        settlesId: 'provider-ar',
+        account: { name: 'Cash on Hands' },
+      }),
+      entry({
+        id: 'provider-fee',
+        type: 'PAYMENT_IN',
+        amount: 15_000,
+        orderId: 'ord1',
+        settlesId: 'provider-ar',
+      }),
+    ]);
+    expect(remitted.paid).toBe(95_000);
+    expect(remitted.providerCollected).toBe(95_000);
+    expect(remitted.providerRemitted).toBe(80_000);
+    expect(remitted.providerFeesOffset).toBe(15_000);
+    expect(remitted.providerCleared).toBe(95_000);
+    expect(remitted.providerOutstanding).toBe(0);
+  });
+
+  it('supports a direct partial payment followed by provider collection for the balance', () => {
+    const snapshot = invoicePaymentSnapshot(order(), [
+      entry({
+        id: 'customer-ar',
+        type: 'INCOME',
+        amount: 30_000,
+        obligation: true,
+        obligationKind: 'RECEIVABLE',
+      }),
+      entry({ id: 'deposit', type: 'PAYMENT_IN', amount: 30_000, orderId: null, settlesId: 'customer-ar' }),
+      entry({
+        id: 'provider-ar',
+        type: 'INCOME',
+        amount: 65_000,
+        obligation: true,
+        obligationKind: 'RECEIVABLE',
+        party: { id: 'wayl', name: 'Wayl', collectsOrderPayments: true },
+      }),
+    ]);
+    expect(snapshot.status).toBe('PAID');
+    expect(snapshot.paidRaw).toBe(95_000);
+    expect(snapshot.route).toBe('PROVIDER');
+    expect(snapshot.providerOutstanding).toBe(65_000);
+  });
+
+  it('groups obligations and their settlement rows in one pass', () => {
+    const rows = [
+      entry({ id: 'ar-1', type: 'INCOME', amount: 95_000, obligation: true, obligationKind: 'RECEIVABLE' }),
+      entry({ id: 'settle-1', type: 'PAYMENT_IN', amount: 95_000, orderId: null, settlesId: 'ar-1' }),
+      entry({ id: 'pay-2', type: 'INCOME', amount: 10_000, orderId: 'ord2' }),
+    ];
+    const grouped = groupInvoiceFinanceEntries(rows);
+    expect(grouped.get('ord1')?.map((row) => row.id)).toEqual(['ar-1', 'settle-1']);
+    expect(grouped.get('ord2')?.map((row) => row.id)).toEqual(['pay-2']);
+  });
+
+  it('caps display payment while retaining raw overpayment for reconciliation', () => {
+    const snapshot = invoicePaymentSnapshot(order(), [
+      entry({ id: 'pay', type: 'INCOME', amount: 100_000 }),
+    ]);
+    expect(snapshot.paid).toBe(95_000);
+    expect(snapshot.paidRaw).toBe(100_000);
+    expect(snapshot.remaining).toBe(0);
   });
 });

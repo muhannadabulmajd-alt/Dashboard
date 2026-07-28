@@ -2,7 +2,7 @@
 
 import { useActionState, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, Loader2, Plus, Search, UserRound, X } from 'lucide-react';
+import { Check, Loader2, Plus, ScanLine, Search, UserRound, X } from 'lucide-react';
 import { Link } from '@/i18n/navigation';
 import { cn } from '@/lib/utils';
 import type { ActionState } from '@/server/records/shared';
@@ -16,8 +16,27 @@ type Opt = { value: string; label: string };
 export type OrderLineInput = { sku: string; quantity: string; unitGrossPrice: string; lineDiscount: string };
 export type OrderInitial = { header: Record<string, string>; lines: OrderLineInput[] };
 /** A selectable variation for the order line picker. */
-export type CatalogItem = { sku: string; name: string; group: string; price: number; unit: string };
+export type CatalogItem = {
+  sku: string;
+  name: string;
+  group: string;
+  price: number;
+  unit: string;
+  barcodeValue: string;
+  retailBarcode: string;
+};
 export type CustomerOption = { externalId: string; label: string; phone?: string | null };
+export type OrderPaymentSummary = {
+  total: number;
+  paid: number;
+  remaining: number;
+  status: string;
+  statusLabel: string;
+  route: string;
+  routeLabel: string;
+  providerName?: string | null;
+  providerOutstanding?: number;
+};
 type InlineCustomerState = { ok: true; customer: CustomerOption } | { error: string } | undefined;
 const emptyLine: OrderLineInput = { sku: '', quantity: '1', unitGrossPrice: '0', lineDiscount: '0' };
 
@@ -34,6 +53,8 @@ function HeaderField({
   min,
   step,
   error,
+  value,
+  onValueChange,
 }: {
   name: string;
   label: string;
@@ -45,6 +66,8 @@ function HeaderField({
   min?: string;
   step?: string;
   error?: string;
+  value?: string;
+  onValueChange?: (value: string) => void;
 }) {
   const fieldId = `${name}-field`;
   const hintId = `${name}-hint`;
@@ -55,7 +78,8 @@ function HeaderField({
         id={fieldId}
         name={disabled ? undefined : name}
         type={type}
-        defaultValue={defaultValue}
+        {...(value === undefined ? { defaultValue } : { value })}
+        onChange={onValueChange ? (event) => onValueChange(event.target.value) : undefined}
         disabled={disabled}
         required={required}
         min={min}
@@ -79,6 +103,8 @@ function HeaderSelect({
   hint,
   required,
   error,
+  value,
+  onValueChange,
 }: {
   name: string;
   label: string;
@@ -87,6 +113,8 @@ function HeaderSelect({
   hint?: string;
   required?: boolean;
   error?: string;
+  value?: string;
+  onValueChange?: (value: string) => void;
 }) {
   const fieldId = `${name}-field`;
   const hintId = `${name}-hint`;
@@ -97,7 +125,10 @@ function HeaderSelect({
         id={fieldId}
         name={name}
         className={cn(input, error && inputError)}
-        defaultValue={defaultValue ?? options[0]?.value ?? ''}
+        {...(value === undefined
+          ? { defaultValue: defaultValue ?? options[0]?.value ?? '' }
+          : { value })}
+        onChange={onValueChange ? (event) => onValueChange(event.target.value) : undefined}
         required={required}
         aria-describedby={hint ? hintId : undefined}
         aria-invalid={Boolean(error)}
@@ -331,6 +362,8 @@ export function OrderForm({
   fulfillmentOptions,
   statusOptions,
   accountOptions,
+  providerOptions,
+  saleStatusValues,
   paymentMethodOptions,
   labels,
   errors,
@@ -341,6 +374,7 @@ export function OrderForm({
   catalog = [],
   customerOptions = [],
   inlineCustomerAction,
+  paymentSummary,
 }: {
   action: (prev: ActionState, fd: FormData) => Promise<ActionState>;
   locale: string;
@@ -349,6 +383,8 @@ export function OrderForm({
   fulfillmentOptions: Opt[];
   statusOptions: Opt[];
   accountOptions: Opt[];
+  providerOptions?: Opt[];
+  saleStatusValues?: string[];
   paymentMethodOptions?: Opt[];
   labels: Record<string, string>;
   errors: Record<string, string>;
@@ -359,11 +395,16 @@ export function OrderForm({
   catalog?: CatalogItem[];
   customerOptions?: CustomerOption[];
   inlineCustomerAction?: (prev: InlineCustomerState, fd: FormData) => Promise<InlineCustomerState>;
+  paymentSummary?: OrderPaymentSummary;
 }) {
   const [state, formAction, pending] = useActionState<ActionState, FormData>(action, undefined);
   const [lines, setLines] = useState<OrderLineInput[]>(initial?.lines?.length ? initial.lines : [{ ...emptyLine }]);
   const [customers, setCustomers] = useState<CustomerOption[]>(customerOptions);
   const [selectedCustomer, setSelectedCustomer] = useState(initial?.header?.customerExternalId ?? '');
+  const [status, setStatus] = useState(initial?.header?.status ?? statusOptions[0]?.value ?? '');
+  const [deliveryFee, setDeliveryFee] = useState(initial?.header?.deliveryFee ?? '0');
+  const [scanValue, setScanValue] = useState('');
+  const [scanMessage, setScanMessage] = useState('');
   const errorRef = useRef<HTMLDivElement>(null);
   const fieldErrors = state?.fieldErrors ?? {};
   const errorFor = (field: string) => {
@@ -383,6 +424,15 @@ export function OrderForm({
   }, [catalog]);
   const priceBySku = useMemo(() => new Map(catalog.map((c) => [c.sku, c.price])), [catalog]);
   const unitBySku = useMemo(() => new Map(catalog.map((c) => [c.sku, c.unit])), [catalog]);
+  const catalogByBarcode = useMemo(() => {
+    const map = new Map<string, CatalogItem>();
+    for (const item of catalog) {
+      map.set(item.sku.trim().toUpperCase(), item);
+      map.set(item.barcodeValue.trim().toUpperCase(), item);
+      map.set(item.retailBarcode.trim(), item);
+    }
+    return map;
+  }, [catalog]);
 
   // Selecting a variation fills the SKU and auto-fills its price (overridable).
   const pickVariation = (i: number, sku: string) =>
@@ -391,13 +441,51 @@ export function OrderForm({
         idx === i ? { ...l, sku, unitGrossPrice: priceBySku.has(sku) ? String(priceBySku.get(sku)) : l.unitGrossPrice } : l,
       ),
     );
+  const addScannedVariation = () => {
+    const key = scanValue.trim();
+    if (!key) return;
+    const item = catalogByBarcode.get(key.toUpperCase()) ?? catalogByBarcode.get(key);
+    if (!item) {
+      setScanMessage(labels.scanNotFound ?? labels.sku);
+      return;
+    }
+    setLines((current) => {
+      const existingIndex = current.findIndex((line) => line.sku === item.sku);
+      if (existingIndex >= 0) {
+        return current.map((line, index) =>
+          index === existingIndex
+            ? { ...line, quantity: String((Number(line.quantity) || 0) + 1) }
+            : line,
+        );
+      }
+      const emptyIndex = current.findIndex((line) => !line.sku);
+      const scannedLine = {
+        sku: item.sku,
+        quantity: '1',
+        unitGrossPrice: String(item.price),
+        lineDiscount: '0',
+      };
+      if (emptyIndex >= 0) {
+        return current.map((line, index) => (index === emptyIndex ? scannedLine : line));
+      }
+      return [...current, scannedLine];
+    });
+    setScanValue('');
+    setScanMessage((labels.scanAdded ?? '{name}').replace('{name}', item.name));
+  };
   const h = initial?.header ?? {};
   // Order-level adjustments are controlled so the live total reflects them.
   const [adj, setAdj] = useState({
     orderDiscount: initial?.header?.orderDiscount ?? '0',
     extraCharges: initial?.header?.extraCharges ?? '0',
   });
-  const [financeMode, setFinanceMode] = useState(initial?.header?.financeMode ?? 'CREDIT');
+  const [financeMode, setFinanceMode] = useState(
+    editing
+      ? 'KEEP'
+      : (saleStatusValues ?? []).includes(status)
+        ? ''
+        : initial?.header?.financeMode ?? 'CREDIT',
+  );
 
   const setLine = (i: number, k: keyof OrderLineInput, v: string) =>
     setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, [k]: v } : l)));
@@ -408,8 +496,16 @@ export function OrderForm({
     const lineDisc = lines.reduce((s, l) => s + (Number(l.lineDiscount) || 0), 0);
     const discount = lineDisc + (Number(adj.orderDiscount) || 0);
     const extra = Number(adj.extraCharges) || 0;
-    return { subtotal, discount, extra, net: subtotal - discount + extra };
-  }, [lines, adj]);
+    const delivery = Number(deliveryFee) || 0;
+    return { subtotal, discount, extra, delivery, net: subtotal - discount + extra + delivery };
+  }, [lines, adj, deliveryFee]);
+  const completionNeedsPayment =
+    (saleStatusValues ?? []).includes(status) &&
+    totals.net > (paymentSummary?.paid ?? 0);
+  const effectiveFinanceMode =
+    completionNeedsPayment && financeMode !== 'PAID' && financeMode !== 'PROVIDER'
+      ? ''
+      : financeMode;
   const fmt = (n: number) => new Intl.NumberFormat(locale === 'ar' ? 'ar-IQ' : 'en-US').format(n);
   const addInlineCustomer = (customer: CustomerOption) => {
     setCustomers((current) => current.some((item) => item.externalId === customer.externalId) ? current : [customer, ...current]);
@@ -466,8 +562,24 @@ export function OrderForm({
         <HeaderSelect name="channel" label={labels.channel} options={channelOptions} defaultValue={h.channel} required error={errorFor('channel')} />
         <HeaderSelect name="governorate" label={labels.governorate} options={governorateOptions} defaultValue={h.governorate} required error={errorFor('governorate')} />
         <HeaderSelect name="fulfillmentMethod" label={labels.fulfillment} options={fulfillmentOptions} defaultValue={h.fulfillmentMethod} required error={errorFor('fulfillmentMethod')} />
-        <HeaderSelect name="status" label={labels.status} options={statusOptions} defaultValue={h.status} required error={errorFor('status')} />
-        <HeaderField name="deliveryFee" label={labels.deliveryFee} type="number" defaultValue={h.deliveryFee ?? '0'} min="0" step="1" />
+        <HeaderSelect
+          name="status"
+          label={labels.status}
+          options={statusOptions}
+          value={status}
+          onValueChange={setStatus}
+          required
+          error={errorFor('status')}
+        />
+        <HeaderField
+          name="deliveryFee"
+          label={labels.deliveryFee}
+          type="number"
+          value={deliveryFee}
+          onValueChange={setDeliveryFee}
+          min="0"
+          step="1"
+        />
         <HeaderField name="deliveryCost" label={labels.deliveryCost} type="number" defaultValue={h.deliveryCost ?? '0'} min="0" step="1" />
         <HeaderField name="notes" label={labels.notes} defaultValue={h.notes} />
       </div>
@@ -475,26 +587,61 @@ export function OrderForm({
       <div className="grid gap-3 rounded-[var(--radius)] border bg-card p-4 shadow-sm sm:grid-cols-2 lg:grid-cols-3">
         <div className="space-y-1 sm:col-span-2 lg:col-span-3">
           <h2 className="text-sm font-semibold text-foreground">{labels.paymentTitle}</h2>
-          <p className="text-xs leading-5 text-muted-foreground">{labels.paymentHint}</p>
+          <p className="text-xs leading-5 text-muted-foreground">
+            {editing ? labels.paymentReadOnlyHint : labels.paymentHint}
+          </p>
         </div>
-        <div className="flex flex-col gap-1">
-          <label htmlFor="finance-mode-field" className="text-xs font-medium text-muted-foreground">{labels.financeMode}</label>
-          <select
-            id="finance-mode-field"
-            name="financeMode"
-            value={financeMode}
-            onChange={(e) => setFinanceMode(e.target.value)}
-            className={cn(input, errorFor('financeMode') && inputError)}
-            aria-invalid={Boolean(errorFor('financeMode'))}
-          >
-            <option value="CREDIT">{labels.financeCredit}</option>
-            <option value="PAID">{labels.financePaid}</option>
-            <option value="PARTIAL">{labels.financePartial}</option>
-            <option value="NONE">{labels.financeNone}</option>
-          </select>
-          {errorFor('financeMode') ? <p className="text-xs font-medium text-danger">{errorFor('financeMode')}</p> : null}
-        </div>
-        {financeMode === 'PAID' || financeMode === 'PARTIAL' ? (
+        {editing && paymentSummary ? (
+          <div className="grid gap-2 sm:col-span-2 sm:grid-cols-2 lg:col-span-3 lg:grid-cols-5">
+            {[
+              [labels.total, fmt(paymentSummary.total)],
+              [labels.paid, fmt(paymentSummary.paid)],
+              [labels.remaining, fmt(paymentSummary.remaining)],
+              [labels.paymentStatus, paymentSummary.statusLabel],
+              [labels.paymentRoute, paymentSummary.routeLabel],
+            ].map(([label, value]) => (
+              <div key={label} className="rounded-lg border bg-muted/25 p-3">
+                <div className="text-xs font-medium text-muted-foreground">{label}</div>
+                <div className="mt-1 break-words text-sm font-bold tabular-nums text-foreground">{value}</div>
+              </div>
+            ))}
+            {paymentSummary.providerName ? (
+              <div className="rounded-lg border bg-muted/25 p-3 sm:col-span-2 lg:col-span-3">
+                <div className="text-xs font-medium text-muted-foreground">{labels.provider}</div>
+                <div className="mt-1 text-sm font-bold text-foreground">{paymentSummary.providerName}</div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  {labels.providerOutstanding}: {fmt(paymentSummary.providerOutstanding ?? 0)}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+        {editing && !completionNeedsPayment ? (
+          <input type="hidden" name="financeMode" value="KEEP" />
+        ) : (
+          <div className="flex flex-col gap-1">
+            <label htmlFor="finance-mode-field" className="text-xs font-medium text-muted-foreground">{labels.financeMode}</label>
+            <select
+              id="finance-mode-field"
+              name="financeMode"
+              value={effectiveFinanceMode}
+              onChange={(e) => setFinanceMode(e.target.value)}
+              className={cn(input, errorFor('financeMode') && inputError)}
+              aria-invalid={Boolean(errorFor('financeMode'))}
+              required={completionNeedsPayment}
+            >
+              {completionNeedsPayment ? <option value="">{labels.choosePaymentRoute}</option> : null}
+              {!editing && !completionNeedsPayment ? <option value="CREDIT">{labels.financeCredit}</option> : null}
+              <option value="PAID">{labels.financePaid}</option>
+              {!editing && !completionNeedsPayment ? <option value="PARTIAL">{labels.financePartial}</option> : null}
+              <option value="PROVIDER">{labels.financeProvider}</option>
+              {!editing && !completionNeedsPayment ? <option value="NONE">{labels.financeNone}</option> : null}
+            </select>
+            {completionNeedsPayment ? <p className="text-xs leading-5 text-warning">{labels.completionPaymentHint}</p> : null}
+            {errorFor('financeMode') ? <p className="text-xs font-medium text-danger">{errorFor('financeMode')}</p> : null}
+          </div>
+        )}
+        {(effectiveFinanceMode === 'PAID' || effectiveFinanceMode === 'PARTIAL') && (!editing || completionNeedsPayment) ? (
           <div className="flex flex-col gap-1">
             <label htmlFor="finance-account-field" className="text-xs font-medium text-muted-foreground">{labels.paymentAccount}</label>
             <select
@@ -515,16 +662,35 @@ export function OrderForm({
             {errorFor('financeAccountId') ? <p className="text-xs font-medium text-danger">{errorFor('financeAccountId')}</p> : null}
           </div>
         ) : null}
-        {financeMode === 'PARTIAL' ? (
+        {effectiveFinanceMode === 'PARTIAL' && (!editing || completionNeedsPayment) ? (
           <HeaderField name="financePaidAmount" label={labels.financePaidAmount} type="number" defaultValue={h.financePaidAmount} required min="1" step="1" error={errorFor('financePaidAmount')} />
         ) : null}
-        {financeMode === 'PAID' || financeMode === 'PARTIAL' ? (
+        {effectiveFinanceMode === 'PROVIDER' && (!editing || completionNeedsPayment) ? (
+          <div className="flex flex-col gap-1">
+            <label htmlFor="finance-provider-field" className="text-xs font-medium text-muted-foreground">{labels.provider}</label>
+            <select
+              id="finance-provider-field"
+              name="financeProviderId"
+              required
+              className={cn(input, errorFor('financeProviderId') && inputError)}
+              defaultValue={h.financeProviderId ?? ''}
+              aria-invalid={Boolean(errorFor('financeProviderId'))}
+            >
+              <option value="">—</option>
+              {(providerOptions ?? []).map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+            {errorFor('financeProviderId') ? <p className="text-xs font-medium text-danger">{errorFor('financeProviderId')}</p> : null}
+          </div>
+        ) : null}
+        {(effectiveFinanceMode === 'PAID' || effectiveFinanceMode === 'PARTIAL' || effectiveFinanceMode === 'PROVIDER') && (!editing || completionNeedsPayment) ? (
           <>
             <HeaderSelect name="financePaymentMethod" label={labels.paymentMethod} options={paymentMethodOptions ?? []} defaultValue={h.financePaymentMethod} />
             <HeaderField name="financePaymentDate" label={labels.paymentDate} type="date" defaultValue={h.financePaymentDate || h.placedAt} required error={errorFor('financePaymentDate')} />
           </>
         ) : null}
-        {financeMode === 'CREDIT' ? (
+        {effectiveFinanceMode === 'CREDIT' ? (
           <HeaderField name="financeDueDate" label={labels.paymentDueDate} type="date" defaultValue={h.financeDueDate || h.placedAt} required error={errorFor('financeDueDate')} />
         ) : null}
       </div>
@@ -543,6 +709,40 @@ export function OrderForm({
             <Plus className="size-3.5" />
             {labels.addLine}
           </button>
+        </div>
+        <div className="mb-3 rounded-lg border bg-muted/20 p-3">
+          <label htmlFor="order-barcode-scan" className="text-xs font-semibold text-foreground">
+            {labels.scanBarcode}
+          </label>
+          <div className="mt-1 flex flex-col gap-2 sm:flex-row">
+            <div className="relative min-w-0 flex-1">
+              <ScanLine className="pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <input
+                id="order-barcode-scan"
+                value={scanValue}
+                onChange={(event) => setScanValue(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    addScannedVariation();
+                  }
+                }}
+                autoComplete="off"
+                inputMode="numeric"
+                placeholder={labels.scanBarcodeHint}
+                className={cn(input, 'ps-9')}
+                data-order-barcode-scan
+              />
+            </div>
+            <button
+              type="button"
+              onClick={addScannedVariation}
+              className="min-h-10 rounded-lg border bg-card px-4 text-sm font-semibold hover:bg-muted"
+            >
+              {labels.addScannedItem}
+            </button>
+          </div>
+          {scanMessage ? <p className="mt-2 text-xs font-medium text-muted-foreground">{scanMessage}</p> : null}
         </div>
         <div className="space-y-2">
           {lines.map((l, i) => (
@@ -629,6 +829,7 @@ export function OrderForm({
           <span className="text-muted-foreground">{labels.subtotal}: <span className="font-semibold tabular-nums text-foreground">{fmt(totals.subtotal)}</span></span>
           <span className="text-muted-foreground">{labels.discount}: <span className="font-semibold tabular-nums text-foreground">{fmt(totals.discount)}</span></span>
           {totals.extra ? <span className="text-muted-foreground">{labels.extraCharges}: <span className="font-semibold tabular-nums text-foreground">{fmt(totals.extra)}</span></span> : null}
+          {totals.delivery ? <span className="text-muted-foreground">{labels.deliveryFee}: <span className="font-semibold tabular-nums text-foreground">{fmt(totals.delivery)}</span></span> : null}
           <span className="text-muted-foreground">{labels.total}: <span className="font-bold tabular-nums text-foreground">{fmt(totals.net)}</span></span>
         </div>
       </div>

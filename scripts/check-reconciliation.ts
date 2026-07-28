@@ -1,5 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { buildShareholderReportData } from '../src/server/reports/shareholder-data';
+import { isValidRetailBarcode } from '../src/lib/barcode';
+import { groupInvoiceFinanceEntries, invoicePaymentSnapshot } from '../src/lib/invoice';
 
 const prisma = new PrismaClient();
 
@@ -105,6 +107,101 @@ async function main(): Promise<void> {
       ) IS NULL
     `,
   });
+
+  const [orders, orderFinanceEntries, orderStatusOptions, activeProducts] = await Promise.all([
+    prisma.order.findMany({
+      select: {
+        id: true,
+        status: true,
+        grossAmount: true,
+        discountAmount: true,
+        refundAmount: true,
+        deliveryFee: true,
+        extraCharges: true,
+      },
+    }),
+    prisma.financeEntry.findMany({
+      select: {
+        id: true,
+        orderId: true,
+        type: true,
+        amount: true,
+        obligation: true,
+        obligationKind: true,
+        settlesId: true,
+        archivedAt: true,
+        reversedAt: true,
+        reversalOfId: true,
+        date: true,
+        paymentMethod: true,
+        account: { select: { name: true } },
+        party: { select: { id: true, name: true, collectsOrderPayments: true } },
+      },
+    }),
+    prisma.listOption.findMany({
+      where: { listKey: 'orderStatus' },
+      select: { code: true, metricRole: true },
+    }),
+    prisma.product.findMany({
+      where: { isActive: true },
+      select: { id: true, retailBarcode: true },
+    }),
+  ]);
+  const statusRoles = new Map(orderStatusOptions.map((option) => [option.code, option.metricRole]));
+  const fallbackRole = (status: string) => {
+    if (status === 'COMPLETED') return 'SALE';
+    if (status === 'PENDING') return 'OPEN';
+    if (status === 'RETURNED' || status === 'REFUNDED') return 'RETURN';
+    if (status === 'CANCELLED' || status === 'CANCELED') return 'CANCELED';
+    return 'UNKNOWN';
+  };
+  const roleFor = (status: string) => statusRoles.get(status) ?? fallbackRole(status);
+  const entriesByOrder = groupInvoiceFinanceEntries(orderFinanceEntries);
+  const orderSnapshots = orders.map((order) => ({
+    order,
+    role: roleFor(order.status),
+    payment: invoicePaymentSnapshot(order, entriesByOrder.get(order.id) ?? []),
+  }));
+  checks.push({
+    name: 'completed order invoices fully paid',
+    failures: orderSnapshots.filter(
+      ({ role, payment }) => role === 'SALE' && (payment.status !== 'PAID' || payment.remaining !== 0),
+    ).length,
+  });
+  checks.push({
+    name: 'order invoice payment arithmetic',
+    failures: orderSnapshots.filter(
+      ({ role, payment }) =>
+        (role === 'OPEN' || role === 'SALE') &&
+        (payment.paid + payment.remaining !== payment.total || payment.paidRaw > payment.total),
+    ).length,
+  });
+  checks.push({
+    name: 'provider collection separation',
+    failures: orderSnapshots.filter(
+      ({ payment }) =>
+        payment.route === 'PROVIDER' &&
+        (
+          !payment.providerPartyId ||
+          payment.providerCollected <= 0 ||
+          payment.providerRemitted +
+            payment.providerFeesOffset +
+            payment.providerOutstanding !==
+            payment.providerCollected
+        ),
+    ).length,
+  });
+  checks.push({
+    name: 'active products have valid unique EAN-13 barcodes',
+    failures: activeProducts.filter((product, index, rows) =>
+      !isValidRetailBarcode(product.retailBarcode) ||
+      rows.findIndex((row) => row.retailBarcode === product.retailBarcode) !== index
+    ).length,
+  });
+  const paidTerminalWithoutRefund = orderSnapshots.filter(
+    ({ role, order, payment }) => (role === 'CANCELED' || role === 'RETURN') && payment.paidRaw > 0 && order.refundAmount <= 0,
+  ).length;
+  console.log(`WARN paid canceled/returned orders without recorded refund: ${paidTerminalWithoutRefund}`);
 
   checks.push({
     name: 'inventory line quantities',

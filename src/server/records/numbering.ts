@@ -7,7 +7,12 @@ import {
   formatOrderNumber,
   laheebDateKey,
 } from '@/lib/numbering';
-import { formatProductBarcode, parseProductBarcodeSequence } from '@/lib/barcode';
+import {
+  formatProductBarcode,
+  formatRetailBarcode,
+  parseProductBarcodeSequence,
+  parseRetailBarcodeSequence,
+} from '@/lib/barcode';
 
 type Tx = Prisma.TransactionClient;
 
@@ -59,4 +64,19 @@ export async function generateProductBarcode(tx: Tx): Promise<string> {
   });
   const max = rows.reduce((current, row) => Math.max(current, parseProductBarcodeSequence(row.barcodeValue) ?? 0), 0);
   return formatProductBarcode(max + 1);
+}
+
+export async function generateRetailBarcode(tx: Tx): Promise<string> {
+  await tx.$queryRaw<{ locked: number }[]>`
+    SELECT 1 AS locked
+    WHERE pg_advisory_xact_lock(hashtext('laheeb-retail-barcode')) IS NULL
+  `;
+  const rows = await tx.product.findMany({
+    select: { retailBarcode: true },
+  });
+  const max = rows.reduce(
+    (current, row) => Math.max(current, parseRetailBarcodeSequence(row.retailBarcode) ?? 0),
+    0,
+  );
+  return formatRetailBarcode(max + 1);
 }
