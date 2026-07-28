@@ -1,5 +1,12 @@
 import { Document, Page, Rect, StyleSheet, Svg, Text, View } from '@react-pdf/renderer';
 import { encodeEan13 } from '@/lib/barcode';
+import {
+  PRODUCT_LABEL_COLUMN_GAP_MM,
+  PRODUCT_LABEL_DETAILS_PERCENT,
+  PRODUCT_LABEL_SAFE_MARGIN_MM,
+  productLabelTypography,
+  softWrapLabelText,
+} from '@/lib/product-label-layout';
 import { registerLaheebPdfFonts } from '@/server/pdf/laheeb-pdf';
 import type { ProductLabelData } from './label-data';
 
@@ -8,10 +15,13 @@ registerLaheebPdfFonts();
 const MM = 72 / 25.4;
 const PAGE_WIDTH = 60 * MM;
 const PAGE_HEIGHT = 30 * MM;
-const SAFE_MARGIN = 1.5 * MM;
-const BARCODE_WIDTH = 54 * MM;
-const BAR_HEIGHT = 25;
-const GUARD_HEIGHT = 28.5;
+const SAFE_MARGIN = PRODUCT_LABEL_SAFE_MARGIN_MM * MM;
+const INNER_WIDTH = PAGE_WIDTH - SAFE_MARGIN * 2;
+const COLUMN_GAP = PRODUCT_LABEL_COLUMN_GAP_MM * MM;
+const DETAILS_WIDTH = INNER_WIDTH * (PRODUCT_LABEL_DETAILS_PERCENT / 100);
+const BARCODE_WIDTH = INNER_WIDTH - DETAILS_WIDTH - COLUMN_GAP;
+const BAR_HEIGHT = 17.5 * MM;
+const GUARD_HEIGHT = 19 * MM;
 
 const styles = StyleSheet.create({
   page: {
@@ -25,89 +35,82 @@ const styles = StyleSheet.create({
   label: {
     width: '100%',
     height: '100%',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    overflow: 'hidden',
+    flexDirection: 'row',
+    alignItems: 'stretch',
   },
-  copy: {
-    width: '100%',
-    flexGrow: 1,
-    alignItems: 'center',
+  details: {
+    width: DETAILS_WIDTH,
+    flexShrink: 0,
     justifyContent: 'center',
-    overflow: 'hidden',
   },
   main: {
     width: '100%',
     color: '#000000',
     fontWeight: 700,
-    lineHeight: 1.02,
-    textAlign: 'center',
+    lineHeight: 1.05,
   },
   variation: {
     width: '100%',
     color: '#000000',
     fontWeight: 700,
-    fontSize: 7,
-    lineHeight: 1.02,
-    textAlign: 'center',
-    marginTop: 0.8,
+    lineHeight: 1.08,
+    marginTop: 1.8,
   },
   specs: {
     width: '100%',
     color: '#000000',
-    fontSize: 5.15,
-    lineHeight: 1.05,
-    textAlign: 'center',
-    marginTop: 0.65,
+    lineHeight: 1.08,
+    marginTop: 1,
   },
   barcodePanel: {
     width: BARCODE_WIDTH,
-    marginTop: 0.6,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   digits: {
     width: '100%',
     color: '#000000',
     fontFamily: 'Helvetica',
-    fontSize: 5.6,
-    letterSpacing: 1.15,
+    fontSize: 5.1,
+    letterSpacing: 0.65,
     lineHeight: 1,
     textAlign: 'center',
-    marginTop: 0.15,
+    marginTop: 0.5,
   },
 });
 
-function clipped(value: string, maxLength: number) {
-  if (value.length <= maxLength) return value;
-  return `${value.slice(0, maxLength - 1).trimEnd()}…`;
-}
-
-function titleSize(value: string) {
-  if (value.length > 42) return 7.7;
-  if (value.length > 28) return 8.8;
-  return 10.2;
-}
-
 export function ProductLabelPdf({ label, copies = 1 }: { label: ProductLabelData; copies?: number }) {
   const safeCopies = Math.min(24, Math.max(1, Math.trunc(copies)));
+  const typography = productLabelTypography(label);
+  const rtl = label.locale === 'ar';
+  const textAlign = rtl ? 'right' : 'left';
 
   return (
     <Document title="Laheeb product label">
       {Array.from({ length: safeCopies }, (_, index) => (
         <Page key={index} size={[PAGE_WIDTH, PAGE_HEIGHT]} style={styles.page}>
-          <View style={styles.label}>
-            <View style={styles.copy}>
-              <Text style={[styles.main, { fontSize: titleSize(label.mainName) }]}>
-                {clipped(label.mainName, 58)}
+          <View style={[styles.label, rtl ? { flexDirection: 'row-reverse' } : {}]}>
+            <View style={styles.details}>
+              <Text style={[styles.main, { fontSize: typography.titlePt, textAlign }]}>
+                {softWrapLabelText(label.mainName)}
               </Text>
               {label.variationName ? (
-                <Text style={styles.variation}>{clipped(label.variationName, 58)}</Text>
+                <Text style={[styles.variation, { fontSize: typography.variationPt, textAlign }]}>
+                  {softWrapLabelText(label.variationName)}
+                </Text>
               ) : null}
-              {label.specLines.map((line) => (
-                <Text key={line} style={styles.specs}>{clipped(line, 72)}</Text>
+              {label.specItems.map((item) => (
+                <Text
+                  key={`${item.label}-${item.value}`}
+                  style={[styles.specs, { fontSize: typography.specsPt, textAlign }]}
+                >
+                  <Text style={{ fontWeight: 700 }}>{softWrapLabelText(item.label)}:</Text>
+                  {' '}
+                  {softWrapLabelText(item.value)}
+                </Text>
               ))}
             </View>
-            <PdfBarcode value={label.retailBarcode} />
+            <PdfBarcode value={label.retailBarcode} rtl={rtl} />
           </View>
         </Page>
       ))}
@@ -115,7 +118,7 @@ export function ProductLabelPdf({ label, copies = 1 }: { label: ProductLabelData
   );
 }
 
-function PdfBarcode({ value }: { value: string }) {
+function PdfBarcode({ value, rtl }: { value: string; rtl: boolean }) {
   const modules = encodeEan13(value);
   const quietLeft = 11;
   const quietRight = 7;
@@ -124,7 +127,12 @@ function PdfBarcode({ value }: { value: string }) {
   const groupedDigits = `${value[0]}  ${value.slice(1, 7)}  ${value.slice(7)}`;
 
   return (
-    <View style={styles.barcodePanel}>
+    <View
+      style={[
+        styles.barcodePanel,
+        rtl ? { marginRight: COLUMN_GAP } : { marginLeft: COLUMN_GAP },
+      ]}
+    >
       <Svg
         width={BARCODE_WIDTH}
         height={GUARD_HEIGHT}
