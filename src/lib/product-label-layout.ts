@@ -1,15 +1,16 @@
 export const PRODUCT_LABEL_DETAILS_PERCENT = 38;
 export const PRODUCT_LABEL_SAFE_MARGIN_MM = 1.5;
 export const PRODUCT_LABEL_COLUMN_GAP_MM = 1;
+export const PRODUCT_LABEL_PDF_LINE_HEIGHT = {
+  title: 1.12,
+  variation: 1.18,
+  specs: 1.28,
+} as const;
 
 export interface ProductLabelTypography {
   titlePt: number;
   variationPt: number;
   specsPt: number;
-}
-
-export function productLabelPdfLineHeight(fontSize: number, multiplier = 1.2) {
-  return Number((fontSize * multiplier).toFixed(2));
 }
 
 function visibleLength(value: string) {
