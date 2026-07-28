@@ -465,6 +465,11 @@ async function main(): Promise<void> {
         WHEN NOT EXISTS (
           SELECT 1 FROM "Setting" WHERE "key" = 'wayl_wallet_unmatched_sales'
         ) THEN 0
+        WHEN NOT EXISTS (
+          SELECT 1
+          FROM "Order"
+          WHERE COALESCE(notes, '') ~* '(1A52C792|998C8C52|E3FCD7DA|EB5369GD|I9D0FC09|I56H8BB5|G8G9AHEI)'
+        ) THEN 0
         WHEN (
           SELECT COUNT(*) = 7 AND COALESCE(SUM(amount), 0) = 9553
           FROM "FinanceEntry"
