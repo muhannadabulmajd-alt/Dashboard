@@ -43,12 +43,14 @@ const styles = StyleSheet.create({
     fontWeight: 700,
     lineHeight: 1.04,
     marginBottom: 2,
+    maxHeight: 22,
   },
   variation: {
     color: '#000000',
     fontSize: 7.2,
     fontWeight: 700,
     lineHeight: 1.08,
+    maxHeight: 16,
   },
   specsBlock: {
     marginTop: 'auto',
@@ -84,6 +86,11 @@ const styles = StyleSheet.create({
   },
 });
 
+function clipped(value: string, maxLength: number) {
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, maxLength - 3).trimEnd()}...`;
+}
+
 export function ProductLabelPdf({ label, copies = 1 }: { label: ProductLabelData; copies?: number }) {
   const safeCopies = Math.min(24, Math.max(1, Math.trunc(copies)));
   const textDirection = label.locale === 'ar' ? { textAlign: 'right' as const } : { textAlign: 'left' as const };
@@ -97,14 +104,14 @@ export function ProductLabelPdf({ label, copies = 1 }: { label: ProductLabelData
               <PdfBarcode value={label.retailBarcode} />
             </View>
             <View style={styles.copy}>
-              <Text maxLines={2} style={[styles.main, textDirection]}>{label.mainName}</Text>
+              <Text style={[styles.main, textDirection]}>{clipped(label.mainName, 44)}</Text>
               {label.variationName ? (
-                <Text maxLines={2} style={[styles.variation, textDirection]}>{label.variationName}</Text>
+                <Text style={[styles.variation, textDirection]}>{clipped(label.variationName, 42)}</Text>
               ) : null}
               <View style={styles.specsBlock}>
                 {label.specItems.map((item) => (
-                  <Text key={`${item.label}-${item.value}`} maxLines={1} style={[styles.spec, textDirection]}>
-                    {item.label}: {item.value}
+                  <Text key={`${item.label}-${item.value}`} style={[styles.spec, textDirection]}>
+                    {clipped(`${item.label}: ${item.value}`, 38)}
                   </Text>
                 ))}
               </View>

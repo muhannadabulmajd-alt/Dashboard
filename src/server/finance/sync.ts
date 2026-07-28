@@ -282,8 +282,8 @@ export async function syncOrderProviderCollection(
 
     const fee = providerFeeAmount(providerAmount, order.deliveryCost, {
       mode: provider.providerFeeMode,
-      rateBps: provider.feeRateBps,
-      fixedAmount: provider.fixedFee,
+      feeRateBps: provider.feeRateBps,
+      fixedFee: provider.fixedFee,
     });
     if (fee > 0) {
       const feeData = {
@@ -292,7 +292,9 @@ export async function syncOrderProviderCollection(
         recordClass: 'EXPENSE' as const,
         amount: fee,
         currency: 'IQD' as const,
-        categoryType: provider.providerFeeMode === 'ORDER_DELIVERY_COST' ? 'SHIPPING' : 'TECH',
+        categoryType: provider.providerFeeMode === 'ORDER_DELIVERY_COST'
+          ? ('SHIPPING' as const)
+          : ('TECH' as const),
         costRole: providerFeeCostRole(provider.providerFeeMode),
         obligation: false,
         obligationKind: null,

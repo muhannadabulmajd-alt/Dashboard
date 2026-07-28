@@ -6,8 +6,8 @@ describe('automatic provider fees', () => {
     expect(
       providerFeeAmount(28_000, 0, {
         mode: 'PERCENT_PLUS_FIXED',
-        rateBps: 350,
-        fixedAmount: 600,
+        feeRateBps: 350,
+        fixedFee: 600,
       }),
     ).toBe(1_580);
     expect(providerFeeCostRole('PERCENT_PLUS_FIXED')).toBe('PAYMENT_PROCESSING');
@@ -17,8 +17,8 @@ describe('automatic provider fees', () => {
     expect(
       providerFeeAmount(27_000, 5_000, {
         mode: 'ORDER_DELIVERY_COST',
-        rateBps: 0,
-        fixedAmount: 0,
+        feeRateBps: 0,
+        fixedFee: 0,
       }),
     ).toBe(5_000);
     expect(providerFeeCostRole('ORDER_DELIVERY_COST')).toBe('DIRECT_DELIVERY');
@@ -28,8 +28,8 @@ describe('automatic provider fees', () => {
     expect(
       providerFeeAmount(500, 5_000, {
         mode: 'ORDER_DELIVERY_COST',
-        rateBps: 0,
-        fixedAmount: 0,
+        feeRateBps: 0,
+        fixedFee: 0,
       }),
     ).toBe(500);
   });

@@ -85,7 +85,7 @@ function HeaderField({
         min={min}
         step={step}
         aria-describedby={hint ? hintId : undefined}
-        aria-invalid={Boolean(error)}
+        data-invalid={Boolean(error) || undefined}
         className={cn(input, disabled && disabledInput, error && inputError)}
       />
       {disabled ? <input type="hidden" name={name} value={defaultValue ?? ''} /> : null}
