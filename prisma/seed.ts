@@ -400,8 +400,8 @@ async function seedOrders(
         offerId,
       });
 
-      // customer stats (count paid-ish orders)
-      if (status !== 'CANCELLED') {
+      // Customer statistics use the same completed-sale contract as reports.
+      if (status === 'COMPLETED') {
         const s = custStats.get(customerId);
         if (!s) custStats.set(customerId, { count: 1, first: placedAt, last: placedAt });
         else {
@@ -441,6 +441,45 @@ async function seedOrders(
     await prisma.orderLine.createMany({ data: lines.slice(i, i + 1000) });
   }
   await prisma.shipment.createMany({ data: shipments });
+
+  const seedCashAccount = await prisma.financeAccount.upsert({
+    where: { externalKey: 'SEED_CASH_ON_HANDS' },
+    update: { isActive: true },
+    create: {
+      externalKey: 'SEED_CASH_ON_HANDS',
+      name: 'Seed cash on hands',
+      type: 'CASH',
+      currency: 'IQD',
+      branchId: branches[0]?.value,
+    },
+  });
+  const completedPayments: Prisma.FinanceEntryCreateManyInput[] = orders
+    .filter((order) => order.status === 'COMPLETED')
+    .map((order) => ({
+      date: order.placedAt,
+      type: 'INCOME',
+      amount: Math.max(
+        0,
+        (order.grossAmount ?? 0) -
+          (order.discountAmount ?? 0) -
+          (order.refundAmount ?? 0) +
+          (order.deliveryFee ?? 0) +
+          (order.extraCharges ?? 0),
+      ),
+      currency: 'IQD',
+      obligation: false,
+      accountId: seedCashAccount.id,
+      branchId: order.branchId,
+      orderId: order.id,
+      paymentMethod: 'Cash',
+      importKey: `SEED:ORDER:${order.id}:PAID`,
+      reference: order.orderNumber,
+      description: `Seed payment for ${order.orderNumber}`,
+    }))
+    .filter((entry) => entry.amount > 0);
+  for (let i = 0; i < completedPayments.length; i += 1000) {
+    await prisma.financeEntry.createMany({ data: completedPayments.slice(i, i + 1000) });
+  }
 
   // Update customer aggregates + segment
   await Promise.all(

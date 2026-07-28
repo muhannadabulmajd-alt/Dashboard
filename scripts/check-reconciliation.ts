@@ -108,10 +108,11 @@ async function main(): Promise<void> {
     `,
   });
 
-  const [orders, orderFinanceEntries, orderStatusOptions, activeProducts] = await Promise.all([
+  const [orders, orderFinanceEntries, orderStatusOptions, activeProducts, paymentInvariantSetting] = await Promise.all([
     prisma.order.findMany({
       select: {
         id: true,
+        createdAt: true,
         status: true,
         grossAmount: true,
         discountAmount: true,
@@ -146,7 +147,18 @@ async function main(): Promise<void> {
       where: { isActive: true },
       select: { id: true, retailBarcode: true },
     }),
+    prisma.setting.findUnique({
+      where: { key: 'order_payment_invariant_started_at' },
+      select: { value: true },
+    }),
   ]);
+  const parsedPaymentInvariantStart = paymentInvariantSetting
+    ? new Date(paymentInvariantSetting.value)
+    : null;
+  const paymentInvariantStartedAt =
+    parsedPaymentInvariantStart && !Number.isNaN(parsedPaymentInvariantStart.getTime())
+      ? parsedPaymentInvariantStart
+      : null;
   const statusRoles = new Map(orderStatusOptions.map((option) => [option.code, option.metricRole]));
   const fallbackRole = (status: string) => {
     if (status === 'COMPLETED') return 'SALE';
@@ -162,10 +174,19 @@ async function main(): Promise<void> {
     role: roleFor(order.status),
     payment: invoicePaymentSnapshot(order, entriesByOrder.get(order.id) ?? []),
   }));
+  const unpaidCompletedOrders = orderSnapshots.filter(
+    ({ role, payment }) => role === 'SALE' && (payment.status !== 'PAID' || payment.remaining !== 0),
+  );
+  const legacyUnpaidCompletedOrders = paymentInvariantStartedAt
+    ? unpaidCompletedOrders.filter(({ order }) => order.createdAt < paymentInvariantStartedAt)
+    : [];
+  console.log(
+    `WARN legacy completed invoices predating payment enforcement: ${legacyUnpaidCompletedOrders.length}`,
+  );
   checks.push({
     name: 'completed order invoices fully paid',
-    failures: orderSnapshots.filter(
-      ({ role, payment }) => role === 'SALE' && (payment.status !== 'PAID' || payment.remaining !== 0),
+    failures: unpaidCompletedOrders.filter(
+      ({ order }) => !paymentInvariantStartedAt || order.createdAt >= paymentInvariantStartedAt,
     ).length,
   });
   checks.push({
