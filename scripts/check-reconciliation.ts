@@ -328,7 +328,13 @@ async function main(): Promise<void> {
     name: 'imported fixed asset allocation',
     failures: await count`
       SELECT CASE WHEN
-        COALESCE((SELECT SUM(a."totalCost") FROM "FixedAsset" a WHERE a."importKey" LIKE 'ASSET:HISTORICAL_SPEND:%'), 0)
+        COALESCE((
+          SELECT SUM(a."totalCost")
+          FROM "FixedAsset" a
+          JOIN "FinanceEntry" e ON e.id = a."financeEntryId"
+          WHERE a."importKey" LIKE 'ASSET:HISTORICAL_SPEND:%'
+            AND e."importKey" LIKE 'PUR:HISTORICAL_SPEND:%'
+        ), 0)
         =
         COALESCE((SELECT SUM(l."lineTotal") FROM "LedgerEntryLine" l JOIN "FinanceEntry" e ON e.id = l."financeEntryId" WHERE l."itemType" = 'ASSET' AND e."importKey" LIKE 'PUR:HISTORICAL_SPEND:%'), 0)
       THEN 0 ELSE 1 END AS count
