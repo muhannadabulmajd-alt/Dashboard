@@ -13,6 +13,7 @@ import {
 } from '@/lib/barcode';
 import {
   PRODUCT_LABEL_DETAILS_PERCENT,
+  productLabelPdfLineHeight,
   productLabelTypography,
   softWrapLabelText,
 } from '@/lib/product-label-layout';
@@ -88,5 +89,10 @@ describe('product barcode helpers', () => {
     expect(dense.specsPt).toBeLessThan(compact.specsPt);
     expect(softWrapLabelText('ExtraordinarilyLongProductName')).not.toContain('…');
     expect(softWrapLabelText('ExtraordinarilyLongProductName')).toContain('\u200B');
+  });
+
+  it('gives wrapped PDF label text enough line height to remain legible', () => {
+    expect(productLabelPdfLineHeight(4.5, 1.28)).toBeGreaterThan(4.5);
+    expect(productLabelPdfLineHeight(8.8, 1.12)).toBeGreaterThan(8.8);
   });
 });
