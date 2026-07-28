@@ -329,6 +329,12 @@ export async function buildShareholderReportData(
     if (lineTotal !== entry.amount) parentMismatchIds.push(entry.id);
     let allocated = 0;
     for (const [lineIndex, line] of reportLines.entries()) {
+      const spendTreatment = line.spendTreatment
+        ?? (line.itemType === 'INVENTORY'
+          ? 'INVENTORY'
+          : line.itemType === 'ASSET'
+            ? 'CAPEX'
+            : 'OPEX');
       const quantity = decimalNumber(line.quantity);
       const unitCost = decimalNumber(line.unitCost);
       const landedUnitCost = decimalNumber(line.landedUnitCost);
@@ -337,30 +343,33 @@ export async function buildShareholderReportData(
         lineMathMismatchIds.push(line.id);
       }
       allocated += line.lineTotal;
-      if (line.spendTreatment === 'INVENTORY') {
+      if (spendTreatment === 'INVENTORY') {
         inventoryPurchases += line.lineTotal;
-      } else if (line.spendTreatment === 'CAPEX') {
+      } else if (spendTreatment === 'CAPEX') {
         fixedAssetPurchases += line.lineTotal;
-        if (sum(line.fixedAssetCostAllocations.map((allocation) => allocation.amount)) !== line.lineTotal) {
+        if (
+          line.fixedAssetCostAllocations
+          && sum(line.fixedAssetCostAllocations.map((allocation) => allocation.amount)) !== line.lineTotal
+        ) {
           assetMismatchIds.push(line.id);
         }
       } else {
         operatingSpending += line.lineTotal;
       }
-      const category = line.spendTreatment === 'CAPEX'
+      const category = spendTreatment === 'CAPEX'
         ? 'FIXED_ASSET'
-        : line.spendTreatment === 'INVENTORY'
+        : spendTreatment === 'INVENTORY'
           ? line.categoryType ?? 'INVENTORY'
           : line.classificationStatus === 'NEEDS_REVIEW'
             ? `REVIEW:${line.categoryType ?? line.itemType}`
             : line.categoryType ?? line.itemType;
       categoryTotals.set(category, (categoryTotals.get(category) ?? 0) + line.lineTotal);
 
-      if (line.spendTreatment === 'INVENTORY') {
+      if (spendTreatment === 'INVENTORY') {
         const movement = entry.stockMovements.find((row) => row.inventoryItemId === line.inventoryItemId);
         const layer = entry.costLayers.find((row) => row.inventoryItemId === line.inventoryItemId);
         const isLandedCost = sum(
-          line.landedCostAllocations.map((allocation) => allocation.amount),
+          (line.landedCostAllocations ?? []).map((allocation) => allocation.amount),
         ) === line.lineTotal;
         if (!isLandedCost && (
           !line.inventoryItemId
@@ -381,7 +390,7 @@ export async function buildShareholderReportData(
         supplier: entry.party?.name ?? '',
         description: entry.description ?? '',
         lineNo: line.lineNo,
-        itemType: line.spendTreatment,
+        itemType: spendTreatment,
         itemName: line.itemName,
         category,
         quantity,
