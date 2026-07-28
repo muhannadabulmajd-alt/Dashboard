@@ -151,12 +151,13 @@ const COPY = {
     note: 'Note',
     stockItem: 'Stock item',
     lines: 'Invoice lines',
-    lineType: 'Line type',
-    inventoryLine: 'Inventory item',
-    expenseLine: 'Expense',
-    serviceLine: 'Service',
-    otherLine: 'Other',
-    assetLine: 'Equipment / asset',
+    lineType: 'Accounting treatment',
+    treatmentHint: 'You can change this later. Finance, inventory, assets, and reports update together.',
+    inventoryLine: 'Inventory purchase',
+    expenseLine: 'Day-to-day cost (Opex)',
+    serviceLine: 'Service cost (Opex)',
+    otherLine: 'Other business cost',
+    assetLine: 'Long-term asset (Capex)',
     existingItem: 'Use existing item',
     newItem: 'Create new item',
     itemNameEn: 'Item name',
@@ -225,12 +226,13 @@ const COPY = {
     note: 'ملاحظة',
     stockItem: 'صنف المخزون',
     lines: 'سطور الفاتورة',
-    lineType: 'نوع السطر',
-    inventoryLine: 'صنف مخزون',
-    expenseLine: 'مصروف',
-    serviceLine: 'خدمة',
-    otherLine: 'أخرى',
-    assetLine: 'معدّة / أصل',
+    lineType: 'المعالجة المحاسبية',
+    treatmentHint: 'يمكنك تغييرها لاحقاً، وستتحدث المالية والمخزون والأصول والتقارير معاً.',
+    inventoryLine: 'شراء مخزون',
+    expenseLine: 'تكلفة يومية (تشغيلية)',
+    serviceLine: 'تكلفة خدمة (تشغيلية)',
+    otherLine: 'تكلفة عمل أخرى',
+    assetLine: 'أصل طويل الأجل (رأسمالي)',
     existingItem: 'استخدام صنف موجود',
     newItem: 'إنشاء صنف جديد',
     itemNameEn: 'اسم الصنف',
@@ -320,6 +322,7 @@ function SelectField({
   value,
   onChange,
   empty = true,
+  hint,
 }: {
   name: string;
   labelText: string;
@@ -328,6 +331,7 @@ function SelectField({
   value?: string;
   onChange?: (value: string) => void;
   empty?: boolean;
+  hint?: string;
 }) {
   return (
     <div className="flex flex-col gap-1">
@@ -351,6 +355,7 @@ function SelectField({
           </option>
         ))}
       </select>
+      {hint ? <p className="text-[11px] leading-4 text-muted-foreground">{hint}</p> : null}
     </div>
   );
 }
@@ -661,6 +666,7 @@ export function CentralEntryPanel({
                           { value: 'OTHER', label: c.otherLine },
                         ]}
                         empty={false}
+                        hint={c.treatmentHint}
                       />
                       {row.type === 'INVENTORY' ? (
                         <>

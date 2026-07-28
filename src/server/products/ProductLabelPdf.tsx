@@ -8,8 +8,8 @@ registerLaheebPdfFonts();
 const MM = 72 / 25.4;
 const PAGE_WIDTH = 60 * MM;
 const PAGE_HEIGHT = 30 * MM;
-const PAGE_PADDING = 1.8 * MM;
-const BARCODE_WIDTH = PAGE_WIDTH - PAGE_PADDING * 2;
+const PAGE_PADDING = 1.4 * MM;
+const BARCODE_WIDTH = 32.2 * MM;
 
 const styles = StyleSheet.create({
   page: {
@@ -24,50 +24,63 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     display: 'flex',
-    flexDirection: 'column',
+    flexDirection: 'row',
     overflow: 'hidden',
   },
   copy: {
-    width: '100%',
+    flex: 1,
     height: '100%',
-  },
-  textBlock: {
-    height: 34,
+    borderLeftWidth: 0.55,
+    borderLeftColor: '#000000',
+    paddingLeft: 4,
+    paddingRight: 1,
+    paddingVertical: 1,
     overflow: 'hidden',
   },
   main: {
     color: '#000000',
-    fontSize: 10.5,
+    fontSize: 10.2,
     fontWeight: 700,
-    lineHeight: 1.02,
-    marginBottom: 1,
+    lineHeight: 1.04,
+    marginBottom: 2,
   },
   variation: {
     color: '#000000',
-    fontSize: 7.6,
+    fontSize: 7.2,
     fontWeight: 700,
-    lineHeight: 1.05,
-    marginBottom: 0.5,
+    lineHeight: 1.08,
   },
-  specs: {
+  specsBlock: {
+    marginTop: 'auto',
+    borderTopWidth: 0.45,
+    borderTopColor: '#000000',
+    paddingTop: 2,
+  },
+  spec: {
     color: '#000000',
-    fontSize: 5.6,
-    lineHeight: 1.05,
-    marginTop: 0.4,
+    fontSize: 5.15,
+    lineHeight: 1.12,
+    marginBottom: 0.35,
+  },
+  barcodePanel: {
+    width: 34.2 * MM,
+    height: '100%',
+    paddingRight: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   barcode: {
-    marginTop: 'auto',
-    height: 39,
-    width: '100%',
+    width: BARCODE_WIDTH,
+    height: 57,
   },
   digits: {
     color: '#000000',
     fontFamily: 'Helvetica',
-    fontSize: 6.2,
-    letterSpacing: 1.45,
+    fontSize: 6.7,
+    letterSpacing: 1.25,
     lineHeight: 1,
     textAlign: 'center',
-    marginTop: -0.5,
+    marginTop: 0.4,
   },
 });
 
@@ -79,13 +92,23 @@ export function ProductLabelPdf({ label, copies = 1 }: { label: ProductLabelData
     <Document title="Laheeb product label">
       {Array.from({ length: safeCopies }, (_, index) => (
         <Page key={index} size={[PAGE_WIDTH, PAGE_HEIGHT]} style={styles.page}>
-          <View style={styles.copy}>
-            <View style={styles.textBlock}>
-              <Text style={[styles.main, textDirection]}>{label.mainName}</Text>
-              {label.variationName ? <Text style={[styles.variation, textDirection]}>{label.variationName}</Text> : null}
-              {label.specLines.map((line) => <Text key={line} style={[styles.specs, textDirection]}>{line}</Text>)}
+          <View style={styles.label}>
+            <View style={styles.barcodePanel}>
+              <PdfBarcode value={label.retailBarcode} />
             </View>
-            <PdfBarcode value={label.retailBarcode} />
+            <View style={styles.copy}>
+              <Text maxLines={2} style={[styles.main, textDirection]}>{label.mainName}</Text>
+              {label.variationName ? (
+                <Text maxLines={2} style={[styles.variation, textDirection]}>{label.variationName}</Text>
+              ) : null}
+              <View style={styles.specsBlock}>
+                {label.specItems.map((item) => (
+                  <Text key={`${item.label}-${item.value}`} maxLines={1} style={[styles.spec, textDirection]}>
+                    {item.label}: {item.value}
+                  </Text>
+                ))}
+              </View>
+            </View>
           </View>
         </Page>
       ))}
@@ -99,8 +122,8 @@ function PdfBarcode({ value }: { value: string }) {
   const quietRight = 7;
   const totalModules = quietLeft + modules.length + quietRight;
   const moduleWidth = BARCODE_WIDTH / totalModules;
-  const barHeight = 26;
-  const guardHeight = 30;
+  const barHeight = 44;
+  const guardHeight = 49;
   const groupedDigits = `${value[0]}  ${value.slice(1, 7)}  ${value.slice(7)}`;
 
   return (

@@ -1,7 +1,7 @@
 import 'server-only';
 import type { Currency, PartyType, Prisma } from '@prisma/client';
 import { prisma } from '@/server/db/client';
-import { getExpenses } from '@/server/db/repositories/finance.repo';
+import { getExpenses, getPaymentProcessingCosts } from '@/server/db/repositories/finance.repo';
 import { getOrders, getOrderLines } from '@/server/db/repositories/sales.repo';
 import { getUsdToIqd } from '@/server/settings';
 import type { DashboardFilters } from '@/lib/filters';
@@ -55,6 +55,8 @@ export interface PnlReport {
   grossProfit: number;
   grossMarginPct: number;
   directDeliveryCost: number;
+  paymentProcessingCosts: number;
+  contributionProfit: number;
   operatingExpenses: number;
   operatingProfit: number;
 }
@@ -64,12 +66,13 @@ export async function getPnlReport(
   scope: Scope,
   range: ResolvedRange,
 ): Promise<PnlReport> {
-  const [orders, lines, expenses] = await Promise.all([
+  const [orders, lines, expenses, paymentProcessingCosts] = await Promise.all([
     getOrders(filters, scope, range),
     getOrderLines(filters, scope, range),
     getExpenses(filters, scope, range),
+    getPaymentProcessingCosts(filters, scope, range),
   ]);
-  return M.buildPnlSnapshot(orders, lines, expenses);
+  return M.buildPnlSnapshot(orders, lines, expenses, { paymentProcessingCosts });
 }
 
 export type CashFlowBucketKey =

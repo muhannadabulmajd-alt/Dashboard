@@ -9,11 +9,12 @@ import type { DashboardFilters } from '@/lib/filters';
 import type { ResolvedRange } from '@/lib/dates';
 import type { Currency } from '@prisma/client';
 
-export type SpendBucket = 'capex' | 'opex' | 'cogs';
+export type SpendBucket = 'all' | 'capex' | 'inventory' | 'opex' | 'direct' | 'cogs';
+type ClassifiedSpendBucket = Exclude<SpendBucket, 'all'>;
 
 export interface SpendRow {
   id: string;
-  bucket: SpendBucket;
+  bucket: ClassifiedSpendBucket;
   date: Date;
   month: string;
   description: string;
@@ -59,6 +60,15 @@ export async function getSpendRows(
   range: ResolvedRange,
   rowFilters: SpendFilters = {},
 ): Promise<SpendRow[]> {
+  if (bucket === 'all') {
+    const groups = await Promise.all(
+      (['capex', 'inventory', 'opex', 'direct'] as const).map((group) =>
+        getSpendRows(group, filters, scope, range, rowFilters),
+      ),
+    );
+    return groups.flat().sort((a, b) => b.date.getTime() - a.date.getTime());
+  }
+
   const rate = await getUsdToIqd();
   const branch = branchWhere(filters, scope);
 
@@ -114,6 +124,7 @@ export async function getSpendRows(
       description: true,
       reference: true,
       categoryType: true,
+      costRole: true,
       party: { select: { name: true } },
       ledgerLines: {
         select: {
@@ -137,12 +148,14 @@ export async function getSpendRows(
     if (entry.ledgerLines.length) {
       for (const line of entry.ledgerLines) {
         const itemType = line.itemType.toUpperCase();
-        const rowBucket: SpendBucket | null =
+        const rowBucket: ClassifiedSpendBucket =
           itemType === 'ASSET'
             ? 'capex'
             : itemType === 'INVENTORY'
-              ? null
-              : 'opex';
+              ? 'inventory'
+              : entry.costRole === 'DIRECT_DELIVERY' || entry.costRole === 'PAYMENT_PROCESSING'
+                ? 'direct'
+                : 'opex';
         if (rowBucket !== bucket) continue;
         rows.push({
           id: line.id,
@@ -160,28 +173,28 @@ export async function getSpendRows(
       continue;
     }
 
-    if (bucket === 'capex' && entry.fixedAssets.length) {
+    const unlinedBucket: ClassifiedSpendBucket =
+      entry.fixedAssets.length
+        ? 'capex'
+        : entry.costLayers.length
+          ? 'inventory'
+          : entry.costRole === 'DIRECT_DELIVERY' || entry.costRole === 'PAYMENT_PROCESSING'
+            ? 'direct'
+            : 'opex';
+    if (bucket === unlinedBucket) {
       rows.push({
         id: entry.id,
         bucket,
         date: entry.date,
         month: monthBucketKey(entry.date),
         description: entry.description ?? entry.reference ?? entry.id,
-        category: entry.categoryType ?? 'EQUIPMENT',
-        party: entry.party?.name ?? null,
-        reference: entry.reference,
-        amount: convertToIqd(entry.amount, entry.currency, rate),
-        sourceHref: `/finance/ledger/${entry.id}`,
-      });
-    }
-    if (bucket === 'opex' && !entry.fixedAssets.length && !entry.costLayers.length) {
-      rows.push({
-        id: entry.id,
-        bucket,
-        date: entry.date,
-        month: monthBucketKey(entry.date),
-        description: entry.description ?? entry.reference ?? entry.id,
-        category: entry.categoryType ?? 'OVERHEAD',
+        category:
+          entry.categoryType ??
+          (unlinedBucket === 'capex'
+            ? 'EQUIPMENT'
+            : unlinedBucket === 'inventory'
+              ? 'INVENTORY'
+              : 'OVERHEAD'),
         party: entry.party?.name ?? null,
         reference: entry.reference,
         amount: convertToIqd(entry.amount, entry.currency, rate),
@@ -224,15 +237,25 @@ export async function getSpendRows(
 }
 
 export async function getSpendTotals(filters: DashboardFilters, scope: Scope, range: ResolvedRange) {
-  const [capex, opex, cogs] = await Promise.all([
+  const [capex, inventory, opex, direct, cogs] = await Promise.all([
     getSpendRows('capex', filters, scope, range),
+    getSpendRows('inventory', filters, scope, range),
     getSpendRows('opex', filters, scope, range),
+    getSpendRows('direct', filters, scope, range),
     getSpendRows('cogs', filters, scope, range),
   ]);
+  const sum = (rows: SpendRow[]) => rows.reduce((total, row) => total + row.amount, 0);
+  const capexTotal = sum(capex);
+  const inventoryTotal = sum(inventory);
+  const opexTotal = sum(opex);
+  const directTotal = sum(direct);
   return {
-    capex: capex.reduce((sum, row) => sum + row.amount, 0),
-    opex: opex.reduce((sum, row) => sum + row.amount, 0),
-    cogs: cogs.reduce((sum, row) => sum + row.amount, 0),
+    capex: capexTotal,
+    inventory: inventoryTotal,
+    opex: opexTotal,
+    direct: directTotal,
+    cogs: sum(cogs),
+    totalSpent: capexTotal + inventoryTotal + opexTotal + directTotal,
   };
 }
 

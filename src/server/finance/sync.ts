@@ -2,6 +2,7 @@ import 'server-only';
 import type { Prisma } from '@prisma/client';
 import { roundMoney } from '@/lib/decimal';
 import type { OrderMetricRole } from '@/lib/metrics/status';
+import { providerFeeAmount, providerFeeCostRole } from '@/lib/provider-fees';
 
 type Tx = Prisma.TransactionClient;
 
@@ -10,6 +11,7 @@ export type FinanceSyncMode = 'NONE' | 'CREDIT' | 'PAID' | 'PARTIAL' | 'PROVIDER
 const ORDER_KEY = (orderId: string, kind: 'AR' | 'PAY') => `ORD:${orderId}:${kind}`;
 const ORDER_PARTIAL_KEY = (orderId: string) => `ORD:${orderId}:PARTIAL`;
 const ORDER_PROVIDER_KEY = (orderId: string) => `ORD:${orderId}:PROVIDER`;
+const ORDER_PROVIDER_FEE_KEY = (orderId: string) => `ORD:${orderId}:PROVIDER:FEE`;
 const ORDER_PAYMENT_ADJUSTMENT_KEY = (orderId: string, invoiceTotal: number) =>
   `ORD:${orderId}:PAY:TOTAL:${invoiceTotal}`;
 const RECEIPT_KEY = (movementId: string) => `INV:${movementId}:PUR`;
@@ -100,7 +102,17 @@ export async function syncOrderProviderCollection(
 ) {
   const provider = await tx.party.findUnique({
     where: { id: input.providerPartyId },
-    select: { id: true, name: true, collectsOrderPayments: true, isActive: true },
+    select: {
+      id: true,
+      name: true,
+      collectsOrderPayments: true,
+      isActive: true,
+      defaultSettlementAccountId: true,
+      automaticOrderSettlement: true,
+      providerFeeMode: true,
+      feeRateBps: true,
+      fixedFee: true,
+    },
   });
   if (!provider?.isActive || !provider.collectsOrderPayments) throw new Error('provider');
 
@@ -114,6 +126,7 @@ export async function syncOrderProviderCollection(
       discountAmount: true,
       refundAmount: true,
       deliveryFee: true,
+      deliveryCost: true,
       extraCharges: true,
       branchId: true,
     },
@@ -146,14 +159,15 @@ export async function syncOrderProviderCollection(
       .filter((entry) => entry.party?.collectsOrderPayments !== true)
       .map((entry) => entry.id),
   );
-  const paidDirectly = entries
-    .filter(
-      (entry) =>
-        entry.orderId === orderId &&
-        !entry.obligation &&
-        entry.type === 'INCOME' &&
-        !entry.settlesId,
-    )
+  const directIncomeEntries = entries.filter(
+    (entry) =>
+      entry.orderId === orderId &&
+      !entry.obligation &&
+      entry.type === 'INCOME' &&
+      !entry.settlesId,
+  );
+  const paidDirectly = directIncomeEntries
+    .filter((entry) => entry.party?.collectsOrderPayments !== true)
     .reduce((sum, entry) => sum + entry.amount, 0);
   const paidAgainstCustomerCredit = entries
     .filter(
@@ -195,6 +209,122 @@ export async function syncOrderProviderCollection(
         },
       });
     }
+  }
+
+  if (provider.automaticOrderSettlement) {
+    if (!provider.defaultSettlementAccountId) throw new Error('provider_account');
+
+    for (const receivable of providerReceivables) {
+      if (receivable.settlements.length > 0) throw new Error('provider_settled');
+      await tx.financeEntry.update({
+        where: { id: receivable.id },
+        data: {
+          archivedAt: new Date(),
+          archiveReason: `Replaced by automatic ${provider.name} collection`,
+        },
+      });
+    }
+
+    const providerDirectEntries = directIncomeEntries.filter(
+      (entry) => entry.party?.collectsOrderPayments === true,
+    );
+    const matchingDirect =
+      providerDirectEntries.find((entry) => entry.partyId === provider.id) ??
+      providerDirectEntries[0] ??
+      null;
+    for (const entry of providerDirectEntries) {
+      if (entry.id === matchingDirect?.id) continue;
+      await tx.financeEntry.update({
+        where: { id: entry.id },
+        data: {
+          archivedAt: new Date(),
+          archiveReason: `Replaced by automatic ${provider.name} collection`,
+        },
+      });
+    }
+
+    const receiptData = {
+      date: order.placedAt,
+      type: 'INCOME' as const,
+      amount: providerAmount,
+      currency: 'IQD' as const,
+      obligation: false,
+      obligationKind: null,
+      dueDate: null,
+      accountId: provider.defaultSettlementAccountId,
+      partyId: provider.id,
+      paymentMethod: input.paymentMethod ?? 'PROVIDER_COLLECTION',
+      branchId: order.branchId,
+      orderId: order.id,
+      reference: order.orderNumber,
+      description: `Automatically collected by ${provider.name}: ${order.orderNumber}`,
+      settlesId: null,
+      providerSettlementId: null,
+      archivedAt: null,
+      archiveReason: null,
+    };
+    if (matchingDirect) {
+      await tx.financeEntry.update({
+        where: { id: matchingDirect.id },
+        data: receiptData,
+      });
+    } else {
+      await tx.financeEntry.upsert({
+        where: { importKey: ORDER_PROVIDER_KEY(order.id) },
+        create: {
+          ...receiptData,
+          importKey: ORDER_PROVIDER_KEY(order.id),
+          createdById: input.createdById ?? null,
+        },
+        update: receiptData,
+      });
+    }
+
+    const fee = providerFeeAmount(providerAmount, order.deliveryCost, {
+      mode: provider.providerFeeMode,
+      rateBps: provider.feeRateBps,
+      fixedAmount: provider.fixedFee,
+    });
+    if (fee > 0) {
+      const feeData = {
+        date: order.placedAt,
+        type: 'EXPENSE' as const,
+        amount: fee,
+        currency: 'IQD' as const,
+        categoryType: provider.providerFeeMode === 'ORDER_DELIVERY_COST' ? 'SHIPPING' : 'TECH',
+        costRole: providerFeeCostRole(provider.providerFeeMode),
+        obligation: false,
+        obligationKind: null,
+        dueDate: null,
+        accountId: provider.defaultSettlementAccountId,
+        partyId: provider.id,
+        paymentMethod: input.paymentMethod ?? 'PROVIDER_COLLECTION',
+        branchId: order.branchId,
+        orderId: order.id,
+        reference: order.orderNumber,
+        description: `${provider.name} fee deducted automatically: ${order.orderNumber}`,
+        settlesId: null,
+        providerSettlementId: null,
+        archivedAt: null,
+        archiveReason: null,
+      };
+      await tx.financeEntry.upsert({
+        where: { importKey: ORDER_PROVIDER_FEE_KEY(order.id) },
+        create: {
+          ...feeData,
+          importKey: ORDER_PROVIDER_FEE_KEY(order.id),
+          createdById: input.createdById ?? null,
+        },
+        update: feeData,
+      });
+    } else {
+      await closeOrDeleteAutoEntry(
+        tx,
+        ORDER_PROVIDER_FEE_KEY(order.id),
+        `No automatic provider fee for order ${order.orderNumber}`,
+      );
+    }
+    return;
   }
 
   const matchingProviderReceivable =

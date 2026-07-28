@@ -58,6 +58,26 @@
     "totalExpenses": "Total expenses",
     "netProfit": "Net profit",
     "grossProfit": "Gross profit",
+    "salesEarned": "Sales earned",
+    "totalSpent": "Total business spending",
+    "operatingProfit": "Operating profit",
+    "contributionProfit": "Contribution profit",
+    "inventoryBought": "Inventory purchased",
+    "directSellingCosts": "Delivery & payment fees",
+    "averageOrderValue": "Average order value",
+    "marginValue": "Margin: {value}",
+    "understandNumbers": "Understand the numbers",
+    "understandNumbersHint": "Every amount has one job. Open any card to see the records behind it.",
+    "explain": {
+      "cogs": "The recorded cost of products actually sold in this period.",
+      "grossProfit": "Sales earned minus COGS.",
+      "contributionProfit": "Gross profit after delivery and payment fees.",
+      "opex": "Day-to-day costs such as rent, utilities, salaries and services.",
+      "capex": "Long-term assets such as equipment, fit-out and brand identity.",
+      "inventory": "Stock bought for future production or sale; not an expense until sold.",
+      "directCosts": "Courier and payment-gateway fees tied directly to orders.",
+      "aov": "Sales earned divided by completed orders."
+    },
     "capex": "Capex",
     "opex": "Opex",
     "cogs": "COGS",
@@ -80,7 +100,7 @@
     "topSuppliers": "Top suppliers by spend",
     "noSpend": "No spending recorded yet. Charts appear once purchases or expenses are added.",
     "spendDetailSubtitle": "Detailed rows included in this finance bucket.",
-    "spendBuckets": { "capex": "Capex details", "opex": "Opex details", "cogs": "COGS details" },
+    "spendBuckets": { "all": "All business spending", "capex": "Capex details", "inventory": "Inventory purchases", "opex": "Opex details", "direct": "Delivery & payment fees", "cogs": "COGS details" },
     "total": "Total",
     "rows": "Rows",
     "timeframe": "Timeframe",
@@ -142,6 +162,10 @@
     "alertsClear": "No finance alerts for the current data.",
     "alertsClearShort": "Clear",
     "alerts": {
+      "walletUnmatched": {
+        "title": "Wallet sales need matching",
+        "body": "{count} wallet sales totaling {amount} have no matching Atlas order lines, so they were not invented or posted."
+      },
       "overduePayables": { "title": "Overdue payables", "body": "Supplier or expense dues past their due date total {amount}." },
       "overdueReceivables": { "title": "Overdue receivables", "body": "Customer amounts past their due date total {amount}." },
       "lowCash": { "title": "Cash pressure", "body": "Available cash is {cash} against open payables of {payables}." },
@@ -359,11 +383,12 @@
       "pnl": {
         "title": "P&L guide",
         "intro": "P&L explains whether the business made money in the selected period.",
-        "points": [
-          "Revenue is sales before cost; COGS is product cost tied to sold items.",
-          "Gross profit is revenue minus COGS.",
-          "Operating profit subtracts operating expenses from gross profit."
-        ]
+      "points": [
+        "Sales earned is completed-order revenue. Average order value is sales earned divided by completed orders.",
+        "COGS is the cost of products sold. Gross profit is sales earned minus COGS.",
+        "Contribution profit also removes delivery and payment fees. Operating profit then removes day-to-day Opex.",
+        "Total business spending is cash committed to Capex, inventory, Opex, delivery and payment fees. COGS is not added again because its inventory cash was already counted when stock was purchased."
+      ]
       },
       "balanceSheet": {
         "title": "Balance sheet guide",
@@ -511,6 +536,7 @@
       "provider": "Provider",
       "completionPaymentHint": "Completing an unpaid order must record where the customer paid. Already-paid orders will not be charged again.",
       "completionMode": "How was payment collected?",
+      "automaticPayment": "Automatic from order route (recommended)",
       "directPayment": "Cash or bank account",
       "providerCollection": "Hi-Express or Wayl collected it",
       "apply": "Apply changes",
@@ -557,7 +583,8 @@
       "payment_read_only": "Existing payment records cannot be changed from the normal order editor. Use a payment, refund, or reversal action.",
       "payment_exceeds_total": "The edited total cannot be lower than the amount already paid. Record a refund or reversal first.",
       "refund_required": "A paid order cannot be returned by editing its status alone. Record the refund or reversal first.",
-      "order_update_failed": "The order update could not be saved safely. Try again or share the debug ID with support."
+      "order_update_failed": "The order update could not be saved safely. Try again or share the debug ID with support.",
+      "finance_configuration": "Automatic payment is not configured for this order route. Check the cash account or collection provider settings."
     },
     "entities": {
       "products": "Products",
@@ -855,7 +882,7 @@
       "deliveryFee": "Delivery fee", "deliveryCost": "Delivery cost", "items": "Items",
       "product": "Product", "qty": "Qty", "unitPrice": "Unit price", "lineTotal": "Line total",
       "subtotal": "Subtotal", "total": "Total", "orderDiscount": "Order discount", "extraCharges": "Extra charges",
-      "financeMode": "Payment status", "financeCredit": "Unpaid", "financePaid": "Paid to cash / bank", "financePartial": "Partially paid", "financeProvider": "Collected by provider", "financeNone": "Do not sync finance",
+      "financeMode": "Payment handling", "financeAuto": "Automatic (recommended)", "financeCredit": "Leave unpaid", "financePaid": "Paid to cash / bank", "financePartial": "Partially paid", "financeProvider": "Collected by provider", "financeNone": "Do not sync finance",
       "financePaidAmount": "Amount paid", "paymentAccount": "Payment account", "account": "Account", "paymentMethod": "Payment method", "paymentDate": "Payment date", "paymentDueDate": "Due date", "paymentMode": "Payment status", "paymentStatus": "Payment status", "paymentRoute": "Payment route", "provider": "Collection provider", "providerOutstanding": "Provider still owes Laheeb", "paid": "Paid", "purchaseCredit": "Create payable", "purchasePaid": "Paid now", "supplier": "Supplier",
       "item": "Item", "category": "Category", "unit": "Unit", "branch": "Branch", "currentStock": "Current stock",
       "reorderPoint": "Reorder point", "avgDailyUsage": "Avg daily use", "unitCost": "Unit cost", "linkedVariation": "Linked variation (deduct on sale)",
@@ -1015,6 +1042,13 @@
     "operatingCosts": "Operating costs",
     "operatingProfit": "Operating profit",
     "deliveryCosts": "Direct delivery cost",
+    "paymentProcessingCosts": "Payment processing fees",
+    "contributionProfit": "Contribution profit",
+    "salesEarned": "Sales earned",
+    "totalSpent": "Total business spending",
+    "averageOrderValue": "Average order value",
+    "capex": "Capex purchased",
+    "inventoryPurchases": "Inventory purchased",
     "productMargin": "Product margin",
     "costsByCategory": "Operating costs by category",
     "perKg": "Cost per kg",

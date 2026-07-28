@@ -382,6 +382,98 @@ async function main(): Promise<void> {
   });
 
   checks.push({
+    name: 'automatic provider configuration',
+    failures: await count`
+      SELECT COUNT(*) AS count
+      FROM "Party" p
+      WHERE p."externalKey" IN ('HI_EXPRESS', 'WAYL')
+        AND p."isActive" = true
+        AND (
+          p."collectsOrderPayments" = false
+          OR p."automaticOrderSettlement" = false
+          OR p."defaultSettlementAccountId" IS NULL
+          OR (p."externalKey" = 'HI_EXPRESS' AND p."providerFeeMode" <> 'ORDER_DELIVERY_COST')
+          OR (p."externalKey" = 'WAYL' AND (
+            p."providerFeeMode" <> 'PERCENT_PLUS_FIXED'
+            OR p."feeRateBps" <> 350
+            OR p."fixedFee" <> 600
+          ))
+        )
+    `,
+  });
+
+  checks.push({
+    name: 'automatic order fees are classified and bounded',
+    failures: await count`
+      SELECT COUNT(*) AS count
+      FROM "FinanceEntry" fee
+      JOIN "Order" o ON o.id = fee."orderId"
+      WHERE fee."importKey" LIKE 'ORD:%:PROVIDER:FEE'
+        AND fee."archivedAt" IS NULL
+        AND fee."reversedAt" IS NULL
+        AND fee."reversalOfId" IS NULL
+        AND (
+          fee.type <> 'EXPENSE'
+          OR fee."accountId" IS NULL
+          OR fee."costRole" NOT IN ('DIRECT_DELIVERY', 'PAYMENT_PROCESSING')
+          OR fee.amount <= 0
+          OR fee.amount > GREATEST(
+            o."grossAmount" - o."discountAmount" - o."refundAmount"
+              + o."deliveryFee" + o."extraCharges",
+            0
+          )
+        )
+    `,
+  });
+
+  checks.push({
+    name: 'branding purchase is a fixed asset',
+    failures: await count`
+      SELECT CASE
+        WHEN NOT EXISTS (
+          SELECT 1 FROM "FinanceEntry" WHERE "recordKey" = 'DOC000169'
+        ) THEN 0
+        WHEN EXISTS (
+          SELECT 1
+          FROM "FinanceEntry" e
+          JOIN "LedgerEntryLine" l ON l."financeEntryId" = e.id
+          JOIN "FixedAsset" a ON a."financeEntryId" = e.id
+          WHERE e."recordKey" = 'DOC000169'
+            AND e.type = 'PURCHASE'
+            AND e."recordClass" = 'PURCHASE'
+            AND e."categoryType" = 'EQUIPMENT'
+            AND l."itemType" = 'ASSET'
+            AND l."categoryType" = 'EQUIPMENT'
+            AND a.category = 'Brand identity'
+            AND a."totalCost" = 1500000
+        ) THEN 0
+        ELSE 1
+      END AS count
+    `,
+  });
+
+  checks.push({
+    name: 'matched Wayl wallet commissions',
+    failures: await count`
+      SELECT CASE
+        WHEN NOT EXISTS (
+          SELECT 1 FROM "Setting" WHERE "key" = 'wayl_wallet_unmatched_sales'
+        ) THEN 0
+        WHEN (
+          SELECT COUNT(*) = 7 AND COALESCE(SUM(amount), 0) = 9553
+          FROM "FinanceEntry"
+          WHERE "importKey" LIKE 'WAYL:COMMISSION:%'
+            AND "archivedAt" IS NULL
+            AND "reversedAt" IS NULL
+            AND "reversalOfId" IS NULL
+            AND "costRole" = 'PAYMENT_PROCESSING'
+        ) THEN 0
+        ELSE 1
+      END AS count
+    `,
+  });
+
+  checks.push({
     name: 'historical orders do not move finished stock',
     failures: await count`
       SELECT COUNT(*) AS count

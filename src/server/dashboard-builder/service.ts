@@ -249,14 +249,20 @@ export async function resolveWidgetData(user: BuilderUser, widget: DashboardWidg
       getSpendTotals(scopedFilters, scope, range),
     ]);
     if (metric.id === 'finance.revenue') return { kind: 'kpi', value: pnl.netSales, valueKind: 'iqd' };
+    if (metric.id === 'finance.totalSpent') return { kind: 'kpi', value: spendTotals.totalSpent, valueKind: 'iqd' };
     if (metric.id === 'finance.capex') return { kind: 'kpi', value: spendTotals.capex, valueKind: 'iqd' };
     if (metric.id === 'finance.opex') return { kind: 'kpi', value: spendTotals.opex, valueKind: 'iqd' };
     if (metric.id === 'finance.cogs') return { kind: 'kpi', value: spendTotals.cogs, valueKind: 'iqd' };
+    if (metric.id === 'finance.grossProfit') return { kind: 'kpi', value: pnl.grossProfit, valueKind: 'iqd' };
+    if (metric.id === 'finance.grossMargin') return { kind: 'kpi', value: pnl.grossMarginPct, valueKind: 'percent' };
+    if (metric.id === 'finance.contributionProfit') return { kind: 'kpi', value: pnl.contributionProfit, valueKind: 'iqd' };
+    if (metric.id === 'finance.operatingProfit') return { kind: 'kpi', value: pnl.operatingProfit, valueKind: 'iqd' };
+    if (metric.id === 'finance.inventoryPurchases') return { kind: 'kpi', value: spendTotals.inventory, valueKind: 'iqd' };
+    if (metric.id === 'finance.directSellingCosts') return { kind: 'kpi', value: spendTotals.direct, valueKind: 'iqd' };
     if (metric.id === 'finance.cash') return { kind: 'kpi', value: balance.combinedIqd.cashBank, valueKind: 'iqd' };
     if (metric.id === 'finance.receivables') return { kind: 'kpi', value: balance.combinedIqd.receivables, valueKind: 'iqd' };
     if (metric.id === 'finance.payables') return { kind: 'kpi', value: balance.combinedIqd.payables, valueKind: 'iqd' };
-    const spendRows = await getSpendRows('opex', scopedFilters, scope, range);
-    const allSpendRows = [...await getSpendRows('capex', scopedFilters, scope, range), ...spendRows, ...await getSpendRows('cogs', scopedFilters, scope, range)];
+    const allSpendRows = await getSpendRows('all', scopedFilters, scope, range);
     if (metric.id === 'finance.spendByMonth') return { kind: 'series', valueKind: 'iqd', points: bucketRows(spendByMonth(allSpendRows)) };
     if (metric.id === 'finance.spendByCategory') return { kind: 'series', valueKind: 'iqd', points: bucketRows(spendByCategory(allSpendRows)) };
     if (metric.id === 'finance.spendByParty') {

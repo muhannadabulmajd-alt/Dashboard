@@ -18,7 +18,7 @@ import {
   getProductProfitabilityReport,
   type CashFlowBucketKey,
 } from '@/server/finance/reports';
-import { getSpendRows, type SpendBucket } from '@/server/finance/spend';
+import { getSpendRows, getSpendTotals, type SpendBucket } from '@/server/finance/spend';
 import { getBalanceSheetSnapshot } from '@/server/finance/balance-sheet';
 import { getUsdToIqd } from '@/server/settings';
 import type { ObligationKind, FinanceType, LedgerRecordClass, Prisma } from '@prisma/client';
@@ -150,18 +150,27 @@ export async function GET(req: NextRequest) {
     }
     filename = 'balance-sheet';
   } else if (type === 'pnl') {
-    const report = await getPnlReport(filters, scope, range);
+    const [report, spend] = await Promise.all([
+      getPnlReport(filters, scope, range),
+      getSpendTotals(filters, scope, range),
+    ]);
     headers = ['Line', 'Amount_IQD'];
     rows = [
       ['Gross revenue', report.grossRevenue],
       ['Discounts', -report.discounts],
       ['Refunds', -report.refunds],
-      ['Net sales', report.netSales],
+      ['Sales earned', report.netSales],
+      ['Total business spending', -spend.totalSpent],
       ['COGS', -report.cogs],
       ['Gross profit', report.grossProfit],
       ['Gross margin %', (report.grossMarginPct * 100).toFixed(1)],
+      ['Direct delivery costs', -report.directDeliveryCost],
+      ['Payment processing fees', -report.paymentProcessingCosts],
+      ['Contribution profit', report.contributionProfit],
       ['Operating expenses', -report.operatingExpenses],
       ['Operating profit', report.operatingProfit],
+      ['Capital spending', -spend.capex],
+      ['Inventory purchases', -spend.inventory],
     ];
     filename = 'pnl';
   } else if (type === 'cash-flow') {
@@ -224,7 +233,11 @@ export async function GET(req: NextRequest) {
     ]);
     filename = kind === 'customer' ? 'customer-statements' : kind === 'supplier' ? 'supplier-statements' : 'party-statements';
   } else if (type === 'spend') {
-    const bucket = (['capex', 'opex', 'cogs'].includes(p.get('bucket') ?? '') ? p.get('bucket') : 'opex') as SpendBucket;
+    const bucket = (
+      ['all', 'capex', 'inventory', 'opex', 'direct', 'cogs'].includes(p.get('bucket') ?? '')
+        ? p.get('bucket')
+        : 'all'
+    ) as SpendBucket;
     const spendRows = await getSpendRows(bucket, filters, scope, range, {
       category: p.get('category') ?? undefined,
       month: p.get('month') ?? undefined,

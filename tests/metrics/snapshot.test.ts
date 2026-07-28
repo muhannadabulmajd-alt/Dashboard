@@ -7,7 +7,7 @@ describe('canonical metric snapshots', () => {
     const orders = [makeOrder({ grossAmount: 1_000_000, discountAmount: 100_000, refundAmount: 50_000, deliveryCost: 25_000 })];
     const lines = [{ productId: 'p', sku: 'P', quantity: 2, unitGrossPrice: 500_000, lineDiscount: 0, lineNet: 850_000, unitCogsSnapshot: 200_000 }];
     const expenses = [{ amount: 75_000, currency: 'IQD' as const, incurredAt: new Date('2026-06-01'), categoryType: 'RENT' as const }];
-    expect(buildPnlSnapshot(orders, lines, expenses)).toEqual({
+    expect(buildPnlSnapshot(orders, lines, expenses, { paymentProcessingCosts: 12_000 })).toEqual({
       grossRevenue: 1_000_000,
       discounts: 100_000,
       refunds: 50_000,
@@ -16,8 +16,10 @@ describe('canonical metric snapshots', () => {
       grossProfit: 450_000,
       grossMarginPct: 450_000 / 850_000,
       directDeliveryCost: 25_000,
+      paymentProcessingCosts: 12_000,
+      contributionProfit: 413_000,
       operatingExpenses: 75_000,
-      operatingProfit: 350_000,
+      operatingProfit: 338_000,
     });
   });
 

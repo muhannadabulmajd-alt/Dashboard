@@ -3,6 +3,7 @@
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
+import type { Prisma } from '@prisma/client';
 import { prisma } from '@/server/db/client';
 import { FULFILLMENT_METHODS } from '@/lib/enums';
 import { invoicePaymentSnapshot, invoiceTotal } from '@/lib/invoice';
@@ -29,7 +30,7 @@ const bulkOrderSchema = z.object({
   orderIds: z.array(z.string().min(1)).min(1).max(100),
   operation: z.enum(['STATUS', 'RECORD_PAID', 'ASSIGN_PROVIDER']),
   status: z.string().optional(),
-  completionMode: z.enum(['DIRECT', 'PROVIDER']).optional(),
+  completionMode: z.enum(['AUTO', 'DIRECT', 'PROVIDER']).optional(),
   accountId: z.string().optional(),
   providerKey: z.enum(['HI_EXPRESS', 'WAYL']).optional(),
   paymentMethod: z.string().optional(),
@@ -73,7 +74,7 @@ const headerSchema = z.object({
   orderDiscount: z.coerce.number().int().nonnegative().default(0),
   extraCharges: z.coerce.number().int().nonnegative().default(0),
   notes: z.string().optional(),
-  financeMode: z.enum(['NONE', 'CREDIT', 'PAID', 'PARTIAL', 'PROVIDER', 'KEEP']).default('CREDIT'),
+  financeMode: z.enum(['AUTO', 'NONE', 'CREDIT', 'PAID', 'PARTIAL', 'PROVIDER', 'KEEP']).default('AUTO'),
   financeAccountId: z.string().optional(),
   financeProviderId: z.string().optional(),
   financePaidAmount: z.coerce.number().int().nonnegative().optional(),
@@ -105,7 +106,7 @@ function parseHeader(fd: FormData) {
     orderDiscount: optField(fd, 'orderDiscount'),
     extraCharges: optField(fd, 'extraCharges'),
     notes: optField(fd, 'notes'),
-    financeMode: optField(fd, 'financeMode') || 'CREDIT',
+    financeMode: optField(fd, 'financeMode') || 'AUTO',
     financeAccountId: optField(fd, 'financeAccountId'),
     financeProviderId: optField(fd, 'financeProviderId'),
     financePaidAmount: optField(fd, 'financePaidAmount'),
@@ -169,6 +170,66 @@ function createOrderFailure(stage: OrderCreateStage, error: unknown, context: Re
   return { error: 'create_failed', formError: 'create_failed', stage, debugId };
 }
 
+async function resolveAutomaticOrderFinance(input: {
+  channel: string;
+  fulfillmentMethod: (typeof FULFILLMENT_METHODS)[number];
+  statusRole: string;
+}, client: typeof prisma | Prisma.TransactionClient = prisma) {
+  if (input.statusRole !== 'SALE') {
+    return {
+      mode: 'NONE' as FinanceSyncMode,
+      accountId: null,
+      providerId: null,
+      paymentMethod: null,
+    };
+  }
+
+  const providerKey =
+    input.channel === 'ONLINE_STORE'
+      ? 'WAYL'
+      : input.fulfillmentMethod === 'COURIER'
+        ? 'HI_EXPRESS'
+        : null;
+  if (providerKey) {
+    const provider = await client.party.findUnique({
+      where: { externalKey: providerKey },
+      select: {
+        id: true,
+        isActive: true,
+        collectsOrderPayments: true,
+        automaticOrderSettlement: true,
+        defaultSettlementAccountId: true,
+      },
+    });
+    if (
+      !provider?.isActive ||
+      !provider.collectsOrderPayments ||
+      !provider.automaticOrderSettlement ||
+      !provider.defaultSettlementAccountId
+    ) {
+      throw new Error('provider_configuration');
+    }
+    return {
+      mode: 'PROVIDER' as FinanceSyncMode,
+      accountId: provider.defaultSettlementAccountId,
+      providerId: provider.id,
+      paymentMethod: providerKey === 'WAYL' ? 'ONLINE_PAYMENT' : 'COURIER_COLLECTION',
+    };
+  }
+
+  const cashAccount = await client.financeAccount.findUnique({
+    where: { externalKey: 'CASH_ON_HANDS' },
+    select: { id: true, isActive: true },
+  });
+  if (!cashAccount?.isActive) throw new Error('cash_account');
+  return {
+    mode: 'PAID' as FinanceSyncMode,
+    accountId: cashAccount.id,
+    providerId: null,
+    paymentMethod: 'CASH',
+  };
+}
+
 export async function createOrder(_prev: ActionState, fd: FormData): Promise<ActionState> {
   const user = await requireCap(CAP);
   if (!user) return { error: 'forbidden' };
@@ -191,26 +252,47 @@ export async function createOrder(_prev: ActionState, fd: FormData): Promise<Act
   if (h.data.financeMode === 'KEEP') {
     return { error: 'invalid', fieldErrors: { financeMode: 'invalid' } };
   }
-  if ((h.data.financeMode === 'PAID' || h.data.financeMode === 'PARTIAL') && !h.data.financeAccountId) {
-    return { error: 'account', fieldErrors: { financeAccountId: 'account' } };
-  }
-  if (h.data.financeMode === 'PROVIDER' && !h.data.financeProviderId) {
-    return { error: 'provider', fieldErrors: { financeProviderId: 'provider' } };
-  }
   const statusRoles = await getOrderStatusRoleMap();
   const statusRole = statusRoles.get(h.data.status) ?? 'UNKNOWN';
   const saleStatuses = [...statusRoles].filter(([, role]) => role === 'SALE').map(([code]) => code);
-  const provider = h.data.financeMode === 'PROVIDER'
+  let automaticFinance: Awaited<ReturnType<typeof resolveAutomaticOrderFinance>> | null = null;
+  if (h.data.financeMode === 'AUTO') {
+    try {
+      automaticFinance = await resolveAutomaticOrderFinance({
+        channel: h.data.channel,
+        fulfillmentMethod: h.data.fulfillmentMethod,
+        statusRole,
+      });
+    } catch (error) {
+      orderActionError(error, { stage: 'automatic_finance', channel: h.data.channel });
+      return {
+        error: 'finance_configuration',
+        formError: 'finance_configuration',
+        fieldErrors: { financeMode: 'finance_configuration' },
+      };
+    }
+  }
+  const financeMode = automaticFinance?.mode ?? h.data.financeMode;
+  const financeAccountId = automaticFinance?.accountId ?? h.data.financeAccountId;
+  const financeProviderId = automaticFinance?.providerId ?? h.data.financeProviderId;
+  const financePaymentMethod = automaticFinance?.paymentMethod ?? h.data.financePaymentMethod;
+  if ((financeMode === 'PAID' || financeMode === 'PARTIAL') && !financeAccountId) {
+    return { error: 'account', fieldErrors: { financeAccountId: 'account' } };
+  }
+  if (financeMode === 'PROVIDER' && !financeProviderId) {
+    return { error: 'provider', fieldErrors: { financeProviderId: 'provider' } };
+  }
+  const provider = financeMode === 'PROVIDER'
     ? await prisma.party.findFirst({
         where: {
-          id: h.data.financeProviderId,
+          id: financeProviderId,
           isActive: true,
           collectsOrderPayments: true,
         },
         select: { id: true },
       })
     : null;
-  if (h.data.financeMode === 'PROVIDER' && !provider) {
+  if (financeMode === 'PROVIDER' && !provider) {
     return { error: 'provider', fieldErrors: { financeProviderId: 'provider' } };
   }
 
@@ -245,14 +327,14 @@ export async function createOrder(_prev: ActionState, fd: FormData): Promise<Act
   const gross = lineData.reduce((s, l) => s + l.unitGrossPrice * l.quantity, 0);
   const discount = lineData.reduce((s, l) => s + l.lineDiscount, 0) + h.data.orderDiscount;
   const total = Math.max(0, gross - discount + h.data.deliveryFee + h.data.extraCharges);
-  if (h.data.financeMode === 'PARTIAL' && (!h.data.financePaidAmount || h.data.financePaidAmount <= 0 || h.data.financePaidAmount >= total)) {
+  if (financeMode === 'PARTIAL' && (!h.data.financePaidAmount || h.data.financePaidAmount <= 0 || h.data.financePaidAmount >= total)) {
     return { error: 'partial', fieldErrors: { financePaidAmount: 'partial' } };
   }
   if (
     statusRole === 'SALE' &&
     total > 0 &&
-    h.data.financeMode !== 'PAID' &&
-    h.data.financeMode !== 'PROVIDER'
+    financeMode !== 'PAID' &&
+    financeMode !== 'PROVIDER'
   ) {
     return {
       error: 'payment_required',
@@ -296,12 +378,12 @@ export async function createOrder(_prev: ActionState, fd: FormData): Promise<Act
       if (statusRole === 'SALE') await applySoldMovements(tx, o.id, h.data.placedAt, lineData);
       stage = 'finance_sync';
       await syncOrderFinance(tx, o.id, {
-        mode: h.data.financeMode as FinanceSyncMode,
-        accountId: h.data.financeAccountId,
+        mode: financeMode as FinanceSyncMode,
+        accountId: financeAccountId,
         dueDate: h.data.financeDueDate,
         paidAmount: h.data.financePaidAmount,
-        paymentMethod: h.data.financePaymentMethod,
-        paymentDate: h.data.financePaymentDate,
+        paymentMethod: financePaymentMethod,
+        paymentDate: automaticFinance ? h.data.placedAt : h.data.financePaymentDate,
         createdById: user.id,
         partyId: provider?.id ?? null,
         statusRole,
@@ -316,7 +398,7 @@ export async function createOrder(_prev: ActionState, fd: FormData): Promise<Act
       customerExternalId: h.data.customerExternalId ?? null,
       status: h.data.status,
       statusRole,
-      financeMode: h.data.financeMode,
+      financeMode,
       lineCount: lineData.length,
       skus: lineData.map((line) => line.sku),
       total,
@@ -405,6 +487,18 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
     },
   });
   const paymentBefore = invoicePaymentSnapshot(existing, existingFinanceEntries);
+  const automaticProviderId = paymentBefore.providerPartyId
+    ? (
+        await prisma.party.findFirst({
+          where: {
+            id: paymentBefore.providerPartyId,
+            automaticOrderSettlement: true,
+            isActive: true,
+          },
+          select: { id: true },
+        })
+      )?.id ?? null
+    : null;
 
   const lineData: LineData[] = [];
   for (const l of parsedLines.data) {
@@ -448,10 +542,31 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
     };
   }
   const needsCompletionPayment = statusRole === 'SALE' && total > paymentBefore.paid;
+  let automaticFinance: Awaited<ReturnType<typeof resolveAutomaticOrderFinance>> | null = null;
+  if (h.data.financeMode === 'AUTO') {
+    try {
+      automaticFinance = await resolveAutomaticOrderFinance({
+        channel: h.data.channel,
+        fulfillmentMethod: h.data.fulfillmentMethod,
+        statusRole,
+      });
+    } catch (error) {
+      orderActionError(error, { stage: 'automatic_finance', orderId: id, channel: h.data.channel });
+      return {
+        error: 'finance_configuration',
+        formError: 'finance_configuration',
+        fieldErrors: { financeMode: 'finance_configuration' },
+      };
+    }
+  }
+  const financeMode = automaticFinance?.mode ?? h.data.financeMode;
+  const financeAccountId = automaticFinance?.accountId ?? h.data.financeAccountId;
+  const financeProviderId = automaticFinance?.providerId ?? h.data.financeProviderId;
+  const financePaymentMethod = automaticFinance?.paymentMethod ?? h.data.financePaymentMethod;
   if (
     needsCompletionPayment &&
-    h.data.financeMode !== 'PAID' &&
-    h.data.financeMode !== 'PROVIDER'
+    financeMode !== 'PAID' &&
+    financeMode !== 'PROVIDER'
   ) {
     return {
       error: 'payment_required',
@@ -466,17 +581,23 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
       fieldErrors: { financeMode: 'payment_read_only' },
     };
   }
-  const provider = h.data.financeMode === 'PROVIDER'
+  if ((financeMode === 'PAID' || financeMode === 'PARTIAL') && !financeAccountId) {
+    return { error: 'account', fieldErrors: { financeAccountId: 'account' } };
+  }
+  if (financeMode === 'PROVIDER' && !financeProviderId) {
+    return { error: 'provider', fieldErrors: { financeProviderId: 'provider' } };
+  }
+  const provider = financeMode === 'PROVIDER'
     ? await prisma.party.findFirst({
         where: {
-          id: h.data.financeProviderId,
+          id: financeProviderId,
           isActive: true,
           collectsOrderPayments: true,
         },
         select: { id: true },
       })
     : null;
-  if (h.data.financeMode === 'PROVIDER' && !provider) {
+  if (financeMode === 'PROVIDER' && !provider) {
     return { error: 'provider', fieldErrors: { financeProviderId: 'provider' } };
   }
   const previousTotal = invoiceTotal(existing);
@@ -513,13 +634,22 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
       }
       if (needsCompletionPayment) {
         await syncOrderFinance(tx, id, {
-          mode: h.data.financeMode as FinanceSyncMode,
-          accountId: h.data.financeAccountId,
+          mode: financeMode as FinanceSyncMode,
+          accountId: financeAccountId,
           dueDate: h.data.financeDueDate,
-          paymentMethod: h.data.financePaymentMethod,
-          paymentDate: h.data.financePaymentDate,
+          paymentMethod: financePaymentMethod,
+          paymentDate: automaticFinance ? h.data.placedAt : h.data.financePaymentDate,
           createdById: user.id,
           partyId: provider?.id ?? null,
+          statusRole,
+        });
+      } else if (automaticProviderId && (statusRole === 'OPEN' || statusRole === 'SALE')) {
+        await syncOrderFinance(tx, id, {
+          mode: 'PROVIDER',
+          partyId: automaticProviderId,
+          dueDate: h.data.financeDueDate,
+          paymentMethod: paymentBefore.paymentMethod,
+          createdById: user.id,
           statusRole,
         });
       } else if (total !== previousTotal && (statusRole === 'OPEN' || statusRole === 'SALE')) {
@@ -564,7 +694,7 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
     discount,
     paymentBefore,
     totalAfter: total,
-    paymentCapture: needsCompletionPayment ? h.data.financeMode : 'KEEP',
+    paymentCapture: needsCompletionPayment ? financeMode : 'KEEP',
   });
   revalidatePath(LIST, 'page');
   revalidatePath(FINANCE, 'page');
@@ -672,8 +802,23 @@ export async function bulkUpdateOrders(_prev: ActionState, fd: FormData): Promis
             },
           });
           const payment = invoicePaymentSnapshot(order, entries);
+          const automatic =
+            nextRole === 'SALE' &&
+            payment.remaining > 0 &&
+            input.completionMode === 'AUTO'
+              ? await resolveAutomaticOrderFinance(
+                  {
+                    channel: order.channel,
+                    fulfillmentMethod: order.fulfillmentMethod,
+                    statusRole: nextRole,
+                  },
+                  tx,
+                )
+              : null;
           if (nextRole === 'SALE' && payment.remaining > 0) {
-            if (input.completionMode === 'DIRECT') {
+            if (automatic) {
+              // Automatic routing already proved its account/provider configuration.
+            } else if (input.completionMode === 'DIRECT') {
               if (!account || !input.date) throw new Error('account');
             } else if (input.completionMode === 'PROVIDER') {
               if (!provider) throw new Error('provider');
@@ -691,11 +836,13 @@ export async function bulkUpdateOrders(_prev: ActionState, fd: FormData): Promis
           await tx.order.update({ where: { id: order.id }, data: { status: input.status } });
           if (nextRole === 'SALE' && payment.remaining > 0) {
             await syncOrderFinance(tx, order.id, {
-              mode: input.completionMode === 'PROVIDER' ? 'PROVIDER' : 'PAID',
-              accountId: account?.id ?? null,
-              partyId: provider?.id ?? null,
-              paymentMethod: input.paymentMethod ?? null,
-              paymentDate: input.date ?? null,
+              mode:
+                automatic?.mode ??
+                (input.completionMode === 'PROVIDER' ? 'PROVIDER' : 'PAID'),
+              accountId: automatic?.accountId ?? account?.id ?? null,
+              partyId: automatic?.providerId ?? provider?.id ?? null,
+              paymentMethod: automatic?.paymentMethod ?? input.paymentMethod ?? null,
+              paymentDate: automatic ? order.placedAt : input.date ?? null,
               createdById: user.id,
               statusRole: nextRole,
             });

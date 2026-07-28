@@ -152,6 +152,7 @@ export default async function EditOrderPage({
     paymentTitle: t('orderForm.paymentTitle'),
     paymentHint: t('orderForm.paymentHint'),
     financeMode: t('f.financeMode'),
+    financeAuto: t('f.financeAuto'),
     financeCredit: t('f.financeCredit'),
     financePaid: t('f.financePaid'),
     financePartial: t('f.financePartial'),
@@ -206,6 +207,7 @@ export default async function EditOrderPage({
     payment_exceeds_total: t('err.payment_exceeds_total'),
     refund_required: t('err.refund_required'),
     order_update_failed: t('err.order_update_failed'),
+    finance_configuration: t('err.finance_configuration'),
   };
 
   return (

@@ -89,6 +89,7 @@ export default async function NewOrderPage({
     paymentTitle: t('orderForm.paymentTitle'),
     paymentHint: t('orderForm.paymentHint'),
     financeMode: t('f.financeMode'),
+    financeAuto: t('f.financeAuto'),
     financeCredit: t('f.financeCredit'),
     financePaid: t('f.financePaid'),
     financePartial: t('f.financePartial'),
@@ -142,6 +143,7 @@ export default async function NewOrderPage({
     payment_exceeds_total: t('err.payment_exceeds_total'),
     refund_required: t('err.refund_required'),
     order_update_failed: t('err.order_update_failed'),
+    finance_configuration: t('err.finance_configuration'),
   };
 
   return (
@@ -171,7 +173,8 @@ export default async function NewOrderPage({
             deliveryCost: '0',
             orderDiscount: '0',
             extraCharges: '0',
-            financeMode: 'CREDIT',
+            status: saleStatusValues[0] ?? statuses[0]?.value ?? 'COMPLETED',
+            financeMode: 'AUTO',
           },
           lines: [{ sku: '', quantity: '1', unitGrossPrice: '0', lineDiscount: '0' }],
         }}

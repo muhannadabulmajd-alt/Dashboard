@@ -7,7 +7,7 @@ import { can } from '@/lib/rbac';
 import type { CurrentUser } from '@/server/auth/session';
 import { getOrders, getPrevOrders, getOrderLines } from '@/server/db/repositories/sales.repo';
 import { getInventoryItems } from '@/server/db/repositories/inventory.repo';
-import { getExpenses } from '@/server/db/repositories/finance.repo';
+import { getExpenses, getPaymentProcessingCosts } from '@/server/db/repositories/finance.repo';
 import { getShipments } from '@/server/db/repositories/fulfillment.repo';
 import { getCustomers } from '@/server/db/repositories/customers.repo';
 import * as M from '@/lib/metrics';
@@ -53,12 +53,13 @@ export async function buildDeckData(
 
   const now = new Date();
   const mtdRange = resolveRange({ range: 'this_month' }, now);
-  const [orders, prevOrders, lines, items, expenses, shipments, customers, mtdOrders] = await Promise.all([
+  const [orders, prevOrders, lines, items, expenses, paymentProcessingCosts, shipments, customers, mtdOrders] = await Promise.all([
     getOrders(filters, scope, range),
     getPrevOrders(filters, scope, range),
     getOrderLines(filters, scope, range),
     getInventoryItems(filters, scope, range),
     showFinancial ? getExpenses(filters, scope, range) : Promise.resolve([]),
+    showFinancial ? getPaymentProcessingCosts(filters, scope, range) : Promise.resolve(0),
     getShipments(filters, scope, range),
     getCustomers(scope),
     getOrders(filters, scope, { start: mtdRange.start, end: mtdRange.end }),
@@ -68,7 +69,7 @@ export async function buildDeckData(
   const prevNet = M.netSales(prevOrders);
   const orderCount = M.salesOrderCount(orders);
   const units = M.unitsSold(lines);
-  const pnl = M.buildPnlSnapshot(orders, lines, expenses);
+  const pnl = M.buildPnlSnapshot(orders, lines, expenses, { paymentProcessingCosts });
   const cogs = pnl.cogs;
   const margin = { amount: pnl.grossProfit, pct: pnl.grossMarginPct };
   const opex = pnl.operatingExpenses;
