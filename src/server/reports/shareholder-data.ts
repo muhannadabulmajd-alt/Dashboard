@@ -5,6 +5,10 @@ import { accountBalance, financeTotals, netCash, unassignedCash, type FinanceEnt
 import { stockRow } from '@/lib/metrics/inventory';
 import { allocateInteger } from '@/lib/metrics/sales';
 import { orderStatusRole } from '@/lib/metrics/status';
+import {
+  spendTreatmentForItemType,
+  type CanonicalSpendTreatment,
+} from '@/lib/spend-treatment';
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
@@ -123,6 +127,13 @@ function check(
 
 function stableHash(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
+}
+
+function reportSpendTreatment(line: {
+  spendTreatment?: CanonicalSpendTreatment;
+  itemType: string;
+}): CanonicalSpendTreatment {
+  return line.spendTreatment ?? spendTreatmentForItemType(line.itemType);
 }
 
 export async function buildShareholderReportData(
@@ -329,12 +340,7 @@ export async function buildShareholderReportData(
     if (lineTotal !== entry.amount) parentMismatchIds.push(entry.id);
     let allocated = 0;
     for (const [lineIndex, line] of reportLines.entries()) {
-      const spendTreatment = line.spendTreatment
-        ?? (line.itemType === 'INVENTORY'
-          ? 'INVENTORY'
-          : line.itemType === 'ASSET'
-            ? 'CAPEX'
-            : 'OPEX');
+      const spendTreatment = reportSpendTreatment(line);
       const quantity = decimalNumber(line.quantity);
       const unitCost = decimalNumber(line.unitCost);
       const landedUnitCost = decimalNumber(line.landedUnitCost);
