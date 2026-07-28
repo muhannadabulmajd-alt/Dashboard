@@ -30,7 +30,6 @@ export function LoginForm() {
             type="email"
             required
             autoComplete="email"
-            defaultValue="owner@laheeb.coffee"
             className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-roast outline-none focus:border-primary"
           />
         </div>
@@ -41,7 +40,6 @@ export function LoginForm() {
             type="password"
             required
             autoComplete="current-password"
-            defaultValue="laheeb1234"
             className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-roast outline-none focus:border-primary"
           />
         </div>
@@ -56,7 +54,6 @@ export function LoginForm() {
           {pending ? <Loader2 className="size-4 animate-spin" /> : null}
           {t('submit')}
         </button>
-        <p className="text-center text-[11px] text-muted-foreground">{t('demoHint')}</p>
       </form>
     </div>
   );
