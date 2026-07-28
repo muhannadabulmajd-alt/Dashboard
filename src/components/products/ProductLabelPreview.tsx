@@ -1,43 +1,80 @@
 import { ProductBarcode } from './ProductBarcode';
+import {
+  PRODUCT_LABEL_COLUMN_GAP_MM,
+  PRODUCT_LABEL_DETAILS_PERCENT,
+  PRODUCT_LABEL_SAFE_MARGIN_MM,
+  productLabelTypography,
+  softWrapLabelText,
+} from '@/lib/product-label-layout';
 import type { ProductLabelData } from '@/server/products/label-data';
 
-function titleClass(name: string) {
-  if (name.length > 42) return 'text-[9px]';
-  if (name.length > 28) return 'text-[10.5px]';
-  return 'text-[12px]';
-}
-
 export function ProductLabelPreview({ label, locale }: { label: ProductLabelData; locale: 'ar' | 'en' }) {
+  const typography = productLabelTypography(label);
+  const rtl = locale === 'ar';
+
   return (
     <section
       className="sku-label-printable bg-white text-black"
-      dir={locale === 'ar' ? 'rtl' : 'ltr'}
+      dir={rtl ? 'rtl' : 'ltr'}
       aria-label="SKU sticker label"
       style={{ width: '60mm', height: '30mm' }}
     >
-      <div className="flex h-full w-full flex-col items-center justify-between overflow-hidden p-[1.5mm]">
-        <div className="flex w-full flex-1 flex-col items-center justify-center overflow-hidden text-center">
-          <h2 className={`${titleClass(label.mainName)} line-clamp-2 break-words font-black leading-none text-black`}>
-            {label.mainName}
+      <div
+        className={`flex h-full w-full items-stretch ${rtl ? 'flex-row-reverse' : 'flex-row'}`}
+        style={{
+          gap: `${PRODUCT_LABEL_COLUMN_GAP_MM}mm`,
+          padding: `${PRODUCT_LABEL_SAFE_MARGIN_MM}mm`,
+        }}
+      >
+        <div
+          className={`flex min-w-0 shrink-0 flex-col justify-center ${rtl ? 'text-right' : 'text-left'}`}
+          style={{ width: `${PRODUCT_LABEL_DETAILS_PERCENT}%` }}
+        >
+          <h2
+            className="w-full break-words font-black text-black"
+            style={{
+              fontSize: `${typography.titlePt}pt`,
+              lineHeight: 1.05,
+              overflowWrap: 'anywhere',
+            }}
+          >
+            {softWrapLabelText(label.mainName)}
           </h2>
           {label.variationName ? (
-            <p className="mt-[0.3mm] line-clamp-1 text-[8px] font-bold leading-none text-black">
-              {label.variationName}
+            <p
+              className="mt-[0.7mm] w-full break-words font-bold text-black"
+              style={{
+                fontSize: `${typography.variationPt}pt`,
+                lineHeight: 1.08,
+                overflowWrap: 'anywhere',
+              }}
+            >
+              {softWrapLabelText(label.variationName)}
             </p>
           ) : null}
-          {label.specLines.map((line) => (
-            <p
-              key={line}
-              className="mt-[0.25mm] line-clamp-1 w-full text-[5.6px] font-medium leading-none text-black"
-            >
-              {line}
-            </p>
-          ))}
+          <div className="mt-[0.9mm] flex w-full flex-col gap-[0.35mm]">
+            {label.specItems.map((item) => (
+              <p
+                key={`${item.label}-${item.value}`}
+                className="w-full break-words font-medium text-black"
+                style={{
+                  fontSize: `${typography.specsPt}pt`,
+                  lineHeight: 1.08,
+                  overflowWrap: 'anywhere',
+                }}
+              >
+                <span className="font-bold">{softWrapLabelText(item.label)}:</span>{' '}
+                {softWrapLabelText(item.value)}
+              </p>
+            ))}
+          </div>
         </div>
-        <ProductBarcode
-          value={label.retailBarcode}
-          className="mt-[0.2mm] h-[10.9mm] w-[54mm] shrink-0"
-        />
+        <div className="flex min-w-0 flex-1 items-center justify-center">
+          <ProductBarcode
+            value={label.retailBarcode}
+            className="h-[22mm] w-full max-w-full shrink-0"
+          />
+        </div>
       </div>
     </section>
   );

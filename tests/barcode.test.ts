@@ -11,6 +11,11 @@ import {
   parseProductBarcodeSequence,
   parseRetailBarcodeSequence,
 } from '@/lib/barcode';
+import {
+  PRODUCT_LABEL_DETAILS_PERCENT,
+  productLabelTypography,
+  softWrapLabelText,
+} from '@/lib/product-label-layout';
 
 describe('product barcode helpers', () => {
   it('formats short internal product barcode values', () => {
@@ -56,5 +61,32 @@ describe('product barcode helpers', () => {
     expect(() => formatRetailBarcode(0)).toThrow();
     expect(() => formatRetailBarcode(1_000_000_000)).toThrow();
     expect(() => encodeEan13('2900000000017')).toThrow();
+  });
+
+  it('keeps the label details column within the requested 30-40% range', () => {
+    expect(PRODUCT_LABEL_DETAILS_PERCENT).toBeGreaterThanOrEqual(30);
+    expect(PRODUCT_LABEL_DETAILS_PERCENT).toBeLessThanOrEqual(40);
+  });
+
+  it('shrinks dense label text without clipping its content', () => {
+    const compact = productLabelTypography({
+      mainName: 'Laheeb Cups',
+      variationName: 'Standard five cups',
+      specItems: [{ label: 'Pack', value: '5 pieces' }],
+    });
+    const dense = productLabelTypography({
+      mainName: 'Extra long premium coffee preparation product name for retail',
+      variationName: 'Extra long variation name for the complete package',
+      specItems: Array.from({ length: 5 }, (_, index) => ({
+        label: `Specification ${index + 1}`,
+        value: 'Detailed value',
+      })),
+    });
+
+    expect(dense.titlePt).toBeLessThan(compact.titlePt);
+    expect(dense.variationPt).toBeLessThan(compact.variationPt);
+    expect(dense.specsPt).toBeLessThan(compact.specsPt);
+    expect(softWrapLabelText('ExtraordinarilyLongProductName')).not.toContain('…');
+    expect(softWrapLabelText('ExtraordinarilyLongProductName')).toContain('\u200B');
   });
 });
