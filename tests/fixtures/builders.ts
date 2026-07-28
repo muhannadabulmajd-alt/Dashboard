@@ -36,6 +36,7 @@ export function makeOrder(over: Partial<OrderLike> = {}): OrderLike {
     discountAmount: 0,
     refundAmount: 0,
     deliveryFee: 0,
+    extraCharges: 0,
     deliveryCost: 0,
     ...over,
   };

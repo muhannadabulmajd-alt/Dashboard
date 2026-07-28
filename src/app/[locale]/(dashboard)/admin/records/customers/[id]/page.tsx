@@ -11,6 +11,7 @@ import { RecordActions } from '@/components/records/RecordActions';
 import { archiveCustomer, deleteCustomer } from '@/server/records/customers';
 import { formatDate } from '@/lib/dates';
 import { formatMoney, formatNumber } from '@/lib/money';
+import { invoiceTotal } from '@/lib/invoice';
 import { Link } from '@/i18n/navigation';
 import { getOrderStatusRoleMap } from '@/server/lists/resolver';
 
@@ -31,7 +32,7 @@ export default async function CustomerDetailPage({
       where: { id },
       include: {
         orders: {
-          where: { status: { in: saleStatuses } },
+          where: { status: { in: saleStatuses }, purpose: 'SALE' },
           orderBy: { placedAt: 'desc' },
           take: 12,
           include: { lines: { include: { product: { select: { nameEn: true, nameAr: true } } } } },
@@ -39,8 +40,14 @@ export default async function CustomerDetailPage({
       },
     }),
     prisma.order.findMany({
-      where: { customerId: id, status: { in: saleStatuses } },
-      select: { grossAmount: true, discountAmount: true, refundAmount: true },
+      where: { customerId: id, status: { in: saleStatuses }, purpose: 'SALE' },
+      select: {
+        grossAmount: true,
+        discountAmount: true,
+        refundAmount: true,
+        deliveryFee: true,
+        extraCharges: true,
+      },
     }),
   ]);
   if (!c) notFound();
@@ -61,8 +68,7 @@ export default async function CustomerDetailPage({
     { label: t('f.lastOrder'), value: c.lastOrderAt ? formatDate(c.lastOrderAt, locale) : '—' },
     { label: t('f.notes'), value: c.notes },
   ];
-  const netForOrder = (order: (typeof c.orders)[number]) => order.grossAmount - order.discountAmount - order.refundAmount;
-  const totalSpend = spendOrders.reduce((sum, order) => sum + order.grossAmount - order.discountAmount - order.refundAmount, 0);
+  const totalSpend = spendOrders.reduce((sum, order) => sum + invoiceTotal(order), 0);
   const productCounts = new Map<string, number>();
   for (const order of c.orders) {
     for (const line of order.lines) {
@@ -89,7 +95,7 @@ export default async function CustomerDetailPage({
   const orderRows = c.orders.map((order) => [
     order.orderNumber,
     formatDate(order.placedAt, locale),
-    formatMoney(netForOrder(order), order.currency, locale),
+    formatMoney(invoiceTotal(order), order.currency, locale),
     enumLabel(order.status, locale),
     <Link key="o" href={`/admin/records/orders/${order.id}`} className="font-medium text-primary hover:underline">
       {t('open')}

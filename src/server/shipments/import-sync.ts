@@ -62,7 +62,7 @@ export async function upsertImportedShipment(
     await closeShippingCost(tx, costKey, `Closed shipping cost for ${shipment.orderNumber}`);
   } else {
     if (!courierParty) throw new Error(`${shipment.orderNumber}: courier party is required for a payable`);
-    await tx.financeEntry.upsert({
+    const entry = await tx.financeEntry.upsert({
       where: { importKey: costKey },
       create: {
         importKey: costKey,
@@ -76,6 +76,7 @@ export async function upsertImportedShipment(
         dueDate: shipment.deliveredAt ?? shipment.dispatchedAt ?? new Date(),
         partyId: courierParty.id,
         categoryType: 'SHIPPING',
+        costRole: 'DIRECT_DELIVERY',
         branchId: order.branchId,
         orderId: order.id,
         reference: shipment.orderNumber,
@@ -92,12 +93,42 @@ export async function upsertImportedShipment(
         dueDate: shipment.deliveredAt ?? shipment.dispatchedAt ?? new Date(),
         partyId: courierParty.id,
         categoryType: 'SHIPPING',
+        costRole: 'DIRECT_DELIVERY',
         branchId: order.branchId,
         orderId: order.id,
         reference: shipment.orderNumber,
         description: `Delivery cost: ${shipment.orderNumber}`,
         archivedAt: null,
         archiveReason: null,
+      },
+      select: { id: true },
+    });
+    await tx.ledgerEntryLine.upsert({
+      where: { financeEntryId_lineNo: { financeEntryId: entry.id, lineNo: 1 } },
+      create: {
+        financeEntryId: entry.id,
+        lineNo: 1,
+        itemType: 'SERVICE',
+        itemName: 'Courier delivery',
+        categoryType: 'SHIPPING',
+        unit: 'service',
+        quantity: 1,
+        unitCost: shipment.shippingCost,
+        landedUnitCost: shipment.shippingCost,
+        lineTotal: shipment.shippingCost,
+        branchId: order.branchId,
+        spendTreatment: 'OPEX',
+        classificationStatus: 'CONFIRMED',
+        classificationSource: 'shipment-import',
+      },
+      update: {
+        unitCost: shipment.shippingCost,
+        landedUnitCost: shipment.shippingCost,
+        lineTotal: shipment.shippingCost,
+        branchId: order.branchId,
+        spendTreatment: 'OPEX',
+        classificationStatus: 'CONFIRMED',
+        classificationSource: 'shipment-import',
       },
     });
   }

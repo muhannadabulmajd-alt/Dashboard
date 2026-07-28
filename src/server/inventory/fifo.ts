@@ -1,4 +1,5 @@
 import 'server-only';
+import type { Prisma } from '@prisma/client';
 import { prisma } from '@/server/db/client';
 import { decimalNumber, roundMoney } from '@/lib/decimal';
 import { fifoStatus } from '@/lib/metrics/inventory';
@@ -10,20 +11,30 @@ import { fifoStatus } from '@/lib/metrics/inventory';
  * snapshot, so only future orders are affected. Shared by the manual cost edit
  * (inventory.ts) and the FIFO sync below.
  */
-export async function recomputeProductsForItem(itemId: string, newCost: number): Promise<void> {
-  const affected = await prisma.productComponent.findMany({
+export async function recomputeProductsForItem(
+  itemId: string,
+  newCost: number,
+  db: Prisma.TransactionClient = prisma,
+): Promise<void> {
+  const affected = await db.productComponent.findMany({
     where: { inventoryItemId: itemId },
     select: { productId: true },
   });
   if (!affected.length) return;
-  await prisma.productComponent.updateMany({ where: { inventoryItemId: itemId }, data: { unitCost: newCost } });
+  await db.productComponent.updateMany({
+    where: { inventoryItemId: itemId },
+    data: { unitCost: newCost },
+  });
   for (const productId of [...new Set(affected.map((a) => a.productId))]) {
-    const comps = await prisma.productComponent.findMany({
+    const comps = await db.productComponent.findMany({
       where: { productId },
       select: { quantity: true, unitCost: true },
     });
     const cost = comps.reduce((s, c) => s + decimalNumber(c.quantity) * decimalNumber(c.unitCost), 0);
-    await prisma.product.update({ where: { id: productId }, data: { cogsPerUnit: roundMoney(cost) } });
+    await db.product.update({
+      where: { id: productId },
+      data: { cogsPerUnit: roundMoney(cost) },
+    });
   }
 }
 
@@ -38,8 +49,11 @@ export async function recomputeProductsForItem(itemId: string, newCost: number):
  * it). Idempotent — always re-derived from scratch, so it's safe to call after
  * every order create/edit/cancel. Returns the active cost, else null.
  */
-export async function syncActiveCost(itemId: string): Promise<number | null> {
-  const layers = await prisma.inventoryCostLayer.findMany({
+export async function syncActiveCost(
+  itemId: string,
+  db: Prisma.TransactionClient = prisma,
+): Promise<number | null> {
+  const layers = await db.inventoryCostLayer.findMany({
     where: {
       inventoryItemId: itemId,
       OR: [
@@ -51,7 +65,7 @@ export async function syncActiveCost(itemId: string): Promise<number | null> {
     select: { id: true, qtyReceived: true, unitCost: true, receivedAt: true },
   });
   if (!layers.length) return null;
-  const out = await prisma.stockMovement.aggregate({
+  const out = await db.stockMovement.aggregate({
     where: {
       inventoryItemId: itemId,
       quantity: { lt: 0 },
@@ -73,10 +87,16 @@ export async function syncActiveCost(itemId: string): Promise<number | null> {
     consumed,
   );
   if (status.activeCost == null) return null; // depleted — keep the last cost
-  const item = await prisma.inventoryItem.findUnique({ where: { id: itemId }, select: { unitCost: true } });
+  const item = await db.inventoryItem.findUnique({
+    where: { id: itemId },
+    select: { unitCost: true },
+  });
   if (item && decimalNumber(item.unitCost) !== status.activeCost) {
-    await prisma.inventoryItem.update({ where: { id: itemId }, data: { unitCost: status.activeCost } });
-    await recomputeProductsForItem(itemId, status.activeCost);
+    await db.inventoryItem.update({
+      where: { id: itemId },
+      data: { unitCost: status.activeCost },
+    });
+    await recomputeProductsForItem(itemId, status.activeCost, db);
   }
   return status.activeCost;
 }

@@ -37,14 +37,24 @@ function hasDrilldown(data: Point[]): boolean {
   return data.some((point) => Boolean(point.href));
 }
 
-function ChartFrame({ title, children, drilldown }: { title: string; children: React.ReactNode; drilldown?: boolean }) {
+function ChartFrame({
+  title,
+  children,
+  drilldown,
+  locale,
+}: {
+  title: string;
+  children: React.ReactNode;
+  drilldown?: boolean;
+  locale: AppLocale;
+}) {
   return (
     <Card className="h-full">
       <CardHeader className="items-start">
         <CardTitle>{title}</CardTitle>
         {drilldown ? (
           <span className="rounded-full border border-amber/25 bg-amber/10 px-2 py-0.5 text-[11px] font-semibold text-primary max-sm:w-full max-sm:text-center">
-            View details
+            {locale === 'ar' ? 'عرض التفاصيل' : 'View details'}
           </span>
         ) : null}
       </CardHeader>
@@ -92,7 +102,7 @@ export function LineChartCard({
 }) {
   const drilldown = hasDrilldown(data);
   return (
-    <ChartFrame title={title} drilldown={drilldown}>
+    <ChartFrame title={title} drilldown={drilldown} locale={locale}>
       {data.length ? <ResponsiveContainer width="100%" height="100%">
         <LineChart
           data={data}
@@ -137,7 +147,7 @@ export function BarChartCard({
   const drilldown = hasDrilldown(data);
   const leftWidth = Math.min(190, Math.max(116, ...data.map((point) => point.label.length * 7)));
   return (
-    <ChartFrame title={title} drilldown={drilldown}>
+    <ChartFrame title={title} drilldown={drilldown} locale={locale}>
       {data.length ? <ResponsiveContainer width="100%" height="100%">
         {horizontal ? (
           <BarChart data={data} layout="vertical" margin={{ top: 4, right: 12, left: 0, bottom: 8 }} style={drilldown ? { cursor: 'pointer' } : undefined}>
@@ -188,7 +198,7 @@ export function DonutChartCard({
 }) {
   const drilldown = hasDrilldown(data);
   return (
-    <ChartFrame title={title} drilldown={drilldown}>
+    <ChartFrame title={title} drilldown={drilldown} locale={locale}>
       {data.length ? <ResponsiveContainer width="100%" height="100%">
         <PieChart>
           <Pie
@@ -255,7 +265,7 @@ export function WaterfallChart({
   ).rows;
 
   return (
-    <ChartFrame title={title}>
+    <ChartFrame title={title} locale={locale}>
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data} margin={{ top: 8, right: 20, left: 8, bottom: 8 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#e6dccb" vertical={false} />

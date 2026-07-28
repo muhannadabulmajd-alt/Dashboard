@@ -8,6 +8,12 @@ import { FINANCE_TYPES, CURRENCIES, OBLIGATION_KINDS, EXPENSE_CATEGORY_TYPES } f
 import { toMinor, convertToIqd } from '@/lib/money';
 import { getUsdToIqd } from '@/server/settings';
 import { requireCap, audit, reqField, optField, type ActionState } from '@/server/records/shared';
+import { syncAllocatedAssetTotals } from '@/server/finance/asset-allocations';
+import {
+  captureLayerBaseCosts,
+  syncLayerLandedCosts,
+} from '@/server/finance/landed-costs';
+import { syncActiveCost } from '@/server/inventory/fifo';
 import type { Prisma } from '@prisma/client';
 
 const HUB = '/[locale]/(dashboard)/finance';
@@ -152,7 +158,8 @@ async function updateLinkedRecords(
   tx: Prisma.TransactionClient,
   id: string,
   data: ReturnType<typeof toData> extends infer T ? Exclude<T, null> : never,
-): Promise<void> {
+  userId: string,
+): Promise<string[]> {
   const linked = await tx.financeEntry.findUnique({
     where: { id },
     select: {
@@ -167,12 +174,32 @@ async function updateLinkedRecords(
           quantity: true,
           unitCost: true,
           inventoryItemId: true,
+          fixedAssetCostAllocations: {
+            select: { id: true, fixedAssetId: true, amount: true },
+          },
+          landedCostAllocations: {
+            select: { id: true, amount: true, costLayerId: true },
+          },
         },
       },
       fixedAssets: { select: { id: true, quantity: true, totalCost: true } },
     },
   });
-  if (!linked) return;
+  if (!linked) return [];
+  const touchedAssetIds = new Set<string>();
+  const touchedInventoryItemIds = new Set(
+    linked.ledgerLines
+      .map((line) => line.inventoryItemId)
+      .filter((value): value is string => Boolean(value)),
+  );
+  const layerBaseCosts = await captureLayerBaseCosts(
+    tx,
+    linked.ledgerLines.flatMap((line) =>
+      line.landedCostAllocations
+        .map((allocation) => allocation.costLayerId)
+        .filter((value): value is string => Boolean(value)),
+    ),
+  );
 
   if (linked.ledgerLines.length) {
     const totals = proportionalIntegers(data.amount, linked.ledgerLines.map((line) => line.lineTotal));
@@ -200,6 +227,27 @@ async function updateLinkedRecords(
           branchId: data.branchId,
         },
       });
+      const fixedAssetAllocationTotals = proportionalIntegers(
+        totals[index],
+        line.fixedAssetCostAllocations.map((allocation) => allocation.amount),
+      );
+      for (const [allocationIndex, allocation] of line.fixedAssetCostAllocations.entries()) {
+        await tx.fixedAssetCostAllocation.update({
+          where: { id: allocation.id },
+          data: { amount: fixedAssetAllocationTotals[allocationIndex] },
+        });
+        touchedAssetIds.add(allocation.fixedAssetId);
+      }
+      const landedAllocationTotals = proportionalIntegers(
+        totals[index],
+        line.landedCostAllocations.map((allocation) => allocation.amount),
+      );
+      for (const [allocationIndex, allocation] of line.landedCostAllocations.entries()) {
+        await tx.inventoryLandedCostAllocation.update({
+          where: { id: allocation.id },
+          data: { amount: landedAllocationTotals[allocationIndex] },
+        });
+      }
       if (line.inventoryItemId) {
         await tx.inventoryCostLayer.updateMany({
           where: { financeEntryId: id, inventoryItemId: line.inventoryItemId },
@@ -213,10 +261,26 @@ async function updateLinkedRecords(
     }
   }
 
-  if (linked.fixedAssets.length) {
-    const totals = proportionalIntegers(data.amount, linked.fixedAssets.map((asset) => asset.totalCost));
-    for (let index = 0; index < linked.fixedAssets.length; index++) {
-      const asset = linked.fixedAssets[index];
+  if (touchedAssetIds.size) {
+    await tx.fixedAsset.updateMany({
+      where: { id: { in: [...touchedAssetIds] } },
+      data: {
+        purchaseDate: data.date,
+        partyId: data.partyId,
+        branchId: data.branchId,
+      },
+    });
+    await syncAllocatedAssetTotals(tx, touchedAssetIds, {
+      userId,
+      reason: `Source finance record ${id} updated`,
+    });
+  }
+
+  const legacyAssets = linked.fixedAssets.filter((asset) => !touchedAssetIds.has(asset.id));
+  if (legacyAssets.length) {
+    const totals = proportionalIntegers(data.amount, legacyAssets.map((asset) => asset.totalCost));
+    for (let index = 0; index < legacyAssets.length; index++) {
+      const asset = legacyAssets[index];
       const quantity = Number(asset.quantity);
       await tx.fixedAsset.update({
         where: { id: asset.id },
@@ -230,6 +294,9 @@ async function updateLinkedRecords(
       });
     }
   }
+  const recalculatedItems = await syncLayerLandedCosts(tx, layerBaseCosts);
+  for (const itemId of recalculatedItems) touchedInventoryItemIds.add(itemId);
+  return [...touchedInventoryItemIds];
 }
 
 function auditValue(value: unknown): AuditScalar {
@@ -258,6 +325,31 @@ function changedEntryFields(before: object | null, after: object): Prisma.InputJ
   return changes;
 }
 
+function genericSpendClassification(data: EntryData) {
+  if (data.type === 'EXPENSE') {
+    return {
+      itemType: 'EXPENSE' as const,
+      spendTreatment: 'OPEX' as const,
+      classificationStatus: 'CONFIRMED' as const,
+      classificationNote: 'Recorded as operating spending from the quick finance form.',
+    };
+  }
+  if (data.categoryType === 'GREEN_COFFEE' || data.categoryType === 'PACKAGING') {
+    return {
+      itemType: 'INVENTORY' as const,
+      spendTreatment: 'INVENTORY' as const,
+      classificationStatus: 'NEEDS_REVIEW' as const,
+      classificationNote: 'Inventory purchase awaiting allocation to a stock item.',
+    };
+  }
+  return {
+    itemType: 'OTHER' as const,
+    spendTreatment: 'REVIEW' as const,
+    classificationStatus: 'NEEDS_REVIEW' as const,
+    classificationNote: 'Purchase needs Owner/Admin classification as inventory, asset, or operating spending.',
+  };
+}
+
 export async function createEntry(_prev: ActionState, fd: FormData): Promise<ActionState> {
   const user = await requireCap(CAP);
   if (!user) return { error: 'forbidden' };
@@ -267,7 +359,50 @@ export async function createEntry(_prev: ActionState, fd: FormData): Promise<Act
   if (!data) return { error: 'invalid' };
   if (!(await validateCapitalParty(data))) return { error: 'invalid' };
   const locale = reqField(fd, 'locale') || 'ar';
-  const row = await prisma.financeEntry.create({ data: { ...data, createdById: user.id } });
+  const row = await prisma.$transaction(async (tx) => {
+    const created = await tx.financeEntry.create({ data: { ...data, createdById: user.id } });
+    if (data.type !== 'EXPENSE' && data.type !== 'PURCHASE') return created;
+
+    const classification = genericSpendClassification(data);
+    const line = await tx.ledgerEntryLine.create({
+      data: {
+        financeEntryId: created.id,
+        lineNo: 1,
+        itemType: classification.itemType,
+        itemName: data.description ?? data.reference ?? 'Recorded spending',
+        categoryType: data.categoryType,
+        unit: 'unit',
+        quantity: 1,
+        unitCost: data.amount,
+        landedUnitCost: data.amount,
+        lineTotal: data.amount,
+        branchId: data.branchId,
+        spendTreatment: classification.spendTreatment,
+        classificationStatus: classification.classificationStatus,
+        classificationSource: 'quick-finance-form',
+        classificationNote: classification.classificationNote,
+      },
+      select: { id: true },
+    });
+    if (classification.spendTreatment === 'INVENTORY') {
+      await tx.inventoryLandedCostAllocation.create({
+        data: {
+          importKey: `LANDED:PENDING:${line.id}`,
+          financeEntryId: created.id,
+          ledgerLineId: line.id,
+          amount: data.amount,
+          notes: classification.classificationNote,
+        },
+      });
+    }
+    if (classification.spendTreatment === 'REVIEW') {
+      await tx.financeEntry.update({
+        where: { id: created.id },
+        data: { type: 'EXPENSE', recordClass: 'EXPENSE' },
+      });
+    }
+    return created;
+  });
   await audit(user.id, 'CREATE', 'FinanceEntry', { id: row.id, ...auditEntrySnapshot(data) });
   revalidatePath(HUB, 'page');
   revalidatePath(LIST, 'page');
@@ -288,12 +423,20 @@ export async function updateEntry(id: string, _prev: ActionState, fd: FormData):
   if (!before) return { error: 'invalid' };
   await prisma.$transaction(async (tx) => {
     await tx.financeEntry.update({ where: { id }, data });
-    await updateLinkedRecords(tx, id, data);
-  });
-  await audit(user.id, 'UPDATE', 'FinanceEntry', {
-    id,
-    reason: optField(fd, 'changeReason') ?? null,
-    changes: changedEntryFields(before, data),
+    const linkedItems = await updateLinkedRecords(tx, id, data, user.id);
+    for (const itemId of linkedItems) await syncActiveCost(itemId, tx);
+    await tx.auditLog.create({
+      data: {
+        userId: user.id,
+        action: 'UPDATE',
+        entity: 'FinanceEntry',
+        entityId: id,
+        metadata: {
+          reason: optField(fd, 'changeReason') ?? null,
+          changes: changedEntryFields(before, data),
+        },
+      },
+    });
   });
   revalidatePath(HUB, 'page');
   revalidatePath(LIST, 'page');
@@ -304,14 +447,42 @@ export async function updateEntry(id: string, _prev: ActionState, fd: FormData):
 async function reverseEntryForUser(id: string, user: { id: string }, locale: string, reason: string): Promise<void> {
   const entry = await prisma.financeEntry.findUnique({
     where: { id },
-    include: { settlements: { where: { archivedAt: null, reversedAt: null, reversalOfId: null }, select: { id: true } } },
+    include: {
+      settlements: { where: { archivedAt: null, reversedAt: null, reversalOfId: null }, select: { id: true } },
+      fixedAssets: { select: { id: true } },
+      stockMovements: { select: { inventoryItemId: true } },
+      costLayers: { select: { inventoryItemId: true } },
+      ledgerLines: {
+        include: {
+          fixedAssetCostAllocations: { select: { fixedAssetId: true } },
+          landedCostAllocations: { select: { costLayerId: true, inventoryItemId: true } },
+        },
+      },
+    },
   });
   if (!entry || entry.importKey || entry.reversedAt || entry.reversalOfId) redirect(`/${locale}/finance/ledger/${id}`);
   if (entry.obligation && entry.settlements.length > 0) {
     redirect(`/${locale}/finance/ledger/${id}`);
   }
 
+  const touchedItems = new Set<string>([
+    ...entry.stockMovements.map((movement) => movement.inventoryItemId),
+    ...entry.costLayers.map((layer) => layer.inventoryItemId),
+    ...entry.ledgerLines.flatMap((line) =>
+      line.landedCostAllocations
+        .map((allocation) => allocation.inventoryItemId)
+        .filter((value): value is string => Boolean(value)),
+    ),
+  ]);
   await prisma.$transaction(async (tx) => {
+    const layerBaseCosts = await captureLayerBaseCosts(
+      tx,
+      entry.ledgerLines.flatMap((line) =>
+        line.landedCostAllocations
+          .map((allocation) => allocation.costLayerId)
+          .filter((value): value is string => Boolean(value)),
+      ),
+    );
     await tx.financeEntry.update({
       where: { id },
       data: {
@@ -346,19 +517,48 @@ async function reverseEntryForUser(id: string, user: { id: string }, locale: str
         createdById: user.id,
       },
     });
-  });
-  await audit(user.id, 'REVERSE', 'FinanceEntry', {
-    id,
-    reason,
-    reversed: auditEntrySnapshot(entry),
-    related: {
-      orderId: entry.orderId,
-      importKey: entry.importKey,
-      accountId: entry.accountId,
-      toAccountId: entry.toAccountId,
-      partyId: entry.partyId,
-      branchId: entry.branchId,
-    },
+    const allocatedAssetIds = entry.ledgerLines.flatMap((line) =>
+      line.fixedAssetCostAllocations.map((allocation) => allocation.fixedAssetId)
+    );
+    await tx.fixedAsset.updateMany({
+      where: {
+        id: { in: entry.fixedAssets.map((asset) => asset.id) },
+        costAllocations: { none: {} },
+      },
+      data: {
+        isActive: false,
+        archivedAt: new Date(),
+        archivedById: user.id,
+        archiveReason: `Source finance record reversed: ${reason}`,
+      },
+    });
+    await syncAllocatedAssetTotals(tx, allocatedAssetIds, {
+      userId: user.id,
+      reason: `All source finance records reversed: ${reason}`,
+    });
+    const recalculatedItems = await syncLayerLandedCosts(tx, layerBaseCosts);
+    for (const itemId of recalculatedItems) touchedItems.add(itemId);
+    for (const itemId of touchedItems) await syncActiveCost(itemId, tx);
+    await tx.auditLog.create({
+      data: {
+        userId: user.id,
+        action: 'REVERSE',
+        entity: 'FinanceEntry',
+        entityId: id,
+        metadata: {
+          reason,
+          reversed: auditEntrySnapshot(entry),
+          related: {
+            orderId: entry.orderId,
+            importKey: entry.importKey,
+            accountId: entry.accountId,
+            toAccountId: entry.toAccountId,
+            partyId: entry.partyId,
+            branchId: entry.branchId,
+          },
+        },
+      },
+    });
   });
   revalidatePath(HUB, 'page');
   revalidatePath(LIST, 'page');

@@ -1,10 +1,9 @@
 import 'server-only';
 import { prisma } from '../client';
-import { buildExpenseWhere, buildBatchWhere } from '@/server/filters/where-builder';
+import { buildBatchWhere } from '@/server/filters/where-builder';
 import type { DashboardFilters } from '@/lib/filters';
 import type { ResolvedRange } from '@/lib/dates';
 import type { ExpenseLike, BatchLike } from '@/lib/metrics/types';
-import { classifyPurchase } from '@/lib/metrics/purchases';
 import { getUsdToIqd } from '@/server/settings';
 import { convertToIqd } from '@/lib/money';
 
@@ -19,18 +18,7 @@ export async function getOperatingExpenseFacts(
   scope: Scope,
   range: ResolvedRange,
 ): Promise<OperatingExpenseFact[]> {
-  const [expenseRows, financeRows, rate] = await Promise.all([
-    prisma.expense.findMany({
-      where: buildExpenseWhere(filters, scope, range),
-      select: {
-        amount: true,
-        currency: true,
-        incurredAt: true,
-        branchId: true,
-        vendor: true,
-        category: { select: { type: true } },
-      },
-    }),
+  const [financeRows, rate] = await Promise.all([
     // Purchase parents may contain inventory, assets and operating lines. Only
     // the operating allocation feeds P&L; cash flow still sees the full parent.
     prisma.financeEntry.findMany({
@@ -55,57 +43,59 @@ export async function getOperatingExpenseFacts(
         party: { select: { name: true } },
         type: true,
         categoryType: true,
-        ledgerLines: { select: { itemType: true, lineTotal: true, categoryType: true, branchId: true } },
+        ledgerLines: {
+          select: {
+            lineTotal: true,
+            categoryType: true,
+            branchId: true,
+            spendTreatment: true,
+          },
+        },
         fixedAssets: { take: 1, select: { id: true } },
         costLayers: { take: 1, select: { id: true } },
       },
     }),
     getUsdToIqd(),
   ]);
-  return [
-    ...expenseRows.map((r) => ({
-      amount: convertToIqd(r.amount, r.currency, rate),
-      currency: 'IQD' as const,
-      incurredAt: r.incurredAt,
-      categoryType: r.category.type,
-      branchId: r.branchId,
-      partyName: r.vendor,
-    })),
-    ...financeRows.flatMap((r) => {
-      if (r.costRole === 'DIRECT_DELIVERY' || r.costRole === 'PAYMENT_PROCESSING') return [];
-      if (r.type === 'EXPENSE') {
-        return [{ amount: convertToIqd(r.amount, r.currency, rate), currency: 'IQD' as const, incurredAt: r.date, categoryType: r.categoryType ?? 'OVERHEAD', branchId: r.branchId, partyName: r.party?.name ?? null }];
-      }
-      const allocation = classifyPurchase({
-        amount: r.amount,
-        categoryType: r.categoryType,
-        ledgerLines: r.ledgerLines,
-        hasFixedAsset: r.fixedAssets.length > 0,
-        hasInventoryLayer: r.costLayers.length > 0,
-      });
-      if (allocation.operatingExpense <= 0) return [];
-      const categories = r.ledgerLines
-        .filter((line) => line.itemType !== 'INVENTORY')
-        .map((line) => line.categoryType)
-        .filter((value): value is NonNullable<typeof value> => value != null);
-      const categoryType = categories.length && categories.every((value) => value === categories[0])
-        ? categories[0]
-        : r.categoryType ?? 'OVERHEAD';
-      return [{ amount: convertToIqd(allocation.operatingExpense, r.currency, rate), currency: 'IQD' as const, incurredAt: r.date, categoryType, branchId: r.branchId, partyName: r.party?.name ?? null }];
-    }),
-  ];
+  return financeRows.flatMap((r) => {
+    if (r.costRole === 'DIRECT_DELIVERY' || r.costRole === 'PAYMENT_PROCESSING') return [];
+    if (r.ledgerLines.length) {
+      return r.ledgerLines
+        .filter((line) => line.spendTreatment === 'OPEX' || line.spendTreatment === 'REVIEW')
+        .map((line) => ({
+          amount: convertToIqd(line.lineTotal, r.currency, rate),
+          currency: 'IQD' as const,
+          incurredAt: r.date,
+          categoryType: line.categoryType ?? r.categoryType ?? 'OVERHEAD',
+          branchId: line.branchId ?? r.branchId,
+          partyName: r.party?.name ?? null,
+        }));
+    }
+    if (r.fixedAssets.length || r.costLayers.length) return [];
+    return [
+      {
+        amount: convertToIqd(r.amount, r.currency, rate),
+        currency: 'IQD' as const,
+        incurredAt: r.date,
+        categoryType: r.categoryType ?? 'OVERHEAD',
+        branchId: r.branchId,
+        partyName: r.party?.name ?? null,
+      },
+    ];
+  });
 }
 
-export async function getPaymentProcessingCosts(
+async function getDirectCostsByRole(
   filters: DashboardFilters,
   scope: Scope,
   range: ResolvedRange,
+  costRole: 'DIRECT_DELIVERY' | 'PAYMENT_PROCESSING',
 ): Promise<number> {
   const [rows, rate] = await Promise.all([
     prisma.financeEntry.findMany({
       where: {
-        type: 'EXPENSE',
-        costRole: 'PAYMENT_PROCESSING',
+        type: { in: ['EXPENSE', 'PURCHASE'] },
+        costRole,
         date: { gte: range.start, lte: range.end },
         archivedAt: null,
         reversedAt: null,
@@ -121,6 +111,22 @@ export async function getPaymentProcessingCosts(
     getUsdToIqd(),
   ]);
   return rows.reduce((sum, row) => sum + convertToIqd(row.amount, row.currency, rate), 0);
+}
+
+export function getDirectDeliveryCosts(
+  filters: DashboardFilters,
+  scope: Scope,
+  range: ResolvedRange,
+): Promise<number> {
+  return getDirectCostsByRole(filters, scope, range, 'DIRECT_DELIVERY');
+}
+
+export async function getPaymentProcessingCosts(
+  filters: DashboardFilters,
+  scope: Scope,
+  range: ResolvedRange,
+): Promise<number> {
+  return getDirectCostsByRole(filters, scope, range, 'PAYMENT_PROCESSING');
 }
 
 export async function getExpenses(

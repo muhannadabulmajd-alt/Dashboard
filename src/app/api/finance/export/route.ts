@@ -166,6 +166,7 @@ export async function GET(req: NextRequest) {
       ['Gross margin %', (report.grossMarginPct * 100).toFixed(1)],
       ['Direct delivery costs', -report.directDeliveryCost],
       ['Payment processing fees', -report.paymentProcessingCosts],
+      ['Promotion product cost', -report.promotionCosts],
       ['Contribution profit', report.contributionProfit],
       ['Operating expenses', -report.operatingExpenses],
       ['Operating profit', report.operatingProfit],
@@ -234,7 +235,7 @@ export async function GET(req: NextRequest) {
     filename = kind === 'customer' ? 'customer-statements' : kind === 'supplier' ? 'supplier-statements' : 'party-statements';
   } else if (type === 'spend') {
     const bucket = (
-      ['all', 'capex', 'inventory', 'opex', 'direct', 'cogs'].includes(p.get('bucket') ?? '')
+      ['all', 'capex', 'inventory', 'operating', 'overhead', 'opex', 'review', 'direct', 'cogs', 'promotion'].includes(p.get('bucket') ?? '')
         ? p.get('bucket')
         : 'all'
     ) as SpendBucket;

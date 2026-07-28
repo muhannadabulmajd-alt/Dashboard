@@ -11,7 +11,12 @@ import type {
 import { isCompletedSaleStatus } from './status';
 
 /** Orders that represent real sales (placed & paid). Cancelled/pending excluded. */
-export function isSalesOrder(o: { status: OrderStatus; metricRole?: string }): boolean {
+export function isSalesOrder(o: {
+  status: OrderStatus;
+  metricRole?: string;
+  purpose?: string;
+}): boolean {
+  if (o.purpose && o.purpose !== 'SALE') return false;
   return o.metricRole ? o.metricRole === 'SALE' : isCompletedSaleStatus(o.status);
 }
 
@@ -32,14 +37,28 @@ export function allocateInteger(total: number, weights: number[]): number[] {
 }
 
 export function grossSales(orders: OrderLike[]): number {
-  return orders.filter(isSalesOrder).reduce((s, o) => s + o.grossAmount, 0);
+  return orders
+    .filter(isSalesOrder)
+    .reduce((s, o) => s + o.grossAmount + o.deliveryFee + (o.extraCharges ?? 0), 0);
 }
 
-/** Net Sales = gross - discounts - refunds, over sales orders. */
+/** Net sales equals the completed customer invoice revenue. */
 export function netSales(orders: OrderLike[]): number {
   return orders
     .filter(isSalesOrder)
-    .reduce((s, o) => s + (o.grossAmount - o.discountAmount - o.refundAmount), 0);
+    .reduce(
+      (s, o) =>
+        s +
+        Math.max(
+          0,
+          o.grossAmount -
+            o.discountAmount -
+            o.refundAmount +
+            o.deliveryFee +
+            (o.extraCharges ?? 0),
+        ),
+      0,
+    );
 }
 
 export function discountTotal(orders: OrderLike[]): number {
@@ -124,7 +143,14 @@ export function salesByDimension<K extends 'channel' | 'governorate'>(
     if (!isSalesOrder(o)) continue;
     const k = o[key] as string;
     const bucket = map.get(k) ?? { key: k, netSales: 0, orders: 0, units: 0 };
-    bucket.netSales += o.grossAmount - o.discountAmount - o.refundAmount;
+    bucket.netSales += Math.max(
+      0,
+      o.grossAmount -
+        o.discountAmount -
+        o.refundAmount +
+        o.deliveryFee +
+        (o.extraCharges ?? 0),
+    );
     bucket.orders += 1;
     map.set(k, bucket);
   }
@@ -138,7 +164,14 @@ export function salesTimeSeries(orders: OrderLike[], bucket: 'day' | 'hour'): Ti
     if (!isSalesOrder(o)) continue;
     const key = bucketKey(o.placedAt, bucket);
     const point = map.get(key) ?? { key, label: bucketLabel(key, bucket), netSales: 0, orders: 0 };
-    point.netSales += o.grossAmount - o.discountAmount - o.refundAmount;
+    point.netSales += Math.max(
+      0,
+      o.grossAmount -
+        o.discountAmount -
+        o.refundAmount +
+        o.deliveryFee +
+        (o.extraCharges ?? 0),
+    );
     point.orders += 1;
     map.set(key, point);
   }

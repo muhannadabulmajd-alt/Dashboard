@@ -13,27 +13,18 @@ import {
 import { getTranslations } from 'next-intl/server';
 import { getPageContext } from '@/server/page-context';
 import { prisma } from '@/server/db/client';
-import { formatMoney, convertToIqd } from '@/lib/money';
+import { formatMoney } from '@/lib/money';
 import { can } from '@/lib/rbac';
 import { enumLabel } from '@/lib/enums';
 import { serializeFilters } from '@/lib/filters';
-import { financeTotals, netCash, type FinanceEntryLike } from '@/lib/metrics/finance';
-import { getUsdToIqd } from '@/server/settings';
 import { setUsdToIqd } from '@/server/finance/settings';
 import { getSpendRows, getSpendTotals, spendByCategory, spendByMonth, spendByParty } from '@/server/finance/spend';
-import { getOrders, getOrderLines } from '@/server/db/repositories/sales.repo';
-import { getExpenses, getPaymentProcessingCosts } from '@/server/db/repositories/finance.repo';
-import * as M from '@/lib/metrics';
+import { getPaymentFacts, getProfitFacts } from '@/server/finance/facts';
 import { RateEditor } from '@/components/finance/RateEditor';
 import { Badge, Card, CardContent, CardHeader, CardTitle, PageHeader } from '@/components/ui/primitives';
 import { KpiCard } from '@/components/kpi/KpiCard';
 import { BarChartCard, DonutChartCard } from '@/components/charts/Charts';
 import { Link } from '@/i18n/navigation';
-
-type ChartEntry = FinanceEntryLike & {
-  date: Date;
-  dueDate: Date | null;
-};
 
 const ALERT_TONES = {
   danger: 'border-danger/40 bg-danger-soft text-danger',
@@ -41,20 +32,6 @@ const ALERT_TONES = {
 } as const;
 
 type FinancialAlert = { title: string; body: string; href: string; tone: keyof typeof ALERT_TONES };
-type WalletIssue = { count: number; grossAmount: number };
-
-function parseWalletIssue(value: string | undefined): WalletIssue | null {
-  if (!value) return null;
-  try {
-    const parsed = JSON.parse(value) as Partial<WalletIssue>;
-    return typeof parsed.count === 'number' && typeof parsed.grossAmount === 'number'
-      ? { count: parsed.count, grossAmount: parsed.grossAmount }
-      : null;
-  } catch {
-    return null;
-  }
-}
-
 function filteredHref(base: string, filters: Parameters<typeof serializeFilters>[0], extra?: Record<string, string | undefined>) {
   const sp = serializeFilters(filters);
   for (const [key, value] of Object.entries(extra ?? {})) if (value) sp.set(key, value);
@@ -73,114 +50,34 @@ export default async function FinancePage({
   const t = await getTranslations('finance');
   const canManage = can(user.role, 'manage:finance');
 
-  const branchWhere = scope.branchId
-    ? { branchId: scope.branchId }
-    : filters.branchId?.length
-      ? { branchId: { in: filters.branchId } }
-      : {};
-
   const [
-    accounts,
-    entriesRaw,
-    rate,
+    paymentFacts,
     spendTotals,
     allSpendRows,
     opexRows,
-    orders,
-    orderLines,
-    operatingExpenses,
-    paymentProcessingCosts,
-    walletIssueSetting,
+    profitFacts,
+    walletReview,
   ] = await Promise.all([
-    prisma.financeAccount.findMany({ where: { isActive: true, ...branchWhere }, orderBy: { createdAt: 'asc' } }),
-    prisma.financeEntry.findMany({
-      where: { archivedAt: null, reversedAt: null, reversalOfId: null, date: { lte: range.end }, ...branchWhere },
-      select: {
-        id: true,
-        type: true,
-        amount: true,
-        currency: true,
-        obligation: true,
-        obligationKind: true,
-        accountId: true,
-        toAccountId: true,
-        settlesId: true,
-        archivedAt: true,
-        reversedAt: true,
-        reversalOfId: true,
-        date: true,
-        dueDate: true,
-      },
-    }),
-    getUsdToIqd(),
+    getPaymentFacts(filters, scope, range),
     getSpendTotals(filters, scope, range),
     getSpendRows('all', filters, scope, range),
-    getSpendRows('opex', filters, scope, range),
-    getOrders(filters, scope, range),
-    getOrderLines(filters, scope, range),
-    getExpenses(filters, scope, range),
-    getPaymentProcessingCosts(filters, scope, range),
-    prisma.setting.findUnique({
-      where: { key: 'wayl_wallet_unmatched_sales' },
-      select: { value: true },
+    getSpendRows('operating', filters, scope, range),
+    getProfitFacts(filters, scope, range),
+    prisma.paymentReconciliationItem.aggregate({
+      where: { status: 'NEEDS_ORDER', provider: { externalKey: 'WAYL' } },
+      _count: true,
+      _sum: { grossAmount: true },
     }),
   ]);
-  const pnl = M.buildPnlSnapshot(orders, orderLines, operatingExpenses, {
-    paymentProcessingCosts,
-  });
-  const averageOrderValue = orders.length ? Math.round(pnl.netSales / orders.length) : 0;
-  const walletIssue = parseWalletIssue(walletIssueSetting?.value);
-  const entries = entriesRaw as ChartEntry[];
-
-  const currencies = Array.from(new Set([...accounts.map((a) => a.currency), ...entries.map((e) => e.currency)]));
-  if (!currencies.length) currencies.push('IQD');
-
-  const byCur = currencies.map((cur) => {
-    const ce = entries.filter((e) => e.currency === cur);
-    const ca = accounts.filter((a) => a.currency === cur);
-    const totals = financeTotals(ce);
-    return {
-      cur,
-      totals,
-      cash: netCash(ca, ce),
-    };
-  });
-  const combined = byCur.reduce(
-    (acc, row) => {
-      acc.cash += convertToIqd(row.cash, row.cur, rate);
-      acc.payable += convertToIqd(row.totals.outstandingPayable, row.cur, rate);
-      acc.receivable += convertToIqd(row.totals.outstandingReceivable, row.cur, rate);
-      return acc;
-    },
-    { cash: 0, payable: 0, receivable: 0 },
-  );
-
-  const iqd = (entry: ChartEntry) => convertToIqd(entry.amount, entry.currency, rate);
-  const paidByObligation = new Map<string, number>();
-  for (const entry of entries) {
-    if (entry.settlesId) paidByObligation.set(entry.settlesId, (paidByObligation.get(entry.settlesId) ?? 0) + iqd(entry));
-  }
-
-  const now = new Date();
-  const overdue = entries.reduce(
-    (acc, entry) => {
-      if (!entry.obligation || !entry.obligationKind || !entry.dueDate || entry.dueDate >= now) return acc;
-      const outstanding = Math.max(0, iqd(entry) - (paidByObligation.get(entry.id) ?? 0));
-      if (entry.obligationKind === 'PAYABLE') acc.payables += outstanding;
-      else acc.receivables += outstanding;
-      return acc;
-    },
-    { payables: 0, receivables: 0 },
-  );
+  const { pnl, averageOrderValue } = profitFacts;
+  const walletIssue = walletReview._count
+    ? { count: walletReview._count, grossAmount: walletReview._sum.grossAmount ?? 0 }
+    : null;
 
   const largeOpex = opexRows
     .map((row) => row.amount)
     .filter((amount) => amount >= 1_000_000)
     .sort((a, b) => b - a);
-  const openPayables = entries
-    .filter((entry) => entry.obligation && entry.obligationKind === 'PAYABLE')
-    .map((entry) => Math.max(0, iqd(entry) - (paidByObligation.get(entry.id) ?? 0)))
-    .filter((amount) => amount > 0);
   const financialAlerts: FinancialAlert[] = [
     ...(walletIssue?.count
       ? [{
@@ -189,41 +86,43 @@ export default async function FinancePage({
             count: walletIssue.count,
             amount: formatMoney(walletIssue.grossAmount, 'IQD', locale),
           }),
-          href: '/finance/ledger',
+          href: '/finance/online-payments',
           tone: 'warning' as const,
         }]
       : []),
-    ...(overdue.payables > 0
+    ...(paymentFacts.overdue.payables > 0
       ? [{
           title: t('alerts.overduePayables.title'),
-          body: t('alerts.overduePayables.body', { amount: formatMoney(overdue.payables, 'IQD', locale) }),
+          body: t('alerts.overduePayables.body', { amount: formatMoney(paymentFacts.overdue.payables, 'IQD', locale) }),
           href: '/finance/dues',
           tone: 'danger' as const,
         }]
       : []),
-    ...(overdue.receivables > 0
+    ...(paymentFacts.overdue.receivables > 0
       ? [{
           title: t('alerts.overdueReceivables.title'),
-          body: t('alerts.overdueReceivables.body', { amount: formatMoney(overdue.receivables, 'IQD', locale) }),
+          body: t('alerts.overdueReceivables.body', { amount: formatMoney(paymentFacts.overdue.receivables, 'IQD', locale) }),
           href: '/finance/dues',
           tone: 'warning' as const,
         }]
       : []),
-    ...(combined.cash < 0 || (combined.payable > 0 && combined.cash < combined.payable)
+    ...(paymentFacts.cashAvailable < 0 || (
+      paymentFacts.payables > 0 && paymentFacts.cashAvailable < paymentFacts.payables
+    )
       ? [{
           title: t('alerts.lowCash.title'),
           body: t('alerts.lowCash.body', {
-            cash: formatMoney(combined.cash, 'IQD', locale),
-            payables: formatMoney(combined.payable, 'IQD', locale),
+            cash: formatMoney(paymentFacts.cashAvailable, 'IQD', locale),
+            payables: formatMoney(paymentFacts.payables, 'IQD', locale),
           }),
           href: '/finance/accounts',
           tone: 'danger' as const,
         }]
       : []),
-    ...(openPayables.length
+    ...(paymentFacts.openPayableCount
       ? [{
           title: t('alerts.unpaidSupplierInvoices.title'),
-          body: t('alerts.unpaidSupplierInvoices.body', { count: openPayables.length }),
+          body: t('alerts.unpaidSupplierInvoices.body', { count: paymentFacts.openPayableCount }),
           href: '/finance/dues',
           tone: 'warning' as const,
         }]
@@ -235,7 +134,7 @@ export default async function FinancePage({
             amount: formatMoney(largeOpex[0], 'IQD', locale),
             count: Math.min(largeOpex.length, 3),
           }),
-          href: filteredHref('/finance/spend', filters, { bucket: 'opex' }),
+          href: filteredHref('/finance/spend', filters, { bucket: 'operating' }),
           tone: 'warning' as const,
         }]
       : []),
@@ -283,10 +182,10 @@ export default async function FinancePage({
     },
     {
       label: t('totalAvailable'),
-      value: combined.cash,
+      value: paymentFacts.cashAvailable,
       icon: Wallet,
       href: '/finance/accounts',
-      tone: combined.cash >= 0 ? 'success' as const : 'danger' as const,
+      tone: paymentFacts.cashAvailable >= 0 ? 'success' as const : 'danger' as const,
     },
     {
       label: t('operatingProfit'),
@@ -295,10 +194,22 @@ export default async function FinancePage({
       href: '/pnl',
       tone: pnl.operatingProfit >= 0 ? 'success' as const : 'danger' as const,
     },
-    { label: t('receivables'), value: combined.receivable, icon: HandCoins, href: '/finance/dues', tone: 'accent' as const },
-    { label: t('payables'), value: combined.payable, icon: Clock, href: '/finance/dues', tone: 'warning' as const },
+    { label: t('receivables'), value: paymentFacts.receivables, icon: HandCoins, href: '/finance/dues', tone: 'accent' as const },
+    { label: t('payables'), value: paymentFacts.payables, icon: Clock, href: '/finance/dues', tone: 'warning' as const },
   ];
   const insightCards: Array<{ label: string; value: number; sub: string; href: string }> = [
+    {
+      label: t('cashReceived'),
+      value: paymentFacts.cashReceived,
+      sub: t('explain.cashReceived'),
+      href: '/finance/accounts',
+    },
+    {
+      label: t('cashPaid'),
+      value: paymentFacts.cashPaid,
+      sub: t('explain.cashPaid'),
+      href: '/finance/accounts',
+    },
     {
       label: t('cogs'),
       value: pnl.cogs,
@@ -318,11 +229,19 @@ export default async function FinancePage({
       href: '/pnl',
     },
     {
-      label: t('opex'),
-      value: spendTotals.opex,
+      label: t('operatingSpending'),
+      value: spendTotals.operating,
       sub: t('explain.opex'),
-      href: filteredHref(spendBase, filters, { bucket: 'opex' }),
+      href: filteredHref(spendBase, filters, { bucket: 'operating' }),
     },
+    ...(spendTotals.review > 0
+      ? [{
+          label: t('classificationReview'),
+          value: spendTotals.review,
+          sub: t('explain.classificationReview'),
+          href: filteredHref(spendBase, filters, { bucket: 'review' }),
+        }]
+      : []),
     {
       label: t('capex'),
       value: spendTotals.capex,
@@ -399,6 +318,14 @@ export default async function FinancePage({
       href: '/balance-sheet',
       icon: Package,
     },
+    ...(walletIssue
+      ? [{
+          label: t('onlinePaymentReview'),
+          hint: t('onlinePaymentReviewHint'),
+          href: '/finance/online-payments',
+          icon: BadgeDollarSign,
+        }]
+      : []),
   ];
 
   return (
@@ -425,7 +352,7 @@ export default async function FinancePage({
         </div>
       </div>
 
-      {canManage ? <RateEditor action={setUsdToIqd} locale={locale} rate={rate} label={t('rate')} apply={t('apply')} /> : null}
+      {canManage ? <RateEditor action={setUsdToIqd} locale={locale} rate={paymentFacts.rate} label={t('rate')} apply={t('apply')} /> : null}
 
       <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
         {cards.map((card) => (
@@ -458,6 +385,14 @@ export default async function FinancePage({
               locale={locale}
             />
           ))}
+        </div>
+        <div className="rounded-lg border border-primary/20 bg-linen/25 px-3 py-2 text-sm text-roast">
+          <strong>{t('spendEquationLabel')}:</strong>{' '}
+          {formatMoney(spendTotals.capex, 'IQD', locale)} +{' '}
+          {formatMoney(spendTotals.inventory, 'IQD', locale)} +{' '}
+          {formatMoney(spendTotals.operating, 'IQD', locale)} ={' '}
+          <strong>{formatMoney(spendTotals.totalSpent, 'IQD', locale)}</strong>.
+          <span className="ms-1 text-muted-foreground">{t('spendEquationHint')}</span>
         </div>
       </section>
 

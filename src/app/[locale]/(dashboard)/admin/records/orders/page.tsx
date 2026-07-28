@@ -93,8 +93,14 @@ export default async function OrdersRecordsPage({
   const [grouped, revenueAgg, total, orders] = await Promise.all([
     prisma.order.groupBy({ by: ['status'], _count: { _all: true } }),
     prisma.order.aggregate({
-      where: { status: { in: saleStatuses } },
-      _sum: { grossAmount: true, discountAmount: true, refundAmount: true },
+      where: { status: { in: saleStatuses }, purpose: 'SALE' },
+      _sum: {
+        grossAmount: true,
+        discountAmount: true,
+        refundAmount: true,
+        deliveryFee: true,
+        extraCharges: true,
+      },
     }),
     prisma.order.count(),
     prisma.order.findMany({ where, orderBy: ORDER_SORTS[sort] ?? ORDER_SORTS.newest, include: { customer: true }, take: 500 }),
@@ -132,7 +138,11 @@ export default async function OrdersRecordsPage({
     0,
   );
   const netRevenue =
-    (revenueAgg._sum.grossAmount ?? 0) - (revenueAgg._sum.discountAmount ?? 0) - (revenueAgg._sum.refundAmount ?? 0);
+    (revenueAgg._sum.grossAmount ?? 0) -
+    (revenueAgg._sum.discountAmount ?? 0) -
+    (revenueAgg._sum.refundAmount ?? 0) +
+    (revenueAgg._sum.deliveryFee ?? 0) +
+    (revenueAgg._sum.extraCharges ?? 0);
   const stats: SummaryStat[] = [
     { label: t('k.total'), value: formatNumber(total, locale) },
     { label: enumLabel('COMPLETED', locale), value: formatNumber(roleCount('SALE'), locale), tone: 'success' },

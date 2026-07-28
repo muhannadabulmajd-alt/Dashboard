@@ -1,7 +1,7 @@
 import 'server-only';
 import type { Currency, PartyType, Prisma } from '@prisma/client';
 import { prisma } from '@/server/db/client';
-import { getExpenses, getPaymentProcessingCosts } from '@/server/db/repositories/finance.repo';
+import { getExpenses } from '@/server/db/repositories/finance.repo';
 import { getOrders, getOrderLines } from '@/server/db/repositories/sales.repo';
 import { getUsdToIqd } from '@/server/settings';
 import type { DashboardFilters } from '@/lib/filters';
@@ -9,6 +9,7 @@ import { convertToIqd } from '@/lib/money';
 import type { ResolvedRange } from '@/lib/dates';
 import * as M from '@/lib/metrics';
 import { allocationTotal, classifyPurchase, type PurchaseAllocation } from '@/lib/metrics/purchases';
+import { getProfitFacts } from '@/server/finance/facts';
 
 type Scope = { branchId?: string };
 type LocalizedName = { en: string; ar: string };
@@ -56,6 +57,7 @@ export interface PnlReport {
   grossMarginPct: number;
   directDeliveryCost: number;
   paymentProcessingCosts: number;
+  promotionCosts: number;
   contributionProfit: number;
   operatingExpenses: number;
   operatingProfit: number;
@@ -66,13 +68,7 @@ export async function getPnlReport(
   scope: Scope,
   range: ResolvedRange,
 ): Promise<PnlReport> {
-  const [orders, lines, expenses, paymentProcessingCosts] = await Promise.all([
-    getOrders(filters, scope, range),
-    getOrderLines(filters, scope, range),
-    getExpenses(filters, scope, range),
-    getPaymentProcessingCosts(filters, scope, range),
-  ]);
-  return M.buildPnlSnapshot(orders, lines, expenses, { paymentProcessingCosts });
+  return (await getProfitFacts(filters, scope, range)).pnl;
 }
 
 export type CashFlowBucketKey =
@@ -163,8 +159,9 @@ export async function getCashFlowReport(
         accountId: true,
         toAccountId: true,
         settlesId: true,
+        orderId: true,
         categoryType: true,
-        ledgerLines: { select: { itemType: true, lineTotal: true, categoryType: true } },
+        ledgerLines: { select: { itemType: true, spendTreatment: true, lineTotal: true, categoryType: true } },
         fixedAssets: { take: 1, select: { id: true } },
         costLayers: { take: 1, select: { id: true } },
         settles: {
@@ -172,7 +169,7 @@ export async function getCashFlowReport(
             type: true,
             amount: true,
             categoryType: true,
-            ledgerLines: { select: { itemType: true, lineTotal: true, categoryType: true } },
+            ledgerLines: { select: { itemType: true, spendTreatment: true, lineTotal: true, categoryType: true } },
             fixedAssets: { take: 1, select: { id: true } },
             costLayers: { take: 1, select: { id: true } },
           },
@@ -207,10 +204,15 @@ export async function getCashFlowReport(
       continue;
     }
     if (e.type === 'INCOME') addBucket(cashIn, 'salesCollected', amount);
-    else if (e.type === 'PAYMENT_IN') addBucket(cashIn, e.settlesId ? 'receivablesCollected' : 'otherIncome', amount);
+    else if (e.type === 'PAYMENT_IN') {
+      addBucket(
+        cashIn,
+        e.settlesId ? 'receivablesCollected' : e.orderId ? 'salesCollected' : 'otherIncome',
+        amount,
+      );
+    }
     else if (e.type === 'CAPITAL_IN') addBucket(cashIn, 'capitalContributions', amount);
-    else if (e.type === 'EXPENSE') addBucket(cashOut, 'expensesPaid', amount);
-    else if (e.type === 'PURCHASE') {
+    else if (e.type === 'EXPENSE' || e.type === 'PURCHASE') {
       addPurchaseCash(cashOut, amount, classifyPurchase({
         amount: e.amount,
         categoryType: e.categoryType,
@@ -218,7 +220,10 @@ export async function getCashFlowReport(
         hasFixedAsset: e.fixedAssets.length > 0,
         hasInventoryLayer: e.costLayers.length > 0,
       }));
-    } else if (e.type === 'PAYMENT_OUT' && e.settles?.type === 'PURCHASE') {
+    } else if (
+      e.type === 'PAYMENT_OUT'
+      && (e.settles?.type === 'PURCHASE' || e.settles?.type === 'EXPENSE')
+    ) {
       addPurchaseCash(cashOut, amount, classifyPurchase({
         amount: e.settles.amount,
         categoryType: e.settles.categoryType,
@@ -372,11 +377,16 @@ export async function getBranchProfitabilityReport(
     if (!M.isSalesOrder(order)) continue;
     const row = ensureRow(order.branchId ?? null);
     row.orders += 1;
-    row.grossRevenue += order.grossAmount;
+    row.grossRevenue += order.grossAmount + order.deliveryFee + (order.extraCharges ?? 0);
     row.discounts += order.discountAmount;
     row.refunds += order.refundAmount;
     row.directDeliveryCost += order.deliveryCost;
-    row.netSales += order.grossAmount - order.discountAmount - order.refundAmount;
+    row.netSales +=
+      order.grossAmount -
+      order.discountAmount -
+      order.refundAmount +
+      order.deliveryFee +
+      (order.extraCharges ?? 0);
   }
 
   for (const line of lines) {

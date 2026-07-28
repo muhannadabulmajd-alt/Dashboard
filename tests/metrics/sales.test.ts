@@ -37,6 +37,17 @@ describe('sales metrics', () => {
     expect(netSales(orders)).toBe(140_000);
   });
 
+  it('includes customer delivery and extra charges in earned invoice revenue', () => {
+    expect(netSales([
+      makeOrder({
+        grossAmount: 100_000,
+        discountAmount: 10_000,
+        deliveryFee: 5_000,
+        extraCharges: 2_000,
+      }),
+    ])).toBe(97_000);
+  });
+
   it('discountTotal sums discounts of sales orders', () => {
     expect(discountTotal(orders)).toBe(10_000);
   });

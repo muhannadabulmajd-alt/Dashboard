@@ -229,10 +229,8 @@ export async function receiveStock(itemId: string, _prev: ActionState, fd: FormD
       createdById: user.id,
     });
     if (financeEntryId) {
-      await Promise.all([
-        tx.inventoryCostLayer.update({ where: { id: layer.id }, data: { financeEntryId } }),
-        tx.stockMovement.update({ where: { id: movement.id }, data: { financeEntryId } }),
-      ]);
+      await tx.inventoryCostLayer.update({ where: { id: layer.id }, data: { financeEntryId } });
+      await tx.stockMovement.update({ where: { id: movement.id }, data: { financeEntryId } });
     }
   });
   await syncActiveCost(itemId);

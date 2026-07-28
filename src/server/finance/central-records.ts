@@ -12,8 +12,17 @@ import { parseDecimalInput } from '@/lib/decimal';
 import { CURRENCIES, EXPENSE_CATEGORY_TYPES, INVENTORY_CATEGORIES, PARTY_TYPES, PAYMENT_METHODS } from '@/lib/enums';
 import { ledgerUnitCostMinor } from '@/lib/ledger-lines';
 import { ledgerRecordClassForLines } from '@/lib/ledger-record-class';
+import {
+  classificationStatusForTreatment,
+  spendTreatmentForItemType,
+} from '@/lib/spend-treatment';
 import { isMeasurementUnit } from '@/lib/units';
 import { syncActiveCost } from '@/server/inventory/fifo';
+import { syncAllocatedAssetTotals } from '@/server/finance/asset-allocations';
+import {
+  captureLayerBaseCosts,
+  syncLayerLandedCosts,
+} from '@/server/finance/landed-costs';
 import type { Currency, ExpenseCategoryType, FinanceType, ObligationKind, Prisma, Role } from '@prisma/client';
 
 const FINANCE = '/[locale]/(dashboard)/finance';
@@ -328,14 +337,14 @@ async function resolveInventoryItem(
   fd: FormData,
   userId: string,
   unitCost: string,
-): Promise<{ id: string; category: string; branchId: string | null } | null> {
+): Promise<{ id: string; category: string; branchId: string | null; nameEn: string; nameAr: string } | null> {
   const mode = reqField(fd, 'inventoryItemMode') || 'existing';
   if (mode === 'existing') {
     const id = reqField(fd, 'inventoryItemId');
     if (!id) return null;
     const item = await tx.inventoryItem.findUnique({
       where: { id },
-      select: { id: true, category: true, branchId: true },
+      select: { id: true, category: true, branchId: true, nameEn: true, nameAr: true },
     });
     return item;
   }
@@ -357,7 +366,7 @@ async function resolveInventoryItem(
       unitCost,
       reorderPoint: reorderPoint ? decimalData(parseDecimalInput(reorderPoint, 3) ?? 0) : null,
     },
-    select: { id: true, category: true, branchId: true },
+    select: { id: true, category: true, branchId: true, nameEn: true, nameAr: true },
   });
   await tx.auditLog.create({
     data: {
@@ -590,7 +599,8 @@ export async function createCentralRecord(_prev: ActionState, fd: FormData): Pro
           categoryType = 'OVERHEAD';
         }
         if (!itemName) throw new Error('invalid-line-name');
-        await tx.ledgerEntryLine.create({
+        const spendTreatment = spendTreatmentForItemType(line.itemType);
+        const ledgerLine = await tx.ledgerEntryLine.create({
           data: {
             financeEntryId: entry.id,
             lineNo: line.lineNo,
@@ -609,10 +619,18 @@ export async function createCentralRecord(_prev: ActionState, fd: FormData): Pro
             lineTotal: line.lineTotal,
             branchId: line.branchId,
             notes: line.notes,
+            spendTreatment,
+            classificationStatus: classificationStatusForTreatment(spendTreatment),
+            classificationSource: 'central-record-panel',
+            classificationNote:
+              spendTreatment === 'REVIEW'
+                ? 'Choose Capex, inventory, or operating spending.'
+                : null,
           },
+          select: { id: true },
         });
         if (line.itemType === 'ASSET') {
-          await tx.fixedAsset.create({
+          const asset = await tx.fixedAsset.create({
             data: {
               name: itemName,
               category: line.assetCategory ?? 'Equipment',
@@ -626,6 +644,16 @@ export async function createCentralRecord(_prev: ActionState, fd: FormData): Pro
               financeEntryId: entry.id,
               notes: line.notes,
               createdById: user.id,
+            },
+            select: { id: true },
+          });
+          await tx.fixedAssetCostAllocation.create({
+            data: {
+              fixedAssetId: asset.id,
+              financeEntryId: entry.id,
+              ledgerLineId: ledgerLine.id,
+              amount: line.lineTotal,
+              notes: 'Created from central record panel',
             },
           });
         }
@@ -675,6 +703,9 @@ export async function createCentralRecord(_prev: ActionState, fd: FormData): Pro
           },
         },
       });
+      for (const itemId of [...new Set(touchedItems)]) {
+        await syncActiveCost(itemId, tx);
+      }
       newId = entry.id;
       return;
     }
@@ -699,6 +730,26 @@ export async function createCentralRecord(_prev: ActionState, fd: FormData): Pro
           description: optField(fd, 'description') ?? 'Bought stock',
         },
         select: { id: true },
+      });
+      await tx.ledgerEntryLine.create({
+        data: {
+          financeEntryId: entry.id,
+          lineNo: 1,
+          itemType: 'INVENTORY',
+          itemName: optField(fd, 'description') ?? item.nameEn ?? item.nameAr,
+          categoryType: categoryForInventory(item.category),
+          inventoryItemId: item.id,
+          unit,
+          quantity: decimalData(qty),
+          unitCost,
+          landedUnitCost: unitCost,
+          lineTotal: money.amount,
+          branchId: optField(fd, 'branchId') ?? item.branchId,
+          notes: optField(fd, 'description') ?? null,
+          spendTreatment: 'INVENTORY',
+          classificationStatus: 'CONFIRMED',
+          classificationSource: 'central-record-panel',
+        },
       });
       await tx.inventoryCostLayer.create({
         data: {
@@ -760,6 +811,7 @@ export async function createCentralRecord(_prev: ActionState, fd: FormData): Pro
       });
       newId = entry.id;
       touchedItems.push(item.id);
+      await syncActiveCost(item.id, tx);
       return;
     }
 
@@ -783,6 +835,28 @@ export async function createCentralRecord(_prev: ActionState, fd: FormData): Pro
         },
         select: { id: true },
       });
+      const ledgerLine = await tx.ledgerEntryLine.create({
+        data: {
+          financeEntryId: entry.id,
+          lineNo: 1,
+          itemType: 'ASSET',
+          itemName: name,
+          assetKey: optField(fd, 'assetKey') ?? null,
+          assetCategory: category,
+          categoryType: 'EQUIPMENT',
+          unit,
+          quantity: decimalData(qty),
+          unitCost,
+          landedUnitCost: unitCost,
+          lineTotal: money.amount,
+          branchId: optField(fd, 'branchId') ?? null,
+          notes: optField(fd, 'description') ?? null,
+          spendTreatment: 'CAPEX',
+          classificationStatus: 'CONFIRMED',
+          classificationSource: 'central-record-panel',
+        },
+        select: { id: true },
+      });
       const asset = await tx.fixedAsset.create({
         data: {
           name,
@@ -799,6 +873,15 @@ export async function createCentralRecord(_prev: ActionState, fd: FormData): Pro
           createdById: user.id,
         },
         select: { id: true },
+      });
+      await tx.fixedAssetCostAllocation.create({
+        data: {
+          fixedAssetId: asset.id,
+          financeEntryId: entry.id,
+          ledgerLineId: ledgerLine.id,
+          amount: money.amount,
+          notes: 'Created from central record panel',
+        },
       });
       await tx.auditLog.create({
         data: {
@@ -858,11 +941,37 @@ export async function createCentralRecord(_prev: ActionState, fd: FormData): Pro
     const entry = await tx.financeEntry.create({
       data: {
         ...baseEntryData(fd, date, money, mapped.type, mapped.obligation, mapped.kind),
-        recordClass: mapped.type === 'EXPENSE' ? 'EXPENSE' : mapped.type === 'PURCHASE' ? 'PURCHASE' : null,
+        recordClass: mapped.type === 'EXPENSE' || mapped.type === 'PURCHASE' ? 'EXPENSE' : null,
         createdById: user.id,
       },
       select: { id: true },
     });
+    if (mapped.type === 'EXPENSE' || mapped.type === 'PURCHASE') {
+      const isOperating = mapped.type === 'EXPENSE';
+      await tx.ledgerEntryLine.create({
+        data: {
+          financeEntryId: entry.id,
+          lineNo: 1,
+          itemType: isOperating ? 'EXPENSE' : 'OTHER',
+          itemName:
+            optField(fd, 'description') ??
+            (isOperating ? 'Money out' : 'Supplier amount due'),
+          categoryType: oneOf(optField(fd, 'categoryType') ?? '', EXPENSE_CATEGORY_TYPES),
+          unit: 'unit',
+          quantity: 1,
+          unitCost: money.amount,
+          landedUnitCost: money.amount,
+          lineTotal: money.amount,
+          branchId: optField(fd, 'branchId') ?? null,
+          spendTreatment: isOperating ? 'OPEX' : 'REVIEW',
+          classificationStatus: isOperating ? 'CONFIRMED' : 'NEEDS_REVIEW',
+          classificationSource: 'central-record-panel',
+          classificationNote: isOperating
+            ? 'Recorded as operating spending.'
+            : 'Supplier amount needs classification as inventory, asset, or operating spending.',
+        },
+      });
+    }
     await tx.auditLog.create({
       data: {
         userId: user.id,
@@ -878,7 +987,6 @@ export async function createCentralRecord(_prev: ActionState, fd: FormData): Pro
     return { error: 'invalid' };
   }
 
-  for (const itemId of touchedItems) await syncActiveCost(itemId);
   revalidateFinancePaths();
   redirect(`/${locale}/finance/ledger/${newId}`);
 }
@@ -914,10 +1022,33 @@ export async function updateCentralPurchase(
       const before = await entrySnapshot(tx, id);
       if (!before || before.type !== 'PURCHASE') throw new Error('invalid-entry');
       before.stockMovements.forEach((movement) => touchedItems.add(movement.inventoryItemId));
+      before.ledgerLines.forEach((line) => {
+        line.landedCostAllocations.forEach((allocation) => {
+          if (allocation.inventoryItemId) touchedItems.add(allocation.inventoryItemId);
+        });
+      });
+      const priorAssetByLineNo = new Map(
+        before.ledgerLines.flatMap((line) =>
+          line.fixedAssetCostAllocations.map((allocation) => [
+            line.lineNo,
+            allocation.fixedAssetId,
+          ] as const),
+        ),
+      );
+      const allocatedAssetIds = new Set(priorAssetByLineNo.values());
+      const layerBaseCosts = await captureLayerBaseCosts(
+        tx,
+        before.ledgerLines.flatMap((line) =>
+          line.landedCostAllocations
+            .map((allocation) => allocation.costLayerId)
+            .filter((value): value is string => Boolean(value)),
+        ),
+      );
 
+      await tx.fixedAssetCostAllocation.deleteMany({ where: { financeEntryId: id } });
+      await tx.inventoryLandedCostAllocation.deleteMany({ where: { financeEntryId: id } });
       await tx.inventoryCostLayer.deleteMany({ where: { financeEntryId: id } });
       await tx.stockMovement.deleteMany({ where: { financeEntryId: id } });
-      await tx.fixedAsset.deleteMany({ where: { financeEntryId: id } });
       await tx.ledgerEntryLine.deleteMany({ where: { financeEntryId: id } });
 
       await tx.financeEntry.update({
@@ -981,7 +1112,8 @@ export async function updateCentralPurchase(
         }
         if (!itemName) throw new Error('invalid-line-name');
 
-        await tx.ledgerEntryLine.create({
+        const spendTreatment = spendTreatmentForItemType(line.itemType);
+        const ledgerLine = await tx.ledgerEntryLine.create({
           data: {
             financeEntryId: id,
             lineNo: line.lineNo,
@@ -1000,28 +1132,84 @@ export async function updateCentralPurchase(
             lineTotal: line.lineTotal,
             branchId: line.branchId,
             notes: line.notes,
+            spendTreatment,
+            classificationStatus: classificationStatusForTreatment(spendTreatment),
+            classificationSource: 'multi-item-ledger-editor',
+            classificationNote:
+              spendTreatment === 'REVIEW'
+                ? 'Choose Capex, inventory, or operating spending.'
+                : null,
           },
+          select: { id: true },
         });
 
         if (line.itemType === 'ASSET') {
-          await tx.fixedAsset.create({
+          const priorAssetId = priorAssetByLineNo.get(line.lineNo);
+          const priorAsset = priorAssetId
+            ? await tx.fixedAsset.findUnique({
+                where: { id: priorAssetId },
+                select: { id: true, financeEntryId: true },
+              })
+            : null;
+          const asset = priorAsset
+            ? priorAsset
+            : await tx.fixedAsset.create({
+                data: {
+                  name: itemName,
+                  category: line.assetCategory ?? 'Equipment',
+                  quantity: decimalData(line.quantity),
+                  unit: line.unit,
+                  totalCost: line.lineTotal,
+                  unitCost: line.landedUnitCost,
+                  purchaseDate: date,
+                  partyId: optField(fd, 'partyId') ?? null,
+                  branchId: line.branchId,
+                  financeEntryId: id,
+                  notes: line.notes,
+                  createdById: user.id,
+                },
+                select: { id: true, financeEntryId: true },
+              });
+          if (asset.financeEntryId === id) {
+            await tx.fixedAsset.update({
+              where: { id: asset.id },
+              data: {
+                name: itemName,
+                category: line.assetCategory ?? 'Equipment',
+                quantity: decimalData(line.quantity),
+                unit: line.unit,
+                purchaseDate: date,
+                partyId: optField(fd, 'partyId') ?? null,
+                branchId: line.branchId,
+                notes: line.notes,
+                isActive: true,
+                archivedAt: null,
+                archivedById: null,
+                archiveReason: null,
+              },
+            });
+          }
+          allocatedAssetIds.add(asset.id);
+          await tx.fixedAssetCostAllocation.create({
             data: {
-              name: itemName,
-              category: line.assetCategory ?? 'Equipment',
-              quantity: decimalData(line.quantity),
-              unit: line.unit,
-              totalCost: line.lineTotal,
-              unitCost: line.landedUnitCost,
-              purchaseDate: date,
-              partyId: optField(fd, 'partyId') ?? null,
-              branchId: line.branchId,
+              fixedAssetId: asset.id,
               financeEntryId: id,
-              notes: line.notes,
-              createdById: user.id,
+              ledgerLineId: ledgerLine.id,
+              amount: line.lineTotal,
+              notes: 'Rebuilt by multi-item ledger editor',
             },
           });
         }
       }
+      await tx.fixedAsset.deleteMany({
+        where: { financeEntryId: id, costAllocations: { none: {} } },
+      });
+      await syncAllocatedAssetTotals(tx, allocatedAssetIds, {
+        userId: user.id,
+        reason: `Multi-item ledger record ${id} updated`,
+      });
+      const recalculatedItems = await syncLayerLandedCosts(tx, layerBaseCosts);
+      for (const itemId of recalculatedItems) touchedItems.add(itemId);
 
       const settlements = before.settlements.filter((row) => !row.archivedAt && !row.reversedAt && !row.reversalOfId);
       if (paidMode === 'PARTIAL') {
@@ -1073,12 +1261,12 @@ export async function updateCentralPurchase(
           },
         },
       });
+      for (const itemId of touchedItems) await syncActiveCost(itemId, tx);
     }, { timeout: 60_000 });
   } catch {
     return { error: 'invalid' };
   }
 
-  for (const itemId of touchedItems) await syncActiveCost(itemId);
   revalidateFinancePaths();
   redirect(`/${locale}/finance/ledger/${id}`);
 }
@@ -1087,7 +1275,14 @@ async function entrySnapshot(tx: Tx, id: string) {
   return tx.financeEntry.findUnique({
     where: { id },
     include: {
-      ledgerLines: true,
+      ledgerLines: {
+        include: {
+          fixedAssetCostAllocations: { select: { fixedAssetId: true } },
+          landedCostAllocations: {
+            select: { costLayerId: true, inventoryItemId: true },
+          },
+        },
+      },
       stockMovements: true,
       costLayers: true,
       fixedAssets: true,
@@ -1101,11 +1296,40 @@ export async function archiveFinanceEntry(id: string, locale: string, active: bo
   if (!user) return;
   const snapshot = await prisma.financeEntry.findUnique({
     where: { id },
-    include: { fixedAssets: true },
+    include: {
+      fixedAssets: true,
+      stockMovements: { select: { inventoryItemId: true } },
+      costLayers: { select: { inventoryItemId: true } },
+      ledgerLines: {
+        include: {
+          fixedAssetCostAllocations: { select: { fixedAssetId: true } },
+          landedCostAllocations: {
+            select: { costLayerId: true, inventoryItemId: true },
+          },
+        },
+      },
+    },
   });
   if (!snapshot) redirect(`/${locale}/finance/ledger`);
   const archivedAt = active ? null : new Date();
+  const touchedItems = new Set<string>([
+    ...snapshot.stockMovements.map((movement) => movement.inventoryItemId),
+    ...snapshot.costLayers.map((layer) => layer.inventoryItemId),
+    ...snapshot.ledgerLines.flatMap((line) =>
+      line.landedCostAllocations
+        .map((allocation) => allocation.inventoryItemId)
+        .filter((value): value is string => Boolean(value)),
+    ),
+  ]);
   await prisma.$transaction(async (tx) => {
+    const layerBaseCosts = await captureLayerBaseCosts(
+      tx,
+      snapshot.ledgerLines.flatMap((line) =>
+        line.landedCostAllocations
+          .map((allocation) => allocation.costLayerId)
+          .filter((value): value is string => Boolean(value)),
+      ),
+    );
     await tx.financeEntry.update({
       where: { id },
       data: {
@@ -1115,6 +1339,9 @@ export async function archiveFinanceEntry(id: string, locale: string, active: bo
       },
     });
     for (const asset of snapshot.fixedAssets) {
+      if (snapshot.ledgerLines.some((line) =>
+        line.fixedAssetCostAllocations.some((allocation) => allocation.fixedAssetId === asset.id)
+      )) continue;
       await tx.fixedAsset.update({
         where: { id: asset.id },
         data: {
@@ -1125,10 +1352,30 @@ export async function archiveFinanceEntry(id: string, locale: string, active: bo
         },
       });
     }
-  });
-  await audit(user.id, active ? 'RESTORE' : 'ARCHIVE', 'FinanceEntry', {
-    id,
-    before: jsonSafe(snapshot),
+    await syncAllocatedAssetTotals(
+      tx,
+      snapshot.ledgerLines.flatMap((line) =>
+        line.fixedAssetCostAllocations.map((allocation) => allocation.fixedAssetId)
+      ),
+      {
+        userId: user.id,
+        reason: active ? 'Restored with source finance record' : 'All source finance records archived',
+      },
+    );
+    const recalculatedItems = await syncLayerLandedCosts(tx, layerBaseCosts);
+    for (const itemId of recalculatedItems) touchedItems.add(itemId);
+    for (const itemId of touchedItems) await syncActiveCost(itemId, tx);
+    await tx.auditLog.create({
+      data: {
+        userId: user.id,
+        action: active ? 'RESTORE' : 'ARCHIVE',
+        entity: 'FinanceEntry',
+        entityId: id,
+        metadata: {
+          before: jsonSafe(snapshot),
+        },
+      },
+    });
   });
   revalidateFinancePaths();
   redirect(`/${locale}/finance/ledger/${id}`);
@@ -1142,21 +1389,52 @@ export async function permanentlyDeleteFinanceEntry(id: string, locale: string):
     const before = await entrySnapshot(tx, id);
     if (!before) return null;
     touchedItems.push(...before.stockMovements.map((m) => m.inventoryItemId));
-    await tx.fixedAsset.deleteMany({ where: { financeEntryId: id } });
+    touchedItems.push(...before.costLayers.map((layer) => layer.inventoryItemId));
+    touchedItems.push(...before.ledgerLines.flatMap((line) =>
+      line.landedCostAllocations
+        .map((allocation) => allocation.inventoryItemId)
+        .filter((value): value is string => Boolean(value)),
+    ));
+    const layerBaseCosts = await captureLayerBaseCosts(
+      tx,
+      before.ledgerLines.flatMap((line) =>
+        line.landedCostAllocations
+          .map((allocation) => allocation.costLayerId)
+          .filter((value): value is string => Boolean(value)),
+      ),
+    );
+    const allocatedAssetIds = before.ledgerLines.flatMap((line) =>
+      line.fixedAssetCostAllocations.map((allocation) => allocation.fixedAssetId)
+    );
+    await tx.auditLog.create({
+      data: {
+        userId: user.id,
+        action: 'DELETE',
+        entity: 'FinanceEntry',
+        entityId: id,
+        metadata: {
+          permanent: true,
+          before: jsonSafe(before),
+        },
+      },
+    });
+    await tx.fixedAsset.deleteMany({
+      where: { financeEntryId: id, costAllocations: { none: {} } },
+    });
     await tx.inventoryCostLayer.deleteMany({ where: { financeEntryId: id } });
     await tx.stockMovement.deleteMany({ where: { financeEntryId: id } });
     await tx.financeEntry.deleteMany({ where: { settlesId: id } });
     await tx.financeEntry.deleteMany({ where: { reversalOfId: id } });
     await tx.financeEntry.delete({ where: { id } });
+    await syncAllocatedAssetTotals(tx, allocatedAssetIds, {
+      userId: user.id,
+      reason: 'All source finance records deleted',
+    });
+    touchedItems.push(...await syncLayerLandedCosts(tx, layerBaseCosts));
+    for (const itemId of [...new Set(touchedItems)]) await syncActiveCost(itemId, tx);
     return before;
   });
   if (!snapshot) redirect(`/${locale}/finance/ledger`);
-  for (const itemId of [...new Set(touchedItems)]) await syncActiveCost(itemId);
-  await audit(user.id, 'DELETE', 'FinanceEntry', {
-    id,
-    permanent: true,
-    before: jsonSafe(snapshot),
-  });
   revalidateFinancePaths();
   redirect(`/${locale}/finance/ledger`);
 }

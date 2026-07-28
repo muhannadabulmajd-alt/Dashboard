@@ -2,9 +2,12 @@ import { getTranslations } from 'next-intl/server';
 import { AlertTriangle, CalendarClock, FileDown, LayoutDashboard, PackageX, TrendingDown } from 'lucide-react';
 import { serializeFilters } from '@/lib/filters';
 import { getPageContext } from '@/server/page-context';
-import { getOrders, getPrevOrders, getOrderLines, getCatalogForAlerts } from '@/server/db/repositories/sales.repo';
+import {
+  getPrevOrders,
+  getCatalogForAlerts,
+} from '@/server/db/repositories/sales.repo';
 import { getInventoryItems } from '@/server/db/repositories/inventory.repo';
-import { getExpenses, getPaymentProcessingCosts } from '@/server/db/repositories/finance.repo';
+import { getProfitFacts } from '@/server/finance/facts';
 import * as M from '@/lib/metrics';
 import type { AlertKind } from '@/lib/metrics';
 import { Link } from '@/i18n/navigation';
@@ -33,30 +36,33 @@ export default async function ExecutiveOverviewPage({
 
   const now = new Date();
   const mtdRange = resolveRange({ range: 'this_month' }, now);
-  const [orders, prevOrders, lines, items, expenses, paymentProcessingCosts, catalog, mtdOrders] = await Promise.all([
-    getOrders(filters, scope, range),
+  const [
+    profitFacts,
+    prevOrders,
+    items,
+    catalog,
+    mtdProfitFacts,
+  ] = await Promise.all([
+    getProfitFacts(filters, scope, range),
     getPrevOrders(filters, scope, range),
-    getOrderLines(filters, scope, range),
     getInventoryItems(filters, scope, range),
-    getExpenses(filters, scope, range),
-    getPaymentProcessingCosts(filters, scope, range),
     getCatalogForAlerts(),
-    getOrders(filters, scope, { start: mtdRange.start, end: mtdRange.end }),
+    getProfitFacts(filters, scope, { start: mtdRange.start, end: mtdRange.end }),
   ]);
 
   const showFinancial = can(user.role, 'view:financial');
+  const { orders, lines, pnl } = profitFacts;
 
   const net = M.netSales(orders);
   const prevNet = M.netSales(prevOrders);
   const orderCount = M.salesOrderCount(orders);
   const prevOrderCount = M.salesOrderCount(prevOrders);
   const units = M.unitsSold(lines);
-  const pnl = M.buildPnlSnapshot(orders, lines, expenses, { paymentProcessingCosts });
   const margin = { amount: pnl.grossProfit, pct: pnl.grossMarginPct };
   const aov = M.aov(net, orderCount);
   const operatingProfit = pnl.operatingProfit;
   const { dayOfMonth, daysInMonth } = monthProgress();
-  const runRate = M.runRate(M.netSales(mtdOrders), dayOfMonth, daysInMonth);
+  const runRate = M.runRate(mtdProfitFacts.pnl.netSales, dayOfMonth, daysInMonth);
 
   const trend = M.salesTimeSeries(orders, 'day').map((p) => ({ label: p.label.slice(5), value: p.netSales }));
   const byChannel = M.salesByDimension(orders, 'channel').map((b) => ({

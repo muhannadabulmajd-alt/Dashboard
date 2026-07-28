@@ -98,11 +98,14 @@ export function invoicePaymentSnapshot(
       entry.settlesId != null &&
       customerIdSet.has(entry.settlesId),
   );
+  const providerCustomerSettlements = customerSettlements.filter(
+    (entry) => entry.party?.collectsOrderPayments === true,
+  );
   const directPayments = active.filter(
     (entry) =>
       entry.orderId === order.id &&
       !entry.obligation &&
-      entry.type === 'INCOME' &&
+      (entry.type === 'INCOME' || entry.type === 'PAYMENT_IN') &&
       !entry.settlesId,
   );
   const providerDirectPayments = directPayments.filter(
@@ -112,12 +115,23 @@ export function invoicePaymentSnapshot(
     (entry) => entry.party?.collectsOrderPayments !== true,
   );
   const providerDirectTotal = providerDirectPayments.reduce((sum, entry) => sum + entry.amount, 0);
+  const providerCustomerSettlementTotal = providerCustomerSettlements.reduce(
+    (sum, entry) => sum + entry.amount,
+    0,
+  );
+  const customerSettlementTotal = customerSettlements
+    .filter((entry) => entry.party?.collectsOrderPayments !== true)
+    .reduce((sum, entry) => sum + entry.amount, 0);
   const providerCollected =
     providerReceivables.reduce((sum, entry) => sum + entry.amount, 0) +
-    providerDirectTotal;
-  const providerRemittedRaw = providerDirectTotal + providerSettlements
-    .filter((entry) => Boolean(entry.account))
-    .reduce((sum, entry) => sum + entry.amount, 0);
+    providerDirectTotal +
+    providerCustomerSettlementTotal;
+  const providerRemittedRaw =
+    providerDirectTotal +
+    providerCustomerSettlementTotal +
+    providerSettlements
+      .filter((entry) => Boolean(entry.account))
+      .reduce((sum, entry) => sum + entry.amount, 0);
   const providerFeesOffsetRaw = providerSettlements
     .filter((entry) => !entry.account)
     .reduce((sum, entry) => sum + entry.amount, 0);
@@ -130,7 +144,7 @@ export function invoicePaymentSnapshot(
     Math.max(0, providerCollected - providerRemitted),
     providerFeesOffsetRaw,
   );
-  const paidFromSettlements = customerSettlements.reduce((sum, entry) => sum + entry.amount, 0);
+  const paidFromSettlements = customerSettlementTotal;
   const paidDirectly = customerDirectPayments.reduce((sum, entry) => sum + entry.amount, 0);
   const paidRaw = paidDirectly + paidFromSettlements + providerCollected;
   const paid = Math.min(total, paidRaw);
@@ -142,6 +156,7 @@ export function invoicePaymentSnapshot(
   const latestPayment = paymentEvents.at(-1) ?? null;
   const provider =
     providerDirectPayments.find((entry) => entry.party?.name)?.party ??
+    providerCustomerSettlements.find((entry) => entry.party?.name)?.party ??
     providerReceivables.find((entry) => entry.party?.name)?.party ??
     null;
   const accountPayment = [...directPayments, ...customerSettlements]
@@ -154,7 +169,7 @@ export function invoicePaymentSnapshot(
     remaining,
     status: invoicePaymentStatus(order.status, total, paid, orderReceivables.length > 0),
     route:
-      providerCollected > 0
+      providerCollected > 0 || providerCustomerSettlements.length > 0
         ? 'PROVIDER'
         : paidDirectly + paidFromSettlements > 0
           ? 'DIRECT'

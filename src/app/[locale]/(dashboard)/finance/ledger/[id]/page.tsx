@@ -15,6 +15,7 @@ import { SectionGuide } from '@/components/records/SectionGuide';
 import { ReverseEntryForm } from '@/components/finance/ReverseEntryForm';
 import { reverseEntryWithReason } from '@/server/finance/entries';
 import { archiveFinanceEntry, permanentlyDeleteFinanceEntry } from '@/server/finance/central-records';
+import { reclassifyLedgerLine, splitLedgerLine } from '@/server/finance/classification';
 import { Link } from '@/i18n/navigation';
 import { DataTable } from '@/components/data-table/DataTable';
 
@@ -47,7 +48,16 @@ export default async function EntryDetailPage({
         },
       },
       ledgerLines: {
-        include: { inventoryItem: { select: { nameEn: true, nameAr: true, unit: true } } },
+        include: {
+          inventoryItem: { select: { nameEn: true, nameAr: true, unit: true } },
+          fixedAssetCostAllocations: {
+            include: { fixedAsset: true },
+            orderBy: { createdAt: 'asc' },
+          },
+          landedCostAllocations: {
+            select: { id: true, amount: true, inventoryItemId: true, costLayerId: true },
+          },
+        },
         orderBy: { lineNo: 'asc' },
       },
       stockMovements: {
@@ -62,11 +72,25 @@ export default async function EntryDetailPage({
     },
   });
   if (!e) notFound();
-  const [branch, createdBy, reversedBy, archivedBy] = await Promise.all([
+  const [branch, createdBy, reversedBy, archivedBy, activeAssets, inventoryItems] = await Promise.all([
     e.branchId ? prisma.branch.findUnique({ where: { id: e.branchId }, select: { nameEn: true, nameAr: true } }) : null,
     e.createdById ? prisma.user.findUnique({ where: { id: e.createdById }, select: { name: true, email: true } }) : null,
     e.reversedById ? prisma.user.findUnique({ where: { id: e.reversedById }, select: { name: true, email: true } }) : null,
     e.archivedById ? prisma.user.findUnique({ where: { id: e.archivedById }, select: { name: true, email: true } }) : null,
+    ownerAdmin
+      ? prisma.fixedAsset.findMany({
+          where: { isActive: true, archivedAt: null },
+          orderBy: { name: 'asc' },
+          select: { id: true, name: true, totalCost: true },
+        })
+      : [],
+    ownerAdmin
+      ? prisma.inventoryItem.findMany({
+          where: { isActive: true },
+          orderBy: [{ nameEn: 'asc' }, { nameAr: 'asc' }],
+          select: { id: true, nameEn: true, nameAr: true, unit: true },
+        })
+      : [],
   ]);
   const branchName = branch ? (locale === 'ar' ? branch.nameAr : branch.nameEn) : '—';
   const isReversed = Boolean(e.reversedAt);
@@ -78,6 +102,16 @@ export default async function EntryDetailPage({
   const canReverse = canEdit && !hasSettlements;
   const paidAmount = e.obligation ? e.settlements.reduce((sum, payment) => sum + payment.amount, 0) : e.amount;
   const paymentSnapshot = ledgerPaymentSnapshot(e.amount, paidAmount, { reversed: isReversed || isReversalMarker });
+  const linkedAssets = [
+    ...new Map(
+      [
+        ...e.fixedAssets,
+        ...e.ledgerLines.flatMap((line) =>
+          line.fixedAssetCostAllocations.map((allocation) => allocation.fixedAsset),
+        ),
+      ].map((asset) => [asset.id, asset]),
+    ).values(),
+  ];
 
   const items: DetailField[] = [
     { label: t('f.transactionId'), value: e.id },
@@ -192,16 +226,138 @@ export default async function EntryDetailPage({
               { label: t('f.category') },
               { label: t('f.quantity'), align: 'end' },
               { label: t('f.value'), align: 'end' },
+              { label: t('spendTreatment') },
+              { label: t('classificationStatus') },
               { label: t('f.description') },
+              ...(ownerAdmin ? [{ label: t('reclassify') }] : []),
             ]}
-            rows={e.ledgerLines.map((line) => [
-              line.lineNo,
-              line.inventoryItem ? (locale === 'ar' ? line.inventoryItem.nameAr : line.inventoryItem.nameEn) : line.itemName,
-              line.categoryType ? enumLabel(line.categoryType, locale) : line.itemType,
-              `${formatQuantity(line.quantity, locale)} ${line.unit}`,
-              formatMoney(line.lineTotal, 'IQD', locale),
-              line.notes ?? '—',
-            ])}
+            rows={e.ledgerLines.map((line) => {
+              const values = [
+                line.lineNo,
+                line.inventoryItem ? (locale === 'ar' ? line.inventoryItem.nameAr : line.inventoryItem.nameEn) : line.itemName,
+                line.categoryType ? enumLabel(line.categoryType, locale) : line.itemType,
+                `${formatQuantity(line.quantity, locale)} ${line.unit}`,
+                formatMoney(line.lineTotal, 'IQD', locale),
+                enumLabel(line.spendTreatment, locale),
+                <Badge
+                  key={`status-${line.id}`}
+                  variant={line.classificationStatus === 'CONFIRMED' ? 'success' : 'warning'}
+                >
+                  {line.classificationStatus === 'CONFIRMED'
+                    ? t('classificationConfirmed')
+                    : t('classificationNeedsReview')}
+                </Badge>,
+                line.classificationNote ?? line.notes ?? '—',
+              ];
+              if (ownerAdmin) {
+                values.push(
+                  <div key={`controls-${line.id}`} className="flex min-w-64 flex-col gap-2">
+                    <form
+                      action={reclassifyLedgerLine.bind(null, e.id, line.id)}
+                      className="flex flex-col gap-1.5"
+                    >
+                      <select
+                        name="spendTreatment"
+                        defaultValue={line.spendTreatment}
+                        className="min-h-9 rounded-lg border bg-background px-2 text-xs"
+                      >
+                        <option value="CAPEX">{t('capex')}</option>
+                        <option value="INVENTORY">{t('inventoryBought')}</option>
+                        <option value="OPEX">{t('opex')}</option>
+                        <option value="REVIEW">{t('classificationNeedsReview')}</option>
+                      </select>
+                      <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+                        {t('assetAllocationTarget')}
+                        <select
+                          name="fixedAssetId"
+                          defaultValue={line.fixedAssetCostAllocations[0]?.fixedAsset.id ?? ''}
+                          className="min-h-9 rounded-lg border bg-background px-2 text-xs text-roast"
+                        >
+                          <option value="">{t('createAssetAutomatically')}</option>
+                          {activeAssets.map((asset) => (
+                            <option key={asset.id} value={asset.id}>
+                              {asset.name} · {formatMoney(asset.totalCost, 'IQD', locale)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+                        {t('inventoryAllocationTarget')}
+                        <select
+                          name="inventoryItemId"
+                          defaultValue={
+                            line.landedCostAllocations[0]?.inventoryItemId ??
+                            line.inventoryItemId ??
+                            ''
+                          }
+                          className="min-h-9 rounded-lg border bg-background px-2 text-xs text-roast"
+                        >
+                          <option value="">{t('keepInventoryAllocationPending')}</option>
+                          {inventoryItems.map((item) => (
+                            <option key={item.id} value={item.id}>
+                              {locale === 'ar' ? item.nameAr : item.nameEn} · {item.unit}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <input
+                        name="classificationNote"
+                        required
+                        defaultValue={line.classificationNote ?? ''}
+                        placeholder={t('classificationReason')}
+                        className="min-h-9 rounded-lg border bg-background px-2 text-xs"
+                      />
+                      <button className="min-h-9 rounded-lg bg-primary px-2 text-xs font-semibold text-primary-foreground">
+                        {t('saveClassification')}
+                      </button>
+                    </form>
+                    {line.lineTotal > 1 &&
+                    !line.inventoryItemId &&
+                    !line.fixedAssetCostAllocations.length &&
+                    !line.landedCostAllocations.length ? (
+                      <details className="rounded-lg border border-border/75 bg-linen/20 p-2">
+                        <summary className="cursor-pointer text-xs font-semibold text-roast">
+                          {t('splitClassification')}
+                        </summary>
+                        <form
+                          action={splitLedgerLine.bind(null, e.id, line.id)}
+                          className="mt-2 flex flex-col gap-1.5"
+                        >
+                          <input
+                            name="splitAmount"
+                            type="number"
+                            min={1}
+                            max={line.lineTotal - 1}
+                            required
+                            placeholder={t('splitAmount')}
+                            className="min-h-9 rounded-lg border bg-background px-2 text-xs"
+                          />
+                          <select
+                            name="splitTreatment"
+                            defaultValue="CAPEX"
+                            className="min-h-9 rounded-lg border bg-background px-2 text-xs"
+                          >
+                            <option value="CAPEX">{t('capex')}</option>
+                            <option value="INVENTORY">{t('inventoryBought')}</option>
+                            <option value="OPEX">{t('opex')}</option>
+                          </select>
+                          <input
+                            name="splitNote"
+                            required
+                            placeholder={t('classificationReason')}
+                            className="min-h-9 rounded-lg border bg-background px-2 text-xs"
+                          />
+                          <button className="min-h-9 rounded-lg border border-primary/40 bg-card px-2 text-xs font-semibold text-primary">
+                            {t('splitAndSave')}
+                          </button>
+                        </form>
+                      </details>
+                    ) : null}
+                  </div>,
+                );
+              }
+              return values;
+            })}
             emptyLabel={tr('none')}
           />
         </div>
@@ -226,10 +382,10 @@ export default async function EntryDetailPage({
           />
         </div>
       ) : null}
-      {e.fixedAssets.length ? (
+      {linkedAssets.length ? (
         <div className="space-y-2">
           <h3 className="text-sm font-semibold">{t('linkedAsset')}</h3>
-          {e.fixedAssets.map((asset) => (
+          {linkedAssets.map((asset) => (
             <DetailGrid
               key={asset.id}
               items={[

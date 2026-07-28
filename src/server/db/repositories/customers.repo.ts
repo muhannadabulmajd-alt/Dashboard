@@ -8,7 +8,11 @@ type Scope = { branchId?: string };
 export async function getCustomers(scope: Scope): Promise<CustomerLike[]> {
   const roles = await getOrderStatusRoleMap();
   const saleStatuses = [...roles].filter(([, role]) => role === 'SALE').map(([code]) => code);
-  const orderWhere = { status: { in: saleStatuses }, ...(scope.branchId ? { branchId: scope.branchId } : {}) };
+  const orderWhere = {
+    status: { in: saleStatuses },
+    purpose: 'SALE' as const,
+    ...(scope.branchId ? { branchId: scope.branchId } : {}),
+  };
   const rows = await prisma.customer.findMany({
     where: scope.branchId ? { orders: { some: orderWhere } } : {},
     select: {

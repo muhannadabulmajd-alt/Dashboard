@@ -26,13 +26,20 @@ function at(date: Date, hour: number, minute = faker.number.int({ min: 0, max: 5
 async function clear() {
   // Delete in dependency order.
   await prisma.auditLog.deleteMany();
+  await prisma.paymentReconciliationItem.deleteMany();
+  await prisma.inventoryLandedCostAllocation.deleteMany();
+  await prisma.fixedAssetCostAllocation.deleteMany();
   await prisma.shipment.deleteMany();
   await prisma.orderLine.deleteMany();
   await prisma.order.deleteMany();
   await prisma.batchSkuLink.deleteMany();
   await prisma.roastBatch.deleteMany();
+  await prisma.fixedAsset.deleteMany();
   await prisma.stockMovement.deleteMany();
+  await prisma.inventoryCostLayer.deleteMany();
   await prisma.inventoryItem.deleteMany();
+  await prisma.financeEntry.deleteMany();
+  await prisma.providerSettlement.deleteMany();
   await prisma.expense.deleteMany();
   await prisma.expenseCategory.deleteMany();
   await prisma.offer.deleteMany();

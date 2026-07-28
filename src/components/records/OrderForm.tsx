@@ -335,7 +335,10 @@ function CustomerPicker({
           'flex min-h-10 w-full items-center justify-between gap-3 rounded-lg border bg-background px-3 py-2 text-start text-sm outline-none hover:border-primary',
           error && inputError,
         )}
-        aria-invalid={Boolean(error)}
+        aria-describedby={error ? 'customer-picker-error' : undefined}
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        data-invalid={error ? 'true' : undefined}
         data-customer-picker-trigger
       >
         <span className={cn('min-w-0 flex-1 break-words', !selected && 'text-muted-foreground')}>
@@ -343,7 +346,7 @@ function CustomerPicker({
         </span>
         <Search className="size-4 shrink-0 text-muted-foreground" />
       </button>
-      {error ? <p className="text-xs font-medium text-danger">{error}</p> : null}
+      {error ? <p id="customer-picker-error" className="text-xs font-medium text-danger">{error}</p> : null}
       {selected ? (
         <button type="button" onClick={() => onSelect('')} className="text-xs font-medium text-muted-foreground hover:text-primary">
           {labels.clearCustomer ?? labels.cancel}

@@ -5,9 +5,9 @@ import { monthProgress, resolveRange } from '@/lib/dates';
 import { formatMoney, formatNumber, formatPercent } from '@/lib/money';
 import { can } from '@/lib/rbac';
 import type { CurrentUser } from '@/server/auth/session';
-import { getOrders, getPrevOrders, getOrderLines } from '@/server/db/repositories/sales.repo';
+import { getPrevOrders } from '@/server/db/repositories/sales.repo';
 import { getInventoryItems } from '@/server/db/repositories/inventory.repo';
-import { getExpenses, getPaymentProcessingCosts } from '@/server/db/repositories/finance.repo';
+import { getProfitFacts } from '@/server/finance/facts';
 import { getShipments } from '@/server/db/repositories/fulfillment.repo';
 import { getCustomers } from '@/server/db/repositories/customers.repo';
 import * as M from '@/lib/metrics';
@@ -53,23 +53,27 @@ export async function buildDeckData(
 
   const now = new Date();
   const mtdRange = resolveRange({ range: 'this_month' }, now);
-  const [orders, prevOrders, lines, items, expenses, paymentProcessingCosts, shipments, customers, mtdOrders] = await Promise.all([
-    getOrders(filters, scope, range),
+  const [
+    profitFacts,
+    prevOrders,
+    items,
+    shipments,
+    customers,
+    mtdProfitFacts,
+  ] = await Promise.all([
+    getProfitFacts(filters, scope, range),
     getPrevOrders(filters, scope, range),
-    getOrderLines(filters, scope, range),
     getInventoryItems(filters, scope, range),
-    showFinancial ? getExpenses(filters, scope, range) : Promise.resolve([]),
-    showFinancial ? getPaymentProcessingCosts(filters, scope, range) : Promise.resolve(0),
     getShipments(filters, scope, range),
     getCustomers(scope),
-    getOrders(filters, scope, { start: mtdRange.start, end: mtdRange.end }),
+    getProfitFacts(filters, scope, { start: mtdRange.start, end: mtdRange.end }),
   ]);
 
+  const { orders, lines, pnl } = profitFacts;
   const net = M.netSales(orders);
   const prevNet = M.netSales(prevOrders);
   const orderCount = M.salesOrderCount(orders);
   const units = M.unitsSold(lines);
-  const pnl = M.buildPnlSnapshot(orders, lines, expenses, { paymentProcessingCosts });
   const cogs = pnl.cogs;
   const margin = { amount: pnl.grossProfit, pct: pnl.grossMarginPct };
   const opex = pnl.operatingExpenses;
@@ -91,7 +95,7 @@ export async function buildDeckData(
     executive.push(
       { label: 'Gross margin', value: formatPercent(margin.pct, L) },
       { label: 'Operating profit', value: formatMoney(profit, 'IQD', L) },
-      { label: 'Projected month sales', value: formatMoney(M.runRate(M.netSales(mtdOrders), dayOfMonth, daysInMonth), 'IQD', L) },
+      { label: 'Projected month sales', value: formatMoney(M.runRate(mtdProfitFacts.pnl.netSales, dayOfMonth, daysInMonth), 'IQD', L) },
     );
   }
 

@@ -31,7 +31,11 @@ export default async function EditEntryPage({
         settlements: { where: { archivedAt: null, reversedAt: null, reversalOfId: null }, orderBy: { date: 'asc' } },
       },
     }),
-    prisma.financeAccount.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true } }),
+    prisma.financeAccount.findMany({
+      where: { isActive: true, type: { not: 'PAYMENT_GATEWAY' } },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true },
+    }),
     prisma.party.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true } }),
     prisma.branch.findMany({ where: { isActive: true }, orderBy: { nameEn: 'asc' }, select: { id: true, nameEn: true, nameAr: true } }),
   ]);

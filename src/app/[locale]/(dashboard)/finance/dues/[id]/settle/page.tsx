@@ -31,7 +31,7 @@ export default async function SettlePage({
   const outstanding = Math.max(0, ob.amount - paid);
   const [accounts, paymentMethods] = await Promise.all([
     prisma.financeAccount.findMany({
-      where: { isActive: true, currency: ob.currency },
+      where: { isActive: true, currency: ob.currency, type: { not: 'PAYMENT_GATEWAY' } },
       orderBy: { name: 'asc' },
       select: { id: true, name: true },
     }),

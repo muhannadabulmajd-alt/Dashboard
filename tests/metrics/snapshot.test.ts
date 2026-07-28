@@ -17,6 +17,7 @@ describe('canonical metric snapshots', () => {
       grossMarginPct: 450_000 / 850_000,
       directDeliveryCost: 25_000,
       paymentProcessingCosts: 12_000,
+      promotionCosts: 0,
       contributionProfit: 413_000,
       operatingExpenses: 75_000,
       operatingProfit: 338_000,

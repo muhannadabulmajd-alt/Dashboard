@@ -27,6 +27,7 @@ export interface OrderLike {
   placedAt: Date;
   status: OrderStatus;
   metricRole?: 'OPEN' | 'SALE' | 'RETURN' | 'CANCELED' | 'UNKNOWN';
+  purpose?: 'SALE' | 'PROMOTION' | 'INTERNAL' | 'SAMPLE';
   channel: Channel;
   governorate: Governorate;
   customerId: string | null;
@@ -35,6 +36,7 @@ export interface OrderLike {
   discountAmount: number;
   refundAmount: number;
   deliveryFee: number;
+  extraCharges?: number;
   deliveryCost: number;
 }
 

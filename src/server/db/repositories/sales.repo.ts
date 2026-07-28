@@ -16,6 +16,7 @@ const orderSelect = {
   offerId: true,
   placedAt: true,
   status: true,
+  purpose: true,
   channel: true,
   governorate: true,
   customerId: true,
@@ -24,6 +25,7 @@ const orderSelect = {
   discountAmount: true,
   refundAmount: true,
   deliveryFee: true,
+  extraCharges: true,
   deliveryCost: true,
 } as const;
 type SelectedLine = Prisma.OrderLineGetPayload<{ select: typeof lineSelect }>;
@@ -44,6 +46,7 @@ const lineSelect = {
       offerId: true,
       placedAt: true,
       status: true,
+      purpose: true,
       channel: true,
       governorate: true,
       customerId: true,
@@ -52,6 +55,7 @@ const lineSelect = {
       discountAmount: true,
       refundAmount: true,
       deliveryFee: true,
+      extraCharges: true,
       deliveryCost: true,
       lines: { select: { id: true, lineNet: true }, orderBy: { id: 'asc' as const } },
     },
@@ -93,7 +97,11 @@ function allocatedNet(row: SelectedLine): number {
 async function loadOrderLines(filters: DashboardFilters, scope: Scope, range: ResolvedRange) {
   const roles = await getOrderStatusRoleMap();
   const saleStatuses = [...roles].filter(([, role]) => role === 'SALE').map(([code]) => code);
-  return prisma.orderLine.findMany({ where: buildOrderLineWhere(filters, scope, range, saleStatuses), select: lineSelect });
+  const rows = await prisma.orderLine.findMany({
+    where: buildOrderLineWhere(filters, scope, range, saleStatuses),
+    select: lineSelect,
+  });
+  return rows.filter((row) => row.order.purpose === 'SALE');
 }
 
 export async function getOrders(
@@ -119,6 +127,8 @@ export async function getOrders(
         grossAmount: line.unitGrossPrice * line.quantity,
         discountAmount: line.unitGrossPrice * line.quantity - allocated,
         refundAmount: 0,
+        deliveryFee: 0,
+        extraCharges: 0,
       });
     }
     return [...byOrder.values()];
@@ -157,6 +167,26 @@ export async function getOrderLines(
     unitCogsSnapshot: row.unitCogsSnapshot,
     product: row.product,
   }));
+}
+
+export async function getPromotionCosts(
+  filters: DashboardFilters,
+  scope: Scope,
+  range: ResolvedRange,
+): Promise<number> {
+  const roles = await getOrderStatusRoleMap();
+  const saleStatuses = [...roles].filter(([, role]) => role === 'SALE').map(([code]) => code);
+  const rows = await prisma.orderLine.findMany({
+    where: buildOrderLineWhere(filters, scope, range, saleStatuses),
+    select: {
+      quantity: true,
+      unitCogsSnapshot: true,
+      order: { select: { purpose: true } },
+    },
+  });
+  return rows
+    .filter((row) => row.order.purpose === 'PROMOTION')
+    .reduce((sum, row) => sum + row.quantity * row.unitCogsSnapshot, 0);
 }
 
 export async function getActiveCatalog(): Promise<

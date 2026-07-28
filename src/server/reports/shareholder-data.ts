@@ -5,6 +5,10 @@ import { accountBalance, financeTotals, netCash, unassignedCash, type FinanceEnt
 import { stockRow } from '@/lib/metrics/inventory';
 import { allocateInteger } from '@/lib/metrics/sales';
 import { orderStatusRole } from '@/lib/metrics/status';
+import {
+  spendTreatmentForItemType,
+  type CanonicalSpendTreatment,
+} from '@/lib/spend-treatment';
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
@@ -125,6 +129,13 @@ function stableHash(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
+function reportSpendTreatment(line: {
+  spendTreatment?: CanonicalSpendTreatment;
+  itemType: string;
+}): CanonicalSpendTreatment {
+  return line.spendTreatment ?? spendTreatmentForItemType(line.itemType);
+}
+
 export async function buildShareholderReportData(
   options: { asOf?: Date; db: DbClient },
 ): Promise<ShareholderReportData> {
@@ -153,6 +164,9 @@ export async function buildShareholderReportData(
             assetKey: true,
             categoryType: true,
             inventoryItemId: true,
+            spendTreatment: true,
+            classificationStatus: true,
+            classificationNote: true,
             quantity: true,
             unit: true,
             unitCost: true,
@@ -160,6 +174,14 @@ export async function buildShareholderReportData(
             discountAmount: true,
             extraAmount: true,
             lineTotal: true,
+            fixedAssetCostAllocations: {
+              where: { financeEntry: activeEntryWhere(asOf) },
+              select: { id: true, amount: true, fixedAssetId: true },
+            },
+            landedCostAllocations: {
+              where: { financeEntry: activeEntryWhere(asOf) },
+              select: { id: true, amount: true, inventoryItemId: true, costLayerId: true },
+            },
           },
         },
         stockMovements: { select: { id: true, inventoryItemId: true, quantity: true } },
@@ -202,11 +224,32 @@ export async function buildShareholderReportData(
         OR: [{ financeEntryId: null }, { financeEntry: activeEntryWhere(asOf) }],
       },
       orderBy: { purchaseDate: 'asc' },
-      select: { name: true, category: true, quantity: true, unit: true, totalCost: true, importKey: true, financeEntryId: true },
+      select: {
+        id: true,
+        name: true,
+        category: true,
+        quantity: true,
+        unit: true,
+        totalCost: true,
+        importKey: true,
+        financeEntryId: true,
+        costAllocations: {
+          where: { financeEntry: activeEntryWhere(asOf) },
+          select: { amount: true },
+        },
+      },
     }),
     db.order.findMany({
       where: { placedAt: { lte: asOf } },
-      select: { status: true, grossAmount: true },
+      select: {
+        status: true,
+        purpose: true,
+        grossAmount: true,
+        discountAmount: true,
+        refundAmount: true,
+        deliveryFee: true,
+        extraCharges: true,
+      },
     }),
     db.branch.findMany({ select: { id: true, nameEn: true, nameAr: true } }),
     db.listOption.findMany({
@@ -241,7 +284,6 @@ export async function buildShareholderReportData(
   const allocationMismatchIds: string[] = [];
   const inventoryLinkMismatchIds: string[] = [];
   const assetMismatchIds: string[] = [];
-  const assetLineTotals = new Map<string, number>();
   const untracedIds: string[] = [];
   const duplicateRecordKeys: string[] = [];
   const seenKeys = new Set<string>();
@@ -271,6 +313,9 @@ export async function buildShareholderReportData(
           assetKey: null,
           categoryType: entry.categoryType,
           inventoryItemId: null,
+          spendTreatment: 'OPEX' as const,
+          classificationStatus: 'CONFIRMED' as const,
+          classificationNote: null,
           quantity: 1,
           unit: 'unit',
           unitCost: entry.amount,
@@ -278,6 +323,8 @@ export async function buildShareholderReportData(
           discountAmount: 0,
           extraAmount: 0,
           lineTotal: entry.amount,
+          fixedAssetCostAllocations: [],
+          landedCostAllocations: [],
         }];
     const lineWeights = reportLines.map((line) => line.lineTotal);
     const paidByLine = allocateInteger(paidAmount, lineWeights);
@@ -293,6 +340,7 @@ export async function buildShareholderReportData(
     if (lineTotal !== entry.amount) parentMismatchIds.push(entry.id);
     let allocated = 0;
     for (const [lineIndex, line] of reportLines.entries()) {
+      const spendTreatment = reportSpendTreatment(line);
       const quantity = decimalNumber(line.quantity);
       const unitCost = decimalNumber(line.unitCost);
       const landedUnitCost = decimalNumber(line.landedUnitCost);
@@ -301,24 +349,42 @@ export async function buildShareholderReportData(
         lineMathMismatchIds.push(line.id);
       }
       allocated += line.lineTotal;
-      if (line.itemType === 'INVENTORY') inventoryPurchases += line.lineTotal;
-      else if (line.itemType === 'ASSET') {
+      if (spendTreatment === 'INVENTORY') {
+        inventoryPurchases += line.lineTotal;
+      } else if (spendTreatment === 'CAPEX') {
         fixedAssetPurchases += line.lineTotal;
-        const key = line.assetKey ? `ASSET:HISTORICAL_SPEND:${line.assetKey}` : `ENTRY:${entry.id}`;
-        assetLineTotals.set(key, (assetLineTotals.get(key) ?? 0) + line.lineTotal);
+        if (
+          line.fixedAssetCostAllocations
+          && sum(line.fixedAssetCostAllocations.map((allocation) => allocation.amount)) !== line.lineTotal
+        ) {
+          assetMismatchIds.push(line.id);
+        }
+      } else {
+        operatingSpending += line.lineTotal;
       }
-      else operatingSpending += line.lineTotal;
-      const category = line.itemType === 'ASSET'
+      const category = spendTreatment === 'CAPEX'
         ? 'FIXED_ASSET'
-        : line.itemType === 'INVENTORY'
+        : spendTreatment === 'INVENTORY'
           ? line.categoryType ?? 'INVENTORY'
-          : line.categoryType ?? line.itemType;
+          : line.classificationStatus === 'NEEDS_REVIEW'
+            ? `REVIEW:${line.categoryType ?? line.itemType}`
+            : line.categoryType ?? line.itemType;
       categoryTotals.set(category, (categoryTotals.get(category) ?? 0) + line.lineTotal);
 
-      if (line.itemType === 'INVENTORY') {
+      if (spendTreatment === 'INVENTORY') {
         const movement = entry.stockMovements.find((row) => row.inventoryItemId === line.inventoryItemId);
         const layer = entry.costLayers.find((row) => row.inventoryItemId === line.inventoryItemId);
-        if (!line.inventoryItemId || !movement || !layer || decimalNumber(movement.quantity) !== quantity || decimalNumber(layer.qtyReceived) !== quantity || Math.abs(decimalNumber(layer.unitCost) - landedUnitCost) > 0.001) {
+        const isLandedCost = sum(
+          (line.landedCostAllocations ?? []).map((allocation) => allocation.amount),
+        ) === line.lineTotal;
+        if (!isLandedCost && (
+          !line.inventoryItemId
+          || !movement
+          || !layer
+          || decimalNumber(movement.quantity) !== quantity
+          || decimalNumber(layer.qtyReceived) !== quantity
+          || Math.abs(decimalNumber(layer.unitCost) - landedUnitCost) > 0.001
+        )) {
           inventoryLinkMismatchIds.push(line.id);
         }
       }
@@ -349,14 +415,13 @@ export async function buildShareholderReportData(
     }
     if (allocated !== entry.amount) allocationMismatchIds.push(entry.id);
   }
-
-  const assetRegisterTotals = new Map<string, number>();
   for (const asset of fixedAssets) {
-    const key = asset.importKey ?? (asset.financeEntryId ? `ENTRY:${asset.financeEntryId}` : `UNLINKED:${asset.name}`);
-    assetRegisterTotals.set(key, (assetRegisterTotals.get(key) ?? 0) + asset.totalCost);
-  }
-  for (const [key, amount] of assetLineTotals) {
-    if ((assetRegisterTotals.get(key) ?? 0) !== amount) assetMismatchIds.push(key);
+    if (
+      asset.costAllocations
+      && sum(asset.costAllocations.map((allocation) => allocation.amount)) !== asset.totalCost
+    ) {
+      assetMismatchIds.push(asset.id);
+    }
   }
 
   const inventory = inventoryRows.map((item) => {
@@ -420,7 +485,10 @@ export async function buildShareholderReportData(
   const tracedRecords = spendingEntries.length - untracedIds.length;
 
   const statusRoles = new Map(orderStatusOptions.map((option) => [option.code, option.metricRole]));
-  const salesOrders = orders.filter((order) => (statusRoles.get(order.status) ?? orderStatusRole(order.status)) === 'SALE');
+  const salesOrders = orders.filter((order) => (
+    order.purpose === 'SALE'
+    && (statusRoles.get(order.status) ?? orderStatusRole(order.status)) === 'SALE'
+  ));
   const baseline = {
     capitalReceived,
     totalSpending,
@@ -434,7 +502,14 @@ export async function buildShareholderReportData(
     fixedAssetValue,
     operatingSpending,
     salesOrders: salesOrders.length,
-    grossSales: sum(salesOrders.map((order) => order.grossAmount)),
+    grossSales: sum(salesOrders.map((order) => Math.max(
+      0,
+      order.grossAmount -
+        order.discountAmount -
+        order.refundAmount +
+        order.deliveryFee +
+        order.extraCharges,
+    ))),
     spendingRecords: spendingEntries.length,
     tracedRecords,
     attachedRecords,
