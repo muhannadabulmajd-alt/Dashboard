@@ -34,7 +34,6 @@ async function clear() {
   await prisma.order.deleteMany();
   await prisma.batchSkuLink.deleteMany();
   await prisma.roastBatch.deleteMany();
-  await prisma.ledgerEntryLine.deleteMany();
   await prisma.fixedAsset.deleteMany();
   await prisma.stockMovement.deleteMany();
   await prisma.inventoryCostLayer.deleteMany();
