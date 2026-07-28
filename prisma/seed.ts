@@ -455,7 +455,7 @@ async function seedOrders(
   });
   const completedPayments: Prisma.FinanceEntryCreateManyInput[] = orders
     .filter((order) => order.status === 'COMPLETED')
-    .map((order) => ({
+    .map((order): Prisma.FinanceEntryCreateManyInput => ({
       date: order.placedAt,
       type: 'INCOME',
       amount: Math.max(
