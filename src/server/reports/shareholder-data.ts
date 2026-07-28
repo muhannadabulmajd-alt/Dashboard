@@ -396,7 +396,7 @@ export async function buildShareholderReportData(
         supplier: entry.party?.name ?? '',
         description: entry.description ?? '',
         lineNo: line.lineNo,
-        itemType: spendTreatment,
+        itemType: line.itemType,
         itemName: line.itemName,
         category,
         quantity,
