@@ -37,12 +37,15 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+      - run: git diff --check HEAD^ HEAD
       - run: pnpm install --frozen-lockfile
+      - run: pnpm exec prisma format --check
       - run: pnpm exec prisma validate
       - run: pnpm exec prisma generate
       - run: pnpm lint
       - run: pnpm typecheck
-      - run: pnpm exec vitest run tests/barcode.test.ts tests/invoice.test.ts tests/provider-settlement.test.ts
+      - run: pnpm check:translations
+      - run: pnpm exec vitest run tests/barcode.test.ts tests/invoice.test.ts tests/provider-fees.test.ts tests/provider-settlement.test.ts tests/spend-treatment.test.ts
       - run: pnpm test
       - run: pnpm exec prisma migrate deploy
       - run: pnpm db:seed

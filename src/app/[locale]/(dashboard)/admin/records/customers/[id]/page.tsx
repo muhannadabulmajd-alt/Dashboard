@@ -31,7 +31,7 @@ export default async function CustomerDetailPage({
       where: { id },
       include: {
         orders: {
-          where: { status: { in: saleStatuses } },
+          where: { status: { in: saleStatuses }, purpose: 'SALE' },
           orderBy: { placedAt: 'desc' },
           take: 12,
           include: { lines: { include: { product: { select: { nameEn: true, nameAr: true } } } } },
@@ -39,8 +39,14 @@ export default async function CustomerDetailPage({
       },
     }),
     prisma.order.findMany({
-      where: { customerId: id, status: { in: saleStatuses } },
-      select: { grossAmount: true, discountAmount: true, refundAmount: true },
+      where: { customerId: id, status: { in: saleStatuses }, purpose: 'SALE' },
+      select: {
+        grossAmount: true,
+        discountAmount: true,
+        refundAmount: true,
+        deliveryFee: true,
+        extraCharges: true,
+      },
     }),
   ]);
   if (!c) notFound();
@@ -61,8 +67,16 @@ export default async function CustomerDetailPage({
     { label: t('f.lastOrder'), value: c.lastOrderAt ? formatDate(c.lastOrderAt, locale) : '—' },
     { label: t('f.notes'), value: c.notes },
   ];
-  const netForOrder = (order: (typeof c.orders)[number]) => order.grossAmount - order.discountAmount - order.refundAmount;
-  const totalSpend = spendOrders.reduce((sum, order) => sum + order.grossAmount - order.discountAmount - order.refundAmount, 0);
+  const netForOrder = (order: (typeof c.orders)[number]) =>
+    Math.max(
+      0,
+      order.grossAmount -
+        order.discountAmount -
+        order.refundAmount +
+        order.deliveryFee +
+        order.extraCharges,
+    );
+  const totalSpend = spendOrders.reduce((sum, order) => sum + netForOrder(order), 0);
   const productCounts = new Map<string, number>();
   for (const order of c.orders) {
     for (const line of order.lines) {

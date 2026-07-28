@@ -115,7 +115,11 @@ export default async function LedgerPage({
         ledgerLines: { select: { id: true } },
       },
     }),
-    prisma.financeAccount.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true, currency: true } }),
+    prisma.financeAccount.findMany({
+      where: { isActive: true, type: { not: 'PAYMENT_GATEWAY' } },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true, currency: true },
+    }),
     prisma.party.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true } }),
     prisma.branch.findMany({ where: { isActive: true }, orderBy: { nameEn: 'asc' }, select: { id: true, nameEn: true, nameAr: true } }),
     prisma.user.findMany({ select: { id: true, name: true, email: true } }),

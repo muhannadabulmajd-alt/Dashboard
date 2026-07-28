@@ -19,7 +19,7 @@ export default async function ProviderSettlementPage({
   const tr = await getTranslations('records');
   const [accounts, paymentMethods] = await Promise.all([
     prisma.financeAccount.findMany({
-      where: { isActive: true, currency: 'IQD' },
+      where: { isActive: true, currency: 'IQD', type: { not: 'PAYMENT_GATEWAY' } },
       orderBy: { name: 'asc' },
       select: { id: true, name: true },
     }),

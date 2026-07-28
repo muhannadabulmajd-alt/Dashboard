@@ -175,19 +175,10 @@ async function resolveAutomaticOrderFinance(input: {
   fulfillmentMethod: (typeof FULFILLMENT_METHODS)[number];
   statusRole: string;
 }, client: typeof prisma | Prisma.TransactionClient = prisma) {
-  if (input.statusRole !== 'SALE') {
-    return {
-      mode: 'NONE' as FinanceSyncMode,
-      accountId: null,
-      providerId: null,
-      paymentMethod: null,
-    };
-  }
-
   const providerKey =
     input.channel === 'ONLINE_STORE'
       ? 'WAYL'
-      : input.fulfillmentMethod === 'COURIER'
+      : input.statusRole === 'SALE' && input.fulfillmentMethod === 'COURIER'
         ? 'HI_EXPRESS'
         : null;
   if (providerKey) {
@@ -197,14 +188,12 @@ async function resolveAutomaticOrderFinance(input: {
         id: true,
         isActive: true,
         collectsOrderPayments: true,
-        automaticOrderSettlement: true,
         defaultSettlementAccountId: true,
       },
     });
     if (
       !provider?.isActive ||
       !provider.collectsOrderPayments ||
-      !provider.automaticOrderSettlement ||
       !provider.defaultSettlementAccountId
     ) {
       throw new Error('provider_configuration');
@@ -214,6 +203,14 @@ async function resolveAutomaticOrderFinance(input: {
       accountId: provider.defaultSettlementAccountId,
       providerId: provider.id,
       paymentMethod: providerKey === 'WAYL' ? 'ONLINE_PAYMENT' : 'COURIER_COLLECTION',
+    };
+  }
+  if (input.statusRole !== 'SALE') {
+    return {
+      mode: 'NONE' as FinanceSyncMode,
+      accountId: null,
+      providerId: null,
+      paymentMethod: null,
     };
   }
 
@@ -487,13 +484,13 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
     },
   });
   const paymentBefore = invoicePaymentSnapshot(existing, existingFinanceEntries);
-  const automaticProviderId = paymentBefore.providerPartyId
+  const managedProviderId = paymentBefore.providerPartyId
     ? (
         await prisma.party.findFirst({
           where: {
             id: paymentBefore.providerPartyId,
-            automaticOrderSettlement: true,
             isActive: true,
+            collectsOrderPayments: true,
           },
           select: { id: true },
         })
@@ -643,10 +640,10 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
           partyId: provider?.id ?? null,
           statusRole,
         });
-      } else if (automaticProviderId && (statusRole === 'OPEN' || statusRole === 'SALE')) {
+      } else if (managedProviderId && (statusRole === 'OPEN' || statusRole === 'SALE')) {
         await syncOrderFinance(tx, id, {
           mode: 'PROVIDER',
-          partyId: automaticProviderId,
+          partyId: managedProviderId,
           dueDate: h.data.financeDueDate,
           paymentMethod: paymentBefore.paymentMethod,
           createdById: user.id,

@@ -2,15 +2,24 @@ import 'server-only';
 import { prisma } from '@/server/db/client';
 import { monthBucketKey } from '@/lib/dates';
 import { convertToIqd } from '@/lib/money';
-import { buildExpenseWhere, buildOrderLineWhere } from '@/server/filters/where-builder';
+import { buildOrderLineWhere } from '@/server/filters/where-builder';
 import { getOrderStatusRoleMap } from '@/server/lists/resolver';
 import { getUsdToIqd } from '@/server/settings';
 import type { DashboardFilters } from '@/lib/filters';
 import type { ResolvedRange } from '@/lib/dates';
-import type { Currency } from '@prisma/client';
 
-export type SpendBucket = 'all' | 'capex' | 'inventory' | 'opex' | 'direct' | 'cogs';
-type ClassifiedSpendBucket = Exclude<SpendBucket, 'all'>;
+export type SpendBucket =
+  | 'all'
+  | 'capex'
+  | 'inventory'
+  | 'operating'
+  | 'overhead'
+  | 'opex'
+  | 'review'
+  | 'direct'
+  | 'cogs'
+  | 'promotion';
+type ClassifiedSpendBucket = Exclude<SpendBucket, 'all' | 'operating' | 'overhead'>;
 
 export interface SpendRow {
   id: string;
@@ -33,6 +42,17 @@ export interface SpendFilters {
 }
 
 type Scope = { branchId?: string };
+
+export interface SpendFacts {
+  capex: number;
+  inventory: number;
+  opex: number;
+  review: number;
+  operating: number;
+  direct: number;
+  cogs: number;
+  totalSpent: number;
+}
 
 function branchWhere(filters: DashboardFilters, scope: Scope) {
   return scope.branchId
@@ -62,7 +82,16 @@ export async function getSpendRows(
 ): Promise<SpendRow[]> {
   if (bucket === 'all') {
     const groups = await Promise.all(
-      (['capex', 'inventory', 'opex', 'direct'] as const).map((group) =>
+      (['capex', 'inventory', 'operating'] as const).map((group) =>
+        getSpendRows(group, filters, scope, range, rowFilters),
+      ),
+    );
+    return groups.flat().sort((a, b) => b.date.getTime() - a.date.getTime());
+  }
+
+  if (bucket === 'operating') {
+    const groups = await Promise.all(
+      (['opex', 'review'] as const).map((group) =>
         getSpendRows(group, filters, scope, range, rowFilters),
       ),
     );
@@ -72,7 +101,7 @@ export async function getSpendRows(
   const rate = await getUsdToIqd();
   const branch = branchWhere(filters, scope);
 
-  if (bucket === 'cogs') {
+  if (bucket === 'cogs' || bucket === 'promotion') {
     const roles = await getOrderStatusRoleMap();
     const saleStatuses = [...roles].filter(([, role]) => role === 'SALE').map(([code]) => code);
     const lines = await prisma.orderLine.findMany({
@@ -83,11 +112,21 @@ export async function getSpendRows(
         quantity: true,
         unitCogsSnapshot: true,
         product: { select: { nameEn: true, nameAr: true, sku: true } },
-        order: { select: { id: true, orderNumber: true, placedAt: true, customer: { select: { nameEn: true, nameAr: true } } } },
+        order: {
+          select: {
+            id: true,
+            orderNumber: true,
+            placedAt: true,
+            purpose: true,
+            customer: { select: { nameEn: true, nameAr: true } },
+          },
+        },
       },
       orderBy: { order: { placedAt: 'desc' } },
     });
+    const purpose = bucket === 'promotion' ? 'PROMOTION' : 'SALE';
     return lines
+      .filter((line) => line.order.purpose === purpose)
       .map((line): SpendRow => {
         const date = line.order.placedAt;
         const label = line.product.nameEn || line.product.nameAr || line.sku;
@@ -96,7 +135,10 @@ export async function getSpendRows(
           bucket,
           date,
           month: monthBucketKey(date),
-          description: `${label} x ${line.quantity}`,
+          description:
+            bucket === 'promotion'
+              ? `${label} x ${line.quantity} · promotion`
+              : `${label} x ${line.quantity}`,
           category: line.sku,
           party: line.order.customer?.nameEn || line.order.customer?.nameAr || null,
           reference: line.order.orderNumber,
@@ -134,6 +176,8 @@ export async function getSpendRows(
           categoryType: true,
           lineTotal: true,
           notes: true,
+          spendTreatment: true,
+          classificationStatus: true,
         },
         orderBy: { lineNo: 'asc' },
       },
@@ -147,16 +191,24 @@ export async function getSpendRows(
   for (const entry of financeRows) {
     if (entry.ledgerLines.length) {
       for (const line of entry.ledgerLines) {
-        const itemType = line.itemType.toUpperCase();
-        const rowBucket: ClassifiedSpendBucket =
-          itemType === 'ASSET'
+        const treatmentBucket: ClassifiedSpendBucket =
+          line.spendTreatment === 'CAPEX'
             ? 'capex'
-            : itemType === 'INVENTORY'
+            : line.spendTreatment === 'INVENTORY'
               ? 'inventory'
-              : entry.costRole === 'DIRECT_DELIVERY' || entry.costRole === 'PAYMENT_PROCESSING'
-                ? 'direct'
+              : line.spendTreatment === 'REVIEW'
+                ? 'review'
                 : 'opex';
-        if (rowBucket !== bucket) continue;
+        const isDirect =
+          entry.costRole === 'DIRECT_DELIVERY' || entry.costRole === 'PAYMENT_PROCESSING';
+        const matchesBucket =
+          bucket === 'direct'
+            ? isDirect
+            : bucket === 'overhead'
+              ? !isDirect && (treatmentBucket === 'opex' || treatmentBucket === 'review')
+              : treatmentBucket === bucket;
+        if (!matchesBucket) continue;
+        const rowBucket = bucket === 'direct' ? 'direct' : treatmentBucket;
         rows.push({
           id: line.id,
           bucket: rowBucket,
@@ -173,26 +225,33 @@ export async function getSpendRows(
       continue;
     }
 
-    const unlinedBucket: ClassifiedSpendBucket =
+    const unlinedTreatment: ClassifiedSpendBucket =
       entry.fixedAssets.length
         ? 'capex'
         : entry.costLayers.length
           ? 'inventory'
-          : entry.costRole === 'DIRECT_DELIVERY' || entry.costRole === 'PAYMENT_PROCESSING'
-            ? 'direct'
-            : 'opex';
-    if (bucket === unlinedBucket) {
+          : 'review';
+    const unlinedDirect =
+      entry.costRole === 'DIRECT_DELIVERY' || entry.costRole === 'PAYMENT_PROCESSING';
+    const matchesBucket =
+      bucket === 'direct'
+        ? unlinedDirect
+        : bucket === 'overhead'
+          ? !unlinedDirect && unlinedTreatment === 'review'
+          : bucket === unlinedTreatment;
+    if (matchesBucket) {
+      const rowBucket = bucket === 'direct' ? 'direct' : unlinedTreatment;
       rows.push({
         id: entry.id,
-        bucket,
+        bucket: rowBucket,
         date: entry.date,
         month: monthBucketKey(entry.date),
         description: entry.description ?? entry.reference ?? entry.id,
         category:
           entry.categoryType ??
-          (unlinedBucket === 'capex'
+          (unlinedTreatment === 'capex'
             ? 'EQUIPMENT'
-            : unlinedBucket === 'inventory'
+            : unlinedTreatment === 'inventory'
               ? 'INVENTORY'
               : 'OVERHEAD'),
         party: entry.party?.name ?? null,
@@ -203,44 +262,19 @@ export async function getSpendRows(
     }
   }
 
-  if (bucket === 'opex') {
-    const expenses = await prisma.expense.findMany({
-      where: buildExpenseWhere(filters, scope, range),
-      select: {
-        id: true,
-        incurredAt: true,
-        amount: true,
-        currency: true,
-        vendor: true,
-        note: true,
-        category: { select: { type: true, nameEn: true, nameAr: true } },
-      },
-      orderBy: { incurredAt: 'desc' },
-    });
-    rows.push(
-      ...expenses.map((expense): SpendRow => ({
-        id: expense.id,
-        bucket,
-        date: expense.incurredAt,
-        month: monthBucketKey(expense.incurredAt),
-        description: expense.note ?? expense.category.nameEn ?? expense.category.nameAr,
-        category: expense.category.type,
-        party: expense.vendor,
-        reference: null,
-        amount: convertToIqd(expense.amount, expense.currency as Currency, rate),
-        sourceHref: null,
-      })),
-    );
-  }
-
   return rows.filter((row) => matches(row, rowFilters)).sort((a, b) => b.date.getTime() - a.date.getTime());
 }
 
-export async function getSpendTotals(filters: DashboardFilters, scope: Scope, range: ResolvedRange) {
-  const [capex, inventory, opex, direct, cogs] = await Promise.all([
+export async function getSpendTotals(
+  filters: DashboardFilters,
+  scope: Scope,
+  range: ResolvedRange,
+): Promise<SpendFacts> {
+  const [capex, inventory, opex, review, direct, cogs] = await Promise.all([
     getSpendRows('capex', filters, scope, range),
     getSpendRows('inventory', filters, scope, range),
     getSpendRows('opex', filters, scope, range),
+    getSpendRows('review', filters, scope, range),
     getSpendRows('direct', filters, scope, range),
     getSpendRows('cogs', filters, scope, range),
   ]);
@@ -248,14 +282,18 @@ export async function getSpendTotals(filters: DashboardFilters, scope: Scope, ra
   const capexTotal = sum(capex);
   const inventoryTotal = sum(inventory);
   const opexTotal = sum(opex);
+  const reviewTotal = sum(review);
   const directTotal = sum(direct);
+  const operatingTotal = opexTotal + reviewTotal;
   return {
     capex: capexTotal,
     inventory: inventoryTotal,
     opex: opexTotal,
+    review: reviewTotal,
+    operating: operatingTotal,
     direct: directTotal,
     cogs: sum(cogs),
-    totalSpent: capexTotal + inventoryTotal + opexTotal + directTotal,
+    totalSpent: capexTotal + inventoryTotal + operatingTotal,
   };
 }
 

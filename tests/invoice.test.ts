@@ -168,6 +168,62 @@ describe('invoice helpers', () => {
     expect(snapshot.accountName).toBe('FIB');
   });
 
+  it('counts a statement-matched provider settlement exactly once', () => {
+    const customerReceivable = entry({
+      id: 'customer-ar',
+      type: 'INCOME',
+      amount: 95_000,
+      obligation: true,
+      obligationKind: 'RECEIVABLE',
+    });
+    const statementPayment = entry({
+      id: 'wayl-statement-payment',
+      type: 'PAYMENT_IN',
+      amount: 95_000,
+      orderId: 'ord1',
+      settlesId: 'customer-ar',
+      account: { name: 'Wayl clearing wallet' },
+      party: {
+        id: 'wayl',
+        name: 'Wayl',
+        collectsOrderPayments: true,
+      },
+    });
+    const snapshot = invoicePaymentSnapshot(order(), [customerReceivable, statementPayment]);
+
+    expect(snapshot.status).toBe('PAID');
+    expect(snapshot.route).toBe('PROVIDER');
+    expect(snapshot.paidRaw).toBe(95_000);
+    expect(snapshot.providerCollected).toBe(95_000);
+    expect(snapshot.providerRemitted).toBe(95_000);
+    expect(snapshot.providerOutstanding).toBe(0);
+    expect(snapshot.accountName).toBe('Wayl clearing wallet');
+  });
+
+  it('counts an order-linked statement receipt without a legacy receivable', () => {
+    const snapshot = invoicePaymentSnapshot(order(), [
+      entry({
+        id: 'wayl-statement-payment',
+        type: 'PAYMENT_IN',
+        amount: 95_000,
+        orderId: 'ord1',
+        account: { name: 'Wayl clearing wallet' },
+        party: {
+          id: 'wayl',
+          name: 'Wayl',
+          collectsOrderPayments: true,
+        },
+      }),
+    ]);
+
+    expect(snapshot.status).toBe('PAID');
+    expect(snapshot.route).toBe('PROVIDER');
+    expect(snapshot.paidRaw).toBe(95_000);
+    expect(snapshot.providerCollected).toBe(95_000);
+    expect(snapshot.providerRemitted).toBe(95_000);
+    expect(snapshot.providerOutstanding).toBe(0);
+  });
+
   it('supports a direct partial payment followed by provider collection for the balance', () => {
     const snapshot = invoicePaymentSnapshot(order(), [
       entry({

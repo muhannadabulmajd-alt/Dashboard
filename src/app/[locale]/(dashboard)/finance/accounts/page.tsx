@@ -28,13 +28,23 @@ export default async function FinanceAccountsPage({
     : filters.branchId?.length
       ? { branchId: { in: filters.branchId } }
       : {};
-  const [accounts, entries] = await Promise.all([
-    prisma.financeAccount.findMany({ where: branchWhere, orderBy: { createdAt: 'asc' } }),
+  const [allAccounts, entries] = await Promise.all([
+    prisma.financeAccount.findMany({
+      where: branchWhere,
+      orderBy: { createdAt: 'asc' },
+    }),
     prisma.financeEntry.findMany({
       where: { date: { lte: range.end }, archivedAt: null, reversedAt: null, reversalOfId: null, ...branchWhere },
       select: { id: true, type: true, amount: true, currency: true, obligation: true, obligationKind: true, accountId: true, toAccountId: true, settlesId: true, archivedAt: true },
     }),
   ]);
+  const accounts = allAccounts.filter((account) => account.type !== 'PAYMENT_GATEWAY');
+  const gatewayAccounts = allAccounts.filter((account) => account.type === 'PAYMENT_GATEWAY');
+  const gatewayBalance = gatewayAccounts.reduce(
+    (total, account) =>
+      total + accountBalance(account, entries.filter((entry) => entry.currency === account.currency)),
+    0,
+  );
 
   const cols: Column[] = [
     { label: t('f.name') },
@@ -73,6 +83,21 @@ export default async function FinanceAccountsPage({
         intro={t('guide.accounts.intro')}
         points={t.raw('guide.accounts.points')}
       />
+      {gatewayAccounts.length ? (
+        <div className="flex flex-col gap-2 rounded-lg border border-primary/20 bg-linen/30 px-3 py-2.5 text-sm text-roast sm:flex-row sm:items-center sm:justify-between">
+          <span>
+            <strong>{t('onlinePaymentBalance')}:</strong>{' '}
+            {formatMoney(gatewayBalance, 'IQD', locale)}.{' '}
+            <span className="text-muted-foreground">{t('onlinePaymentBalanceHint')}</span>
+          </span>
+          <Link
+            href="/finance/online-payments"
+            className="shrink-0 font-semibold text-primary hover:underline"
+          >
+            {t('viewOnlinePayments')}
+          </Link>
+        </div>
+      ) : null}
       <DataTable columns={cols} rows={rows} emptyLabel={tr('none')} />
     </>
   );

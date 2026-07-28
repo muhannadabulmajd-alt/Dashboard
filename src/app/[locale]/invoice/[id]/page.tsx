@@ -66,7 +66,12 @@ export default async function InvoicePage({
   const paymentRows = financeEntries.filter((entry) => {
     if (!activeInvoiceFinanceEntry(entry)) return false;
     if (payment.providerReceivableIds.includes(entry.id)) return true;
-    if (entry.type === 'INCOME' && !entry.obligation && entry.orderId === o.id) return true;
+    if (
+      (entry.type === 'INCOME' || entry.type === 'PAYMENT_IN') &&
+      !entry.obligation &&
+      !entry.settlesId &&
+      entry.orderId === o.id
+    ) return true;
     return entry.type === 'PAYMENT_IN' && Boolean(
       entry.settlesId &&
       [...payment.receivableIds, ...payment.providerReceivableIds].includes(entry.settlesId),

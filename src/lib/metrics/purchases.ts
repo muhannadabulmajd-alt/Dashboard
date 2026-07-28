@@ -4,6 +4,7 @@ export type PurchaseBucket = 'OPERATING_EXPENSE' | 'INVENTORY' | 'FIXED_ASSET' |
 
 export interface PurchaseLineFact {
   itemType: string;
+  spendTreatment?: 'CAPEX' | 'INVENTORY' | 'OPEX' | 'REVIEW';
   lineTotal: number;
   categoryType: ExpenseCategoryType | null;
   branchId?: string | null;
@@ -38,6 +39,9 @@ const OPERATING_CATEGORIES = new Set<ExpenseCategoryType>([
 const ASSET_LIKE_CATEGORIES = new Set<ExpenseCategoryType>(['GREEN_COFFEE', 'PACKAGING', 'EQUIPMENT']);
 
 export function purchaseBucketForLine(line: PurchaseLineFact): PurchaseBucket {
+  if (line.spendTreatment === 'INVENTORY') return 'INVENTORY';
+  if (line.spendTreatment === 'CAPEX') return 'FIXED_ASSET';
+  if (line.spendTreatment === 'OPEX' || line.spendTreatment === 'REVIEW') return 'OPERATING_EXPENSE';
   if (line.itemType === 'INVENTORY') return 'INVENTORY';
   if (line.itemType === 'ASSET') return 'FIXED_ASSET';
   if (line.itemType === 'EXPENSE' || line.itemType === 'SERVICE' || line.itemType === 'OTHER') return 'OPERATING_EXPENSE';

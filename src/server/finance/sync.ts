@@ -2,7 +2,11 @@ import 'server-only';
 import type { Prisma } from '@prisma/client';
 import { roundMoney } from '@/lib/decimal';
 import type { OrderMetricRole } from '@/lib/metrics/status';
-import { providerFeeAmount, providerFeeCostRole } from '@/lib/provider-fees';
+import {
+  providerFeeAmount,
+  providerFeeCostRole,
+  providerFeeImportKey,
+} from '@/lib/provider-fees';
 
 type Tx = Prisma.TransactionClient;
 
@@ -163,7 +167,7 @@ export async function syncOrderProviderCollection(
     (entry) =>
       entry.orderId === orderId &&
       !entry.obligation &&
-      entry.type === 'INCOME' &&
+      (entry.type === 'INCOME' || entry.type === 'PAYMENT_IN') &&
       !entry.settlesId,
   );
   const paidDirectly = directIncomeEntries
@@ -285,6 +289,7 @@ export async function syncOrderProviderCollection(
       feeRateBps: provider.feeRateBps,
       fixedFee: provider.fixedFee,
     });
+    const feeImportKey = providerFeeImportKey(order.id, provider.providerFeeMode);
     if (fee > 0) {
       const feeData = {
         date: order.placedAt,
@@ -311,20 +316,57 @@ export async function syncOrderProviderCollection(
         archivedAt: null,
         archiveReason: null,
       };
-      await tx.financeEntry.upsert({
-        where: { importKey: ORDER_PROVIDER_FEE_KEY(order.id) },
+      const feeEntry = await tx.financeEntry.upsert({
+        where: { importKey: feeImportKey },
         create: {
           ...feeData,
-          importKey: ORDER_PROVIDER_FEE_KEY(order.id),
+          importKey: feeImportKey,
           createdById: input.createdById ?? null,
         },
         update: feeData,
+        select: { id: true },
+      });
+      await tx.ledgerEntryLine.upsert({
+        where: { financeEntryId_lineNo: { financeEntryId: feeEntry.id, lineNo: 1 } },
+        create: {
+          financeEntryId: feeEntry.id,
+          lineNo: 1,
+          itemType: 'SERVICE',
+          itemName: `${provider.name} fee`,
+          categoryType: feeData.categoryType,
+          unit: 'service',
+          quantity: 1,
+          unitCost: fee,
+          landedUnitCost: fee,
+          lineTotal: fee,
+          branchId: order.branchId,
+          spendTreatment: 'OPEX',
+          classificationStatus: 'CONFIRMED',
+          classificationSource: 'provider-fee-rule',
+        },
+        update: {
+          itemName: `${provider.name} fee`,
+          categoryType: feeData.categoryType,
+          unitCost: fee,
+          landedUnitCost: fee,
+          lineTotal: fee,
+          spendTreatment: 'OPEX',
+          classificationStatus: 'CONFIRMED',
+          classificationSource: 'provider-fee-rule',
+        },
       });
     } else {
       await closeOrDeleteAutoEntry(
         tx,
-        ORDER_PROVIDER_FEE_KEY(order.id),
+        feeImportKey,
         `No automatic provider fee for order ${order.orderNumber}`,
+      );
+    }
+    if (provider.providerFeeMode === 'ORDER_DELIVERY_COST') {
+      await closeOrDeleteAutoEntry(
+        tx,
+        ORDER_PROVIDER_FEE_KEY(order.id),
+        `Replaced by canonical shipping cost for order ${order.orderNumber}`,
       );
     }
     return;
@@ -383,6 +425,104 @@ export async function syncOrderProviderCollection(
       update: data,
     });
   }
+
+  const fee = providerFeeAmount(providerAmount, order.deliveryCost, {
+    mode: provider.providerFeeMode,
+    feeRateBps: provider.feeRateBps,
+    fixedFee: provider.fixedFee,
+  });
+  const feeImportKey = providerFeeImportKey(order.id, provider.providerFeeMode);
+  if (fee <= 0) {
+    await closeOrDeleteAutoEntry(
+      tx,
+      feeImportKey,
+      `No provider fee for order ${order.orderNumber}`,
+    );
+    if (provider.providerFeeMode === 'ORDER_DELIVERY_COST') {
+      await closeOrDeleteAutoEntry(
+        tx,
+        ORDER_PROVIDER_FEE_KEY(order.id),
+        `No courier fee for order ${order.orderNumber}`,
+      );
+    }
+    return;
+  }
+
+  const feeEntry = await tx.financeEntry.upsert({
+    where: { importKey: feeImportKey },
+    create: {
+      date: order.placedAt,
+      type: 'EXPENSE',
+      recordClass: 'EXPENSE',
+      amount: fee,
+      currency: 'IQD',
+      obligation: true,
+      obligationKind: 'PAYABLE',
+      dueDate: input.dueDate ?? order.placedAt,
+      partyId: provider.id,
+      categoryType: provider.providerFeeMode === 'ORDER_DELIVERY_COST' ? 'SHIPPING' : 'TECH',
+      costRole: providerFeeCostRole(provider.providerFeeMode),
+      paymentMethod: input.paymentMethod ?? 'PROVIDER_COLLECTION',
+      branchId: order.branchId,
+      orderId: order.id,
+      reference: order.orderNumber,
+      description: `${provider.name} fee to deduct from remittance: ${order.orderNumber}`,
+      importKey: feeImportKey,
+      createdById: input.createdById ?? null,
+    },
+    update: {
+      date: order.placedAt,
+      amount: fee,
+      obligation: true,
+      obligationKind: 'PAYABLE',
+      dueDate: input.dueDate ?? order.placedAt,
+      accountId: null,
+      partyId: provider.id,
+      categoryType: provider.providerFeeMode === 'ORDER_DELIVERY_COST' ? 'SHIPPING' : 'TECH',
+      costRole: providerFeeCostRole(provider.providerFeeMode),
+      branchId: order.branchId,
+      reference: order.orderNumber,
+      archivedAt: null,
+      archiveReason: null,
+    },
+    select: { id: true },
+  });
+  await tx.ledgerEntryLine.upsert({
+    where: { financeEntryId_lineNo: { financeEntryId: feeEntry.id, lineNo: 1 } },
+    create: {
+      financeEntryId: feeEntry.id,
+      lineNo: 1,
+      itemType: 'SERVICE',
+      itemName: `${provider.name} fee`,
+      categoryType: provider.providerFeeMode === 'ORDER_DELIVERY_COST' ? 'SHIPPING' : 'TECH',
+      unit: 'service',
+      quantity: 1,
+      unitCost: fee,
+      landedUnitCost: fee,
+      lineTotal: fee,
+      branchId: order.branchId,
+      spendTreatment: 'OPEX',
+      classificationStatus: 'CONFIRMED',
+      classificationSource: 'provider-fee-rule',
+    },
+    update: {
+      itemName: `${provider.name} fee`,
+      categoryType: provider.providerFeeMode === 'ORDER_DELIVERY_COST' ? 'SHIPPING' : 'TECH',
+      unitCost: fee,
+      landedUnitCost: fee,
+      lineTotal: fee,
+      spendTreatment: 'OPEX',
+      classificationStatus: 'CONFIRMED',
+      classificationSource: 'provider-fee-rule',
+    },
+  });
+  if (provider.providerFeeMode === 'ORDER_DELIVERY_COST') {
+    await closeOrDeleteAutoEntry(
+      tx,
+      ORDER_PROVIDER_FEE_KEY(order.id),
+      `Replaced by canonical shipping cost for order ${order.orderNumber}`,
+    );
+  }
 }
 
 export async function syncOrderCustomerBalance(
@@ -427,7 +567,7 @@ export async function syncOrderCustomerBalance(
     .filter(
       (entry) =>
         entry.orderId === orderId &&
-        entry.type === 'INCOME' &&
+        (entry.type === 'INCOME' || entry.type === 'PAYMENT_IN') &&
         !entry.obligation &&
         !entry.settlesId,
     )
@@ -583,6 +723,8 @@ export async function syncOrderFinance(
     await closeOrDeleteAutoEntry(tx, arKey, `Closed finance sync for order ${order.orderNumber}`);
     await closeOrDeleteAutoEntry(tx, paidKey, `Closed finance sync for order ${order.orderNumber}`);
     await closeOrDeleteAutoEntry(tx, ORDER_PARTIAL_KEY(order.id), `Closed partial payment sync for order ${order.orderNumber}`);
+    await closeOrDeleteAutoEntry(tx, ORDER_PROVIDER_KEY(order.id), `Closed provider collection for order ${order.orderNumber}`);
+    await closeOrDeleteAutoEntry(tx, ORDER_PROVIDER_FEE_KEY(order.id), `Closed provider fee for order ${order.orderNumber}`);
     return;
   }
 
@@ -641,7 +783,7 @@ export async function syncOrderFinance(
       (entry) =>
         entry.orderId === order.id &&
         !entry.obligation &&
-        entry.type === 'INCOME' &&
+        (entry.type === 'INCOME' || entry.type === 'PAYMENT_IN') &&
         !entry.settlesId,
     );
     const directCoverage = directPayments
@@ -828,6 +970,7 @@ export async function closeOrderFinance(tx: Tx, orderId: string) {
   await closeOrDeleteAutoEntry(tx, ORDER_KEY(orderId, 'PAY'), `Closed finance sync for deleted order ${orderId}`);
   await closeOrDeleteAutoEntry(tx, ORDER_PARTIAL_KEY(orderId), `Closed partial payment sync for deleted order ${orderId}`);
   await closeOrDeleteAutoEntry(tx, ORDER_PROVIDER_KEY(orderId), `Closed provider collection for deleted order ${orderId}`);
+  await closeOrDeleteAutoEntry(tx, ORDER_PROVIDER_FEE_KEY(orderId), `Closed provider fee for deleted order ${orderId}`);
 }
 
 function categoryForInventory(category: string) {
@@ -858,7 +1001,7 @@ export async function syncInventoryReceiptFinance(
 
   const item = await tx.inventoryItem.findUnique({
     where: { id: input.inventoryItemId },
-    select: { nameEn: true, nameAr: true, category: true, branchId: true },
+    select: { nameEn: true, nameAr: true, category: true, branchId: true, unit: true },
   });
   if (!item) return null;
 
@@ -870,6 +1013,7 @@ export async function syncInventoryReceiptFinance(
       importKey,
       date: input.receivedAt,
       type: 'PURCHASE',
+      recordClass: 'PURCHASE',
       amount,
       currency: 'IQD',
       obligation: !isPaid,
@@ -886,6 +1030,7 @@ export async function syncInventoryReceiptFinance(
     update: {
       date: input.receivedAt,
       type: 'PURCHASE',
+      recordClass: 'PURCHASE',
       amount,
       currency: 'IQD',
       obligation: !isPaid,
@@ -899,6 +1044,40 @@ export async function syncInventoryReceiptFinance(
       description: `Inventory purchase: ${item.nameEn || item.nameAr}`,
     },
     select: { id: true },
+  });
+  await tx.ledgerEntryLine.upsert({
+    where: { financeEntryId_lineNo: { financeEntryId: entry.id, lineNo: 1 } },
+    create: {
+      financeEntryId: entry.id,
+      lineNo: 1,
+      itemType: 'INVENTORY',
+      itemName: item.nameEn || item.nameAr,
+      categoryType: categoryForInventory(item.category),
+      inventoryItemId: input.inventoryItemId,
+      unit: item.unit,
+      quantity: input.quantity,
+      unitCost: input.unitCost,
+      landedUnitCost: input.unitCost,
+      lineTotal: amount,
+      branchId: item.branchId,
+      spendTreatment: 'INVENTORY',
+      classificationStatus: 'CONFIRMED',
+      classificationSource: 'inventory-receipt',
+    },
+    update: {
+      itemName: item.nameEn || item.nameAr,
+      categoryType: categoryForInventory(item.category),
+      inventoryItemId: input.inventoryItemId,
+      unit: item.unit,
+      quantity: input.quantity,
+      unitCost: input.unitCost,
+      landedUnitCost: input.unitCost,
+      lineTotal: amount,
+      branchId: item.branchId,
+      spendTreatment: 'INVENTORY',
+      classificationStatus: 'CONFIRMED',
+      classificationSource: 'inventory-receipt',
+    },
   });
   return entry.id;
 }

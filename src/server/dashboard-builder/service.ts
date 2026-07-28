@@ -251,7 +251,7 @@ export async function resolveWidgetData(user: BuilderUser, widget: DashboardWidg
     if (metric.id === 'finance.revenue') return { kind: 'kpi', value: pnl.netSales, valueKind: 'iqd' };
     if (metric.id === 'finance.totalSpent') return { kind: 'kpi', value: spendTotals.totalSpent, valueKind: 'iqd' };
     if (metric.id === 'finance.capex') return { kind: 'kpi', value: spendTotals.capex, valueKind: 'iqd' };
-    if (metric.id === 'finance.opex') return { kind: 'kpi', value: spendTotals.opex, valueKind: 'iqd' };
+    if (metric.id === 'finance.opex') return { kind: 'kpi', value: spendTotals.operating, valueKind: 'iqd' };
     if (metric.id === 'finance.cogs') return { kind: 'kpi', value: spendTotals.cogs, valueKind: 'iqd' };
     if (metric.id === 'finance.grossProfit') return { kind: 'kpi', value: pnl.grossProfit, valueKind: 'iqd' };
     if (metric.id === 'finance.grossMargin') return { kind: 'kpi', value: pnl.grossMarginPct, valueKind: 'percent' };
@@ -295,15 +295,29 @@ export async function resolveWidgetData(user: BuilderUser, widget: DashboardWidg
     if (metric.id === 'customers.repeat') return { kind: 'kpi', value: customers.filter((c) => c.ordersCount > 1).length, valueKind: 'count' };
     if (metric.id === 'customers.byCity') return { kind: 'series', valueKind: 'count', points: M.customersByCity(customers).map((row) => ({ label: enumLabel(row.governorate, locale), value: row.count })) };
     if (metric.id === 'customers.top') {
+      const salesByCustomer = new Map<string, { orders: number; sales: number }>();
+      for (const order of orders) {
+        if (!M.isSalesOrder(order) || !order.customerId) continue;
+        const current = salesByCustomer.get(order.customerId) ?? { orders: 0, sales: 0 };
+        current.orders += 1;
+        current.sales += M.netSales([order]);
+        salesByCustomer.set(order.customerId, current);
+      }
       const rows = await prisma.customer.findMany({
-        where: scope.branchId ? { orders: { some: { branchId: scope.branchId } } } : {},
-        select: { externalId: true, nameEn: true, nameAr: true, orders: { select: { grossAmount: true, discountAmount: true, refundAmount: true, status: true } } },
-        take: 50,
+        where: { id: { in: [...salesByCustomer.keys()] } },
+        select: { id: true, externalId: true, nameEn: true, nameAr: true },
       });
-      return { kind: 'table', columns: ['Customer', 'Orders', 'Sales'], rows: rows.map((row) => {
-        const sales = row.orders.reduce((sum, order) => sum + order.grossAmount - order.discountAmount - order.refundAmount, 0);
-        return [row.nameEn || row.nameAr || row.externalId || '—', row.orders.length, sales];
-      }).sort((a, b) => Number(b[2]) - Number(a[2])).slice(0, 12) };
+      return {
+        kind: 'table',
+        columns: ['Customer', 'Orders', 'Sales'],
+        rows: rows
+          .map((row) => {
+            const totals = salesByCustomer.get(row.id) ?? { orders: 0, sales: 0 };
+            return [row.nameEn || row.nameAr || row.externalId || '—', totals.orders, totals.sales];
+          })
+          .sort((a, b) => Number(b[2]) - Number(a[2]))
+          .slice(0, 12),
+      };
     }
   }
 

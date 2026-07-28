@@ -138,6 +138,13 @@ enum InventorySyncMode {
   SKIP_HISTORICAL
 }
 
+enum OrderPurpose {
+  SALE
+  PROMOTION
+  INTERNAL
+  SAMPLE
+}
+
 enum InventoryCategory {
   GREEN_COFFEE
   ROASTED
@@ -216,14 +223,14 @@ model User {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
-  branch          Branch?          @relation(fields: [branchId], references: [id])
-  createdBy       User?            @relation("UserCreatedBy", fields: [createdById], references: [id])
-  createdUsers    User[]           @relation("UserCreatedBy")
-  operatedBatches RoastBatch[]     @relation("BatchOperator")
-  createdOrders   Order[]          @relation("OrderCreatedBy")
-  dashboards      Dashboard[]      @relation("DashboardOwner")
-  dashboardShares DashboardShare[]
-  auditLogs       AuditLog[]
+  branch              Branch?              @relation(fields: [branchId], references: [id])
+  createdBy           User?                @relation("UserCreatedBy", fields: [createdById], references: [id])
+  createdUsers        User[]               @relation("UserCreatedBy")
+  operatedBatches     RoastBatch[]         @relation("BatchOperator")
+  createdOrders       Order[]              @relation("OrderCreatedBy")
+  dashboards          Dashboard[]          @relation("DashboardOwner")
+  dashboardShares     DashboardShare[]
+  auditLogs           AuditLog[]
   providerSettlements ProviderSettlement[]
 
   @@index([role])
@@ -481,20 +488,23 @@ model Order {
   offerId           String?
   uploadBatchId     String?
   inventorySyncMode InventorySyncMode @default(NORMAL)
+  purpose           OrderPurpose      @default(SALE)
   createdAt         DateTime          @default(now())
 
-  lines          OrderLine[]
-  customer       Customer?       @relation(fields: [customerId], references: [id])
-  branch         Branch?         @relation(fields: [branchId], references: [id])
-  createdBy      User?           @relation("OrderCreatedBy", fields: [createdById], references: [id])
-  offer          Offer?          @relation(fields: [offerId], references: [id])
-  shipment       Shipment?
-  stockMovements StockMovement[]
+  lines                      OrderLine[]
+  customer                   Customer?                   @relation(fields: [customerId], references: [id])
+  branch                     Branch?                     @relation(fields: [branchId], references: [id])
+  createdBy                  User?                       @relation("OrderCreatedBy", fields: [createdById], references: [id])
+  offer                      Offer?                      @relation(fields: [offerId], references: [id])
+  shipment                   Shipment?
+  stockMovements             StockMovement[]
+  paymentReconciliationItems PaymentReconciliationItem[]
 
   @@index([placedAt])
   @@index([channel])
   @@index([governorate])
   @@index([status])
+  @@index([purpose])
   @@index([customerId])
   @@index([offerId])
   @@index([createdById])
@@ -588,14 +598,15 @@ model InventoryItem {
   isActive      Boolean           @default(true)
   createdAt     DateTime          @default(now())
 
-  product        Product?             @relation(fields: [productId], references: [id])
-  branch         Branch?              @relation(fields: [branchId], references: [id])
-  movements      StockMovement[]
-  recipeUses     ProductComponent[]
-  costLayers     InventoryCostLayer[]
-  ledgerLines    LedgerEntryLine[]
-  greenBatches   RoastBatch[]         @relation("BatchGreenInventory")
-  roastedBatches RoastBatch[]         @relation("BatchRoastedInventory")
+  product               Product?                        @relation(fields: [productId], references: [id])
+  branch                Branch?                         @relation(fields: [branchId], references: [id])
+  movements             StockMovement[]
+  recipeUses            ProductComponent[]
+  costLayers            InventoryCostLayer[]
+  ledgerLines           LedgerEntryLine[]
+  greenBatches          RoastBatch[]                    @relation("BatchGreenInventory")
+  roastedBatches        RoastBatch[]                    @relation("BatchRoastedInventory")
+  landedCostAllocations InventoryLandedCostAllocation[]
 
   @@index([category])
 }
@@ -614,9 +625,10 @@ model InventoryCostLayer {
   receivedAt      DateTime
   createdAt       DateTime @default(now())
 
-  inventoryItem InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
-  financeEntry  FinanceEntry? @relation(fields: [financeEntryId], references: [id], onDelete: SetNull)
-  roastBatch    RoastBatch?   @relation(fields: [roastBatchId], references: [id], onDelete: Cascade)
+  inventoryItem         InventoryItem                   @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+  financeEntry          FinanceEntry?                   @relation(fields: [financeEntryId], references: [id], onDelete: SetNull)
+  roastBatch            RoastBatch?                     @relation(fields: [roastBatchId], references: [id], onDelete: Cascade)
+  landedCostAllocations InventoryLandedCostAllocation[]
 
   @@index([inventoryItemId, receivedAt])
   @@index([financeEntryId])
@@ -653,28 +665,34 @@ model StockMovement {
 }
 
 model LedgerEntryLine {
-  id              String               @id @default(cuid())
-  financeEntryId  String
-  lineNo          Int
-  itemType        String               @default("EXPENSE") // INVENTORY | EXPENSE | SERVICE | OTHER
-  itemName        String
-  assetKey        String?
-  assetCategory   String?
-  categoryType    ExpenseCategoryType?
-  inventoryItemId String?
-  unit            String               @default("unit")
-  quantity        Decimal              @db.Decimal(14, 3)
-  unitCost        Decimal              @db.Decimal(14, 3) // entered base price in minor IQD per unit
-  landedUnitCost  Decimal              @db.Decimal(14, 3) // final line total / quantity after discount and extras
-  discountAmount  Int                  @default(0)
-  extraAmount     Int                  @default(0)
-  lineTotal       Int
-  branchId        String?
-  notes           String?
-  createdAt       DateTime             @default(now())
+  id                   String               @id @default(cuid())
+  financeEntryId       String
+  lineNo               Int
+  itemType             String               @default("EXPENSE") // INVENTORY | EXPENSE | SERVICE | OTHER
+  itemName             String
+  assetKey             String?
+  assetCategory        String?
+  categoryType         ExpenseCategoryType?
+  inventoryItemId      String?
+  unit                 String               @default("unit")
+  quantity             Decimal              @db.Decimal(14, 3)
+  unitCost             Decimal              @db.Decimal(14, 3) // entered base price in minor IQD per unit
+  landedUnitCost       Decimal              @db.Decimal(14, 3) // final line total / quantity after discount and extras
+  discountAmount       Int                  @default(0)
+  extraAmount          Int                  @default(0)
+  lineTotal            Int
+  branchId             String?
+  notes                String?
+  spendTreatment       SpendTreatment       @default(OPEX)
+  classificationStatus ClassificationStatus @default(CONFIRMED)
+  classificationSource String?
+  classificationNote   String?
+  createdAt            DateTime             @default(now())
 
-  financeEntry  FinanceEntry   @relation(fields: [financeEntryId], references: [id], onDelete: Cascade)
-  inventoryItem InventoryItem? @relation(fields: [inventoryItemId], references: [id], onDelete: SetNull)
+  financeEntry              FinanceEntry                    @relation(fields: [financeEntryId], references: [id], onDelete: Cascade)
+  inventoryItem             InventoryItem?                  @relation(fields: [inventoryItemId], references: [id], onDelete: SetNull)
+  fixedAssetCostAllocations FixedAssetCostAllocation[]
+  landedCostAllocations     InventoryLandedCostAllocation[]
 
   @@unique([financeEntryId, lineNo])
   @@index([financeEntryId])
@@ -682,6 +700,8 @@ model LedgerEntryLine {
   @@index([categoryType])
   @@index([itemType])
   @@index([assetKey])
+  @@index([spendTreatment])
+  @@index([classificationStatus])
 }
 
 model FixedAsset {
@@ -706,9 +726,10 @@ model FixedAsset {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
-  party        Party?        @relation(fields: [partyId], references: [id], onDelete: SetNull)
-  branch       Branch?       @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  financeEntry FinanceEntry? @relation(fields: [financeEntryId], references: [id], onDelete: SetNull)
+  party           Party?                     @relation(fields: [partyId], references: [id], onDelete: SetNull)
+  branch          Branch?                    @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  financeEntry    FinanceEntry?              @relation(fields: [financeEntryId], references: [id], onDelete: SetNull)
+  costAllocations FixedAssetCostAllocation[]
 
   @@index([category])
   @@index([partyId])
@@ -933,6 +954,24 @@ enum ProviderFeeMode {
   ORDER_DELIVERY_COST
 }
 
+enum SpendTreatment {
+  CAPEX
+  INVENTORY
+  OPEX
+  REVIEW
+}
+
+enum ClassificationStatus {
+  CONFIRMED
+  NEEDS_REVIEW
+}
+
+enum PaymentReconciliationStatus {
+  NEEDS_ORDER
+  LINKED
+  IGNORED
+}
+
 enum FinanceCostRole {
   OPERATING
   DIRECT_DELIVERY
@@ -974,42 +1013,43 @@ model FinanceAccount {
   isActive       Boolean     @default(true)
   createdAt      DateTime    @default(now())
 
-  entries   FinanceEntry[] @relation("AccountEntries")
-  transfers FinanceEntry[] @relation("TransferTo")
+  entries             FinanceEntry[]       @relation("AccountEntries")
+  transfers           FinanceEntry[]       @relation("TransferTo")
   providerSettlements ProviderSettlement[]
-  settlementParties Party[] @relation("PartyDefaultSettlementAccount")
+  settlementParties   Party[]              @relation("PartyDefaultSettlementAccount")
 
   @@index([type])
 }
 
 model Party {
-  id                String    @id @default(cuid())
-  externalKey       String?   @unique
-  name              String
-  type              PartyType @default(OTHER)
-  phone             String?
-  email             String?
-  address           String?
-  branchId          String?
-  openingPayable    Int       @default(0)
-  openingReceivable Int       @default(0)
-  notes             String?
-  equityShare       Float? // ownership % (shareholders)
+  id                         String          @id @default(cuid())
+  externalKey                String?         @unique
+  name                       String
+  type                       PartyType       @default(OTHER)
+  phone                      String?
+  email                      String?
+  address                    String?
+  branchId                   String?
+  openingPayable             Int             @default(0)
+  openingReceivable          Int             @default(0)
+  notes                      String?
+  equityShare                Float? // ownership % (shareholders)
   defaultSettlementAccountId String?
-  netFeesFromRemittance Boolean @default(false)
-  collectsOrderPayments Boolean @default(false)
-  automaticOrderSettlement Boolean @default(false)
-  providerFeeMode ProviderFeeMode @default(NONE)
-  feeRateBps Int @default(0)
-  fixedFee Int @default(0)
-  isActive          Boolean   @default(true)
-  createdAt         DateTime  @default(now())
+  netFeesFromRemittance      Boolean         @default(false)
+  collectsOrderPayments      Boolean         @default(false)
+  automaticOrderSettlement   Boolean         @default(false)
+  providerFeeMode            ProviderFeeMode @default(NONE)
+  feeRateBps                 Int             @default(0)
+  fixedFee                   Int             @default(0)
+  isActive                   Boolean         @default(true)
+  createdAt                  DateTime        @default(now())
 
-  entries     FinanceEntry[]
-  fixedAssets FixedAsset[]
-  shipments   Shipment[]
-  defaultSettlementAccount FinanceAccount? @relation("PartyDefaultSettlementAccount", fields: [defaultSettlementAccountId], references: [id], onDelete: SetNull)
-  providerSettlements ProviderSettlement[]
+  entries                    FinanceEntry[]
+  fixedAssets                FixedAsset[]
+  shipments                  Shipment[]
+  defaultSettlementAccount   FinanceAccount?             @relation("PartyDefaultSettlementAccount", fields: [defaultSettlementAccountId], references: [id], onDelete: SetNull)
+  providerSettlements        ProviderSettlement[]
+  paymentReconciliationItems PaymentReconciliationItem[]
 
   @@index([type])
   @@index([branchId])
@@ -1017,22 +1057,22 @@ model Party {
 }
 
 model ProviderSettlement {
-  id             String   @id @default(cuid())
+  id              String   @id @default(cuid())
   providerPartyId String
-  accountId      String
-  date           DateTime
-  grossCleared   Int
-  feesOffset     Int      @default(0)
-  amountReceived Int
-  paymentMethod  String?
-  reference      String?  @unique
-  createdById    String?
-  createdAt      DateTime @default(now())
+  accountId       String
+  date            DateTime
+  grossCleared    Int
+  feesOffset      Int      @default(0)
+  amountReceived  Int
+  paymentMethod   String?
+  reference       String?  @unique
+  createdById     String?
+  createdAt       DateTime @default(now())
 
-  provider Party @relation(fields: [providerPartyId], references: [id])
-  account FinanceAccount @relation(fields: [accountId], references: [id])
-  createdBy User? @relation(fields: [createdById], references: [id])
-  entries FinanceEntry[]
+  provider  Party          @relation(fields: [providerPartyId], references: [id])
+  account   FinanceAccount @relation(fields: [accountId], references: [id])
+  createdBy User?          @relation(fields: [createdById], references: [id])
+  entries   FinanceEntry[]
 
   @@index([providerPartyId, date])
   @@index([accountId])
@@ -1040,58 +1080,62 @@ model ProviderSettlement {
 }
 
 model FinanceEntry {
-  id             String               @id @default(cuid())
-  recordKey      String?              @unique // immutable Atlas spending key, e.g. DOC000169
-  date           DateTime
-  type           FinanceType
-  recordClass    LedgerRecordClass?
-  amount         Int // minor units, positive — ALWAYS the IQD value
-  currency       Currency             @default(IQD)
+  id                   String               @id @default(cuid())
+  recordKey            String?              @unique // immutable Atlas spending key, e.g. DOC000169
+  date                 DateTime
+  type                 FinanceType
+  recordClass          LedgerRecordClass?
+  amount               Int // minor units, positive — ALWAYS the IQD value
+  currency             Currency             @default(IQD)
   // Original payment when made in a foreign currency (e.g. paid in USD).
   // `amount`/`currency` stay IQD; these preserve "I paid origAmount origCurrency
   // at fxRate IQD per 1 unit" for the audit trail. Null for native-IQD entries.
-  origCurrency   Currency?
-  origAmount     Int? // minor units in origCurrency (USD cents)
-  fxRate         Int? // IQD per 1 unit of origCurrency on the entry date
+  origCurrency         Currency?
+  origAmount           Int? // minor units in origCurrency (USD cents)
+  fxRate               Int? // IQD per 1 unit of origCurrency on the entry date
   // When obligation=true this is a payable/receivable that has NOT moved cash.
   // When false it is an actual cash movement on `account` (and `toAccount` for transfers).
-  obligation     Boolean              @default(false)
-  obligationKind ObligationKind?
-  dueDate        DateTime?
-  accountId      String?
-  toAccountId    String?
-  partyId        String?
-  categoryType   ExpenseCategoryType?
-  costRole        FinanceCostRole?
-  paymentMethod  String?
-  settlesId      String? // payment that settles an obligation (partial allowed)
-  importKey      String?              @unique // idempotent bulk import (re-uploads upsert)
-  description    String?
-  reference      String?
-  attachmentUrl  String?
-  branchId       String?
-  orderId        String?
-  createdById    String?
+  obligation           Boolean              @default(false)
+  obligationKind       ObligationKind?
+  dueDate              DateTime?
+  accountId            String?
+  toAccountId          String?
+  partyId              String?
+  categoryType         ExpenseCategoryType?
+  costRole             FinanceCostRole?
+  paymentMethod        String?
+  settlesId            String? // payment that settles an obligation (partial allowed)
+  importKey            String?              @unique // idempotent bulk import (re-uploads upsert)
+  description          String?
+  reference            String?
+  attachmentUrl        String?
+  branchId             String?
+  orderId              String?
+  createdById          String?
   providerSettlementId String?
-  archivedAt     DateTime?
-  archivedById   String?
-  archiveReason  String?
-  reversalOfId   String?
-  reversedAt     DateTime?
-  reversedById   String?
-  reversalReason String?
-  createdAt      DateTime             @default(now())
+  archivedAt           DateTime?
+  archivedById         String?
+  archiveReason        String?
+  reversalOfId         String?
+  reversedAt           DateTime?
+  reversedById         String?
+  reversalReason       String?
+  createdAt            DateTime             @default(now())
 
-  account        FinanceAccount?      @relation("AccountEntries", fields: [accountId], references: [id])
-  toAccount      FinanceAccount?      @relation("TransferTo", fields: [toAccountId], references: [id])
-  party          Party?               @relation(fields: [partyId], references: [id])
-  settles        FinanceEntry?        @relation("Settlements", fields: [settlesId], references: [id])
-  settlements    FinanceEntry[]       @relation("Settlements")
-  stockMovements StockMovement[]
-  costLayers     InventoryCostLayer[]
-  ledgerLines    LedgerEntryLine[]
-  fixedAssets    FixedAsset[]
-  providerSettlement ProviderSettlement? @relation(fields: [providerSettlementId], references: [id], onDelete: SetNull)
+  account                   FinanceAccount?                 @relation("AccountEntries", fields: [accountId], references: [id])
+  toAccount                 FinanceAccount?                 @relation("TransferTo", fields: [toAccountId], references: [id])
+  party                     Party?                          @relation(fields: [partyId], references: [id])
+  settles                   FinanceEntry?                   @relation("Settlements", fields: [settlesId], references: [id])
+  settlements               FinanceEntry[]                  @relation("Settlements")
+  stockMovements            StockMovement[]
+  costLayers                InventoryCostLayer[]
+  ledgerLines               LedgerEntryLine[]
+  fixedAssets               FixedAsset[]
+  providerSettlement        ProviderSettlement?             @relation(fields: [providerSettlementId], references: [id], onDelete: SetNull)
+  fixedAssetCostAllocations FixedAssetCostAllocation[]
+  landedCostAllocations     InventoryLandedCostAllocation[]
+  reconciliationReceipt     PaymentReconciliationItem?      @relation("PaymentReconciliationReceipt")
+  reconciliationFee         PaymentReconciliationItem?      @relation("PaymentReconciliationFee")
 
   @@index([date])
   @@index([type])
@@ -1108,6 +1152,74 @@ model FinanceEntry {
   @@index([providerSettlementId])
   @@index([archivedAt])
   @@index([reversalOfId])
+}
+
+model FixedAssetCostAllocation {
+  id             String   @id @default(cuid())
+  importKey      String?  @unique
+  fixedAssetId   String
+  financeEntryId String
+  ledgerLineId   String?
+  amount         Int
+  notes          String?
+  createdAt      DateTime @default(now())
+
+  fixedAsset   FixedAsset       @relation(fields: [fixedAssetId], references: [id], onDelete: Cascade)
+  financeEntry FinanceEntry     @relation(fields: [financeEntryId], references: [id], onDelete: Cascade)
+  ledgerLine   LedgerEntryLine? @relation(fields: [ledgerLineId], references: [id], onDelete: SetNull)
+
+  @@index([fixedAssetId])
+  @@index([financeEntryId])
+  @@index([ledgerLineId])
+}
+
+model InventoryLandedCostAllocation {
+  id              String   @id @default(cuid())
+  importKey       String?  @unique
+  financeEntryId  String
+  ledgerLineId    String?
+  inventoryItemId String?
+  costLayerId     String?
+  amount          Int
+  notes           String?
+  createdAt       DateTime @default(now())
+
+  financeEntry  FinanceEntry        @relation(fields: [financeEntryId], references: [id], onDelete: Cascade)
+  ledgerLine    LedgerEntryLine?    @relation(fields: [ledgerLineId], references: [id], onDelete: SetNull)
+  inventoryItem InventoryItem?      @relation(fields: [inventoryItemId], references: [id], onDelete: SetNull)
+  costLayer     InventoryCostLayer? @relation(fields: [costLayerId], references: [id], onDelete: SetNull)
+
+  @@index([financeEntryId])
+  @@index([ledgerLineId])
+  @@index([inventoryItemId])
+  @@index([costLayerId])
+}
+
+model PaymentReconciliationItem {
+  id              String                      @id @default(cuid())
+  providerPartyId String
+  orderId         String?
+  occurredAt      DateTime
+  externalCode    String
+  sourceReference String?
+  grossAmount     Int
+  feeAmount       Int                         @default(0)
+  netAmount       Int
+  status          PaymentReconciliationStatus @default(NEEDS_ORDER)
+  receiptEntryId  String?                     @unique
+  feeEntryId      String?                     @unique
+  metadata        Json?
+  createdAt       DateTime                    @default(now())
+  updatedAt       DateTime                    @updatedAt
+
+  provider     Party         @relation(fields: [providerPartyId], references: [id], onDelete: Cascade)
+  order        Order?        @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  receiptEntry FinanceEntry? @relation("PaymentReconciliationReceipt", fields: [receiptEntryId], references: [id], onDelete: SetNull)
+  feeEntry     FinanceEntry? @relation("PaymentReconciliationFee", fields: [feeEntryId], references: [id], onDelete: SetNull)
+
+  @@unique([providerPartyId, externalCode])
+  @@index([status, occurredAt])
+  @@index([orderId])
 }
 
 // Key/value app settings (e.g. usd_to_iqd conversion rate).

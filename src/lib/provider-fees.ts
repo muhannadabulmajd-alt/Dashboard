@@ -6,6 +6,12 @@ export interface ProviderFeeRule {
   fixedFee: number;
 }
 
+export function providerFeeImportKey(orderId: string, mode: ProviderFeeMode): string {
+  return mode === 'ORDER_DELIVERY_COST'
+    ? `SHIP:${orderId}:COST`
+    : `ORD:${orderId}:PROVIDER:FEE`;
+}
+
 export function providerFeeAmount(
   grossAmount: number,
   deliveryCost: number,
@@ -16,7 +22,7 @@ export function providerFeeAmount(
 
   const calculated = rule.mode === 'ORDER_DELIVERY_COST'
     ? Math.max(0, Math.trunc(deliveryCost))
-    : Math.round(gross * Math.max(0, rule.feeRateBps) / 10_000) +
+    : Math.floor(gross * Math.max(0, rule.feeRateBps) / 10_000) +
       Math.max(0, Math.trunc(rule.fixedFee));
 
   return Math.min(gross, calculated);

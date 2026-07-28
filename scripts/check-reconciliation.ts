@@ -50,14 +50,14 @@ async function main(): Promise<void> {
           WHEN e.type = 'EXPENSE' THEN 'EXPENSE'::"LedgerRecordClass"
           WHEN EXISTS (
             SELECT 1 FROM "LedgerEntryLine" l
-            WHERE l."financeEntryId" = e.id AND l."itemType" IN ('INVENTORY', 'ASSET')
+            WHERE l."financeEntryId" = e.id AND l."spendTreatment" IN ('INVENTORY', 'CAPEX')
           ) AND EXISTS (
             SELECT 1 FROM "LedgerEntryLine" l
-            WHERE l."financeEntryId" = e.id AND l."itemType" IN ('EXPENSE', 'SERVICE', 'OTHER')
+            WHERE l."financeEntryId" = e.id AND l."spendTreatment" IN ('OPEX', 'REVIEW')
           ) THEN 'MIXED'::"LedgerRecordClass"
           WHEN EXISTS (
             SELECT 1 FROM "LedgerEntryLine" l
-            WHERE l."financeEntryId" = e.id AND l."itemType" IN ('EXPENSE', 'SERVICE', 'OTHER')
+            WHERE l."financeEntryId" = e.id AND l."spendTreatment" IN ('OPEX', 'REVIEW')
           ) THEN 'EXPENSE'::"LedgerRecordClass"
           ELSE 'PURCHASE'::"LedgerRecordClass"
         END
@@ -86,6 +86,185 @@ async function main(): Promise<void> {
             AND e."categoryType" IN ('GREEN_COFFEE', 'PACKAGING', 'EQUIPMENT')
           )
         )
+    `,
+  });
+
+  checks.push({
+    name: 'canonical spending line treatments',
+    failures: await count`
+      SELECT COUNT(*) AS count
+      FROM "FinanceEntry" e
+      WHERE e.type IN ('EXPENSE', 'PURCHASE')
+        AND e."archivedAt" IS NULL
+        AND e."reversedAt" IS NULL
+        AND e."reversalOfId" IS NULL
+        AND (
+          NOT EXISTS (
+            SELECT 1 FROM "LedgerEntryLine" l WHERE l."financeEntryId" = e.id
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM "LedgerEntryLine" l
+            WHERE l."financeEntryId" = e.id
+              AND (
+                l."spendTreatment" IS NULL
+                OR (l."spendTreatment" = 'REVIEW' AND l."classificationStatus" <> 'NEEDS_REVIEW')
+              )
+          )
+        )
+    `,
+  });
+
+  checks.push({
+    name: 'recorded spending equation',
+    failures: await count`
+      SELECT CASE
+        WHEN NOT EXISTS (
+          SELECT 1 FROM "Setting" WHERE "key" = 'finance_integrity_expected_total_spending'
+        ) THEN 0
+        WHEN (
+          SELECT COALESCE(SUM(l."lineTotal"), 0)
+          FROM "LedgerEntryLine" l
+          JOIN "FinanceEntry" e ON e.id = l."financeEntryId"
+          WHERE e.type IN ('EXPENSE', 'PURCHASE')
+            AND e."archivedAt" IS NULL
+            AND e."reversedAt" IS NULL
+            AND e."reversalOfId" IS NULL
+            AND e."createdAt" <= (
+              SELECT value::timestamp
+              FROM "Setting"
+              WHERE "key" = 'finance_integrity_expected_cutoff'
+            )
+        ) = (
+          SELECT value::bigint
+          FROM "Setting"
+          WHERE "key" = 'finance_integrity_expected_total_spending'
+        ) THEN 0
+        ELSE 1
+      END AS count
+    `,
+  });
+
+  checks.push({
+    name: 'recorded spending bucket targets',
+    failures: await count`
+      SELECT CASE
+        WHEN NOT EXISTS (
+          SELECT 1 FROM "Setting" WHERE "key" = 'finance_integrity_expected_capex'
+        ) THEN 0
+        WHEN (
+          SELECT COALESCE(SUM(l."lineTotal") FILTER (
+            WHERE l."spendTreatment" = 'CAPEX'
+          ), 0)
+          FROM "LedgerEntryLine" l
+          JOIN "FinanceEntry" e ON e.id = l."financeEntryId"
+          WHERE e.type IN ('EXPENSE', 'PURCHASE')
+            AND e."archivedAt" IS NULL
+            AND e."reversedAt" IS NULL
+            AND e."reversalOfId" IS NULL
+            AND e."createdAt" <= (
+              SELECT value::timestamp
+              FROM "Setting"
+              WHERE "key" = 'finance_integrity_expected_cutoff'
+            )
+        ) = (
+          SELECT value::bigint FROM "Setting"
+          WHERE "key" = 'finance_integrity_expected_capex'
+        ) AND (
+          SELECT COALESCE(SUM(l."lineTotal") FILTER (
+            WHERE l."spendTreatment" = 'INVENTORY'
+          ), 0)
+          FROM "LedgerEntryLine" l
+          JOIN "FinanceEntry" e ON e.id = l."financeEntryId"
+          WHERE e.type IN ('EXPENSE', 'PURCHASE')
+            AND e."archivedAt" IS NULL
+            AND e."reversedAt" IS NULL
+            AND e."reversalOfId" IS NULL
+            AND e."createdAt" <= (
+              SELECT value::timestamp
+              FROM "Setting"
+              WHERE "key" = 'finance_integrity_expected_cutoff'
+            )
+        ) = (
+          SELECT value::bigint FROM "Setting"
+          WHERE "key" = 'finance_integrity_expected_inventory'
+        ) AND (
+          SELECT COALESCE(SUM(l."lineTotal") FILTER (
+            WHERE l."spendTreatment" IN ('OPEX', 'REVIEW')
+          ), 0)
+          FROM "LedgerEntryLine" l
+          JOIN "FinanceEntry" e ON e.id = l."financeEntryId"
+          WHERE e.type IN ('EXPENSE', 'PURCHASE')
+            AND e."archivedAt" IS NULL
+            AND e."reversedAt" IS NULL
+            AND e."reversalOfId" IS NULL
+            AND e."createdAt" <= (
+              SELECT value::timestamp
+              FROM "Setting"
+              WHERE "key" = 'finance_integrity_expected_cutoff'
+            )
+        ) = (
+          SELECT value::bigint FROM "Setting"
+          WHERE "key" = 'finance_integrity_expected_operating'
+        ) THEN 0
+        ELSE 1
+      END AS count
+    `,
+  });
+
+  checks.push({
+    name: 'corrected sales and promotion targets',
+    failures: await count`
+      SELECT CASE
+        WHEN NOT EXISTS (
+          SELECT 1 FROM "Setting" WHERE "key" = 'finance_integrity_expected_sales'
+        ) THEN 0
+        WHEN (
+          SELECT COALESCE(SUM(GREATEST(
+            "grossAmount" - "discountAmount" - "refundAmount"
+              + "deliveryFee" + "extraCharges",
+            0
+          )), 0)
+          FROM "Order"
+          WHERE status = 'COMPLETED'
+            AND purpose = 'SALE'
+            AND "createdAt" <= (
+              SELECT value::timestamp
+              FROM "Setting"
+              WHERE "key" = 'finance_integrity_expected_cutoff'
+            )
+        ) = (
+          SELECT value::bigint FROM "Setting"
+          WHERE "key" = 'finance_integrity_expected_sales'
+        ) AND (
+          SELECT COUNT(*)
+          FROM "Order"
+          WHERE status = 'COMPLETED'
+            AND purpose = 'SALE'
+            AND "createdAt" <= (
+              SELECT value::timestamp
+              FROM "Setting"
+              WHERE "key" = 'finance_integrity_expected_cutoff'
+            )
+        ) = (
+          SELECT value::bigint FROM "Setting"
+          WHERE "key" = 'finance_integrity_expected_sale_orders'
+        ) AND (
+          SELECT COUNT(*)
+          FROM "Order"
+          WHERE status = 'COMPLETED'
+            AND purpose = 'PROMOTION'
+            AND "createdAt" <= (
+              SELECT value::timestamp
+              FROM "Setting"
+              WHERE "key" = 'finance_integrity_expected_cutoff'
+            )
+        ) = (
+          SELECT value::bigint FROM "Setting"
+          WHERE "key" = 'finance_integrity_expected_promotion_orders'
+        ) THEN 0
+        ELSE 1
+      END AS count
     `,
   });
 
@@ -231,6 +410,11 @@ async function main(): Promise<void> {
         SELECT l.id
         FROM "LedgerEntryLine" l
         WHERE l."itemType" = 'INVENTORY'
+          AND NOT EXISTS (
+            SELECT 1
+            FROM "InventoryLandedCostAllocation" allocation
+            WHERE allocation."ledgerLineId" = l.id
+          )
           AND (
             l."inventoryItemId" IS NULL
             OR NOT EXISTS (
@@ -247,6 +431,39 @@ async function main(): Promise<void> {
                 AND m.quantity = l.quantity
             )
           )
+      ) mismatches
+    `,
+  });
+
+  checks.push({
+    name: 'landed cost allocations',
+    failures: await count`
+      SELECT COUNT(*) AS count FROM (
+        SELECT allocation.id AS key
+        FROM "InventoryLandedCostAllocation" allocation
+        LEFT JOIN "LedgerEntryLine" line ON line.id = allocation."ledgerLineId"
+        LEFT JOIN "InventoryCostLayer" layer ON layer.id = allocation."costLayerId"
+        WHERE allocation.amount <= 0
+          OR line.id IS NULL
+          OR line."financeEntryId" <> allocation."financeEntryId"
+          OR (
+            (allocation."inventoryItemId" IS NULL)
+              <> (allocation."costLayerId" IS NULL)
+          )
+          OR (
+            allocation."inventoryItemId" IS NOT NULL
+            AND (
+              layer.id IS NULL
+              OR layer."inventoryItemId" <> allocation."inventoryItemId"
+            )
+          )
+        UNION ALL
+        SELECT line.id AS key
+        FROM "LedgerEntryLine" line
+        JOIN "InventoryLandedCostAllocation" allocation
+          ON allocation."ledgerLineId" = line.id
+        GROUP BY line.id, line."lineTotal"
+        HAVING SUM(allocation.amount) <> line."lineTotal"
       ) mismatches
     `,
   });
@@ -279,26 +496,106 @@ async function main(): Promise<void> {
   });
 
   checks.push({
+    name: 'active FIFO cost cache',
+    failures: await count`
+      WITH active_layers AS (
+        SELECT
+          layer.id,
+          layer."inventoryItemId",
+          layer."unitCost",
+          layer."receivedAt",
+          SUM(layer."qtyReceived") OVER (
+            PARTITION BY layer."inventoryItemId"
+            ORDER BY layer."receivedAt", layer.id
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+          ) AS cumulative_received,
+          MIN(layer."receivedAt") OVER (
+            PARTITION BY layer."inventoryItemId"
+          ) AS first_received
+        FROM "InventoryCostLayer" layer
+        LEFT JOIN "FinanceEntry" source ON source.id = layer."financeEntryId"
+        WHERE layer."financeEntryId" IS NULL
+          OR (
+            source."archivedAt" IS NULL
+            AND source."reversedAt" IS NULL
+            AND source."reversalOfId" IS NULL
+          )
+      ),
+      consumed AS (
+        SELECT
+          layer."inventoryItemId",
+          COALESCE(-SUM(movement.quantity) FILTER (
+            WHERE movement.quantity < 0
+              AND movement."occurredAt" >= layer.first_received
+              AND (
+                movement."financeEntryId" IS NULL
+                OR (
+                  movement_source."archivedAt" IS NULL
+                  AND movement_source."reversedAt" IS NULL
+                  AND movement_source."reversalOfId" IS NULL
+                )
+              )
+          ), 0) AS quantity_consumed
+        FROM (
+          SELECT "inventoryItemId", MIN(first_received) AS first_received
+          FROM active_layers
+          GROUP BY "inventoryItemId"
+        ) layer
+        LEFT JOIN "StockMovement" movement
+          ON movement."inventoryItemId" = layer."inventoryItemId"
+        LEFT JOIN "FinanceEntry" movement_source
+          ON movement_source.id = movement."financeEntryId"
+        GROUP BY layer."inventoryItemId"
+      ),
+      active_cost AS (
+        SELECT DISTINCT ON (layer."inventoryItemId")
+          layer."inventoryItemId",
+          layer."unitCost"
+        FROM active_layers layer
+        JOIN consumed
+          ON consumed."inventoryItemId" = layer."inventoryItemId"
+        WHERE layer.cumulative_received > consumed.quantity_consumed
+        ORDER BY layer."inventoryItemId", layer."receivedAt", layer.id
+      )
+      SELECT COUNT(*) AS count
+      FROM active_cost
+      JOIN "InventoryItem" item ON item.id = active_cost."inventoryItemId"
+      WHERE item."unitCost" IS NULL
+        OR ABS(item."unitCost" - active_cost."unitCost") > 0.001
+    `,
+  });
+
+  checks.push({
+    name: 'product component cost cache',
+    failures: await count`
+      SELECT COUNT(*) AS count
+      FROM "Product" product
+      JOIN (
+        SELECT component."productId",
+               ROUND(SUM(component.quantity * component."unitCost"))::integer AS expected
+        FROM "ProductComponent" component
+        GROUP BY component."productId"
+      ) cost ON cost."productId" = product.id
+      WHERE product."cogsPerUnit" <> cost.expected
+    `,
+  });
+
+  checks.push({
     name: 'asset line allocations',
     failures: await count`
       SELECT COUNT(*) AS count FROM (
-        SELECT l."assetKey" AS key
+        SELECT l.id AS key
         FROM "LedgerEntryLine" l
-        WHERE l."itemType" = 'ASSET' AND l."assetKey" IS NOT NULL
-        GROUP BY l."assetKey"
-        HAVING SUM(l."lineTotal") <> COALESCE((
-          SELECT SUM(a."totalCost") FROM "FixedAsset" a
-          WHERE a."importKey" = 'ASSET:HISTORICAL_SPEND:' || l."assetKey"
-        ), 0)
-        UNION ALL
-        SELECT l."financeEntryId" AS key
-        FROM "LedgerEntryLine" l
-        WHERE l."itemType" = 'ASSET' AND l."assetKey" IS NULL
-        GROUP BY l."financeEntryId"
-        HAVING SUM(l."lineTotal") <> COALESCE((
-          SELECT SUM(a."totalCost") FROM "FixedAsset" a
-          WHERE a."financeEntryId" = l."financeEntryId" AND a."importKey" IS NULL
-        ), 0)
+        JOIN "FinanceEntry" e ON e.id = l."financeEntryId"
+        WHERE l."spendTreatment" = 'CAPEX'
+          AND e."archivedAt" IS NULL
+          AND e."reversedAt" IS NULL
+          AND e."reversalOfId" IS NULL
+          AND COALESCE((
+            SELECT SUM(allocation.amount)
+            FROM "FixedAssetCostAllocation" allocation
+            WHERE allocation."ledgerLineId" = l.id
+          ), 0) <> l."lineTotal"
       ) mismatches
     `,
   });
@@ -325,19 +622,21 @@ async function main(): Promise<void> {
   });
 
   checks.push({
-    name: 'imported fixed asset allocation',
+    name: 'fixed asset allocation totals',
     failures: await count`
-      SELECT CASE WHEN
-        COALESCE((
-          SELECT SUM(a."totalCost")
-          FROM "FixedAsset" a
-          JOIN "FinanceEntry" e ON e.id = a."financeEntryId"
-          WHERE a."importKey" LIKE 'ASSET:HISTORICAL_SPEND:%'
-            AND e."importKey" LIKE 'PUR:HISTORICAL_SPEND:%'
-        ), 0)
-        =
-        COALESCE((SELECT SUM(l."lineTotal") FROM "LedgerEntryLine" l JOIN "FinanceEntry" e ON e.id = l."financeEntryId" WHERE l."itemType" = 'ASSET' AND e."importKey" LIKE 'PUR:HISTORICAL_SPEND:%'), 0)
-      THEN 0 ELSE 1 END AS count
+      SELECT COUNT(*) AS count
+      FROM "FixedAsset" asset
+      WHERE asset."isActive" = true
+        AND asset."archivedAt" IS NULL
+        AND COALESCE((
+          SELECT SUM(allocation.amount)
+          FROM "FixedAssetCostAllocation" allocation
+          JOIN "FinanceEntry" source ON source.id = allocation."financeEntryId"
+          WHERE allocation."fixedAssetId" = asset.id
+            AND source."archivedAt" IS NULL
+            AND source."reversedAt" IS NULL
+            AND source."reversalOfId" IS NULL
+        ), 0) <> asset."totalCost"
     `,
   });
 
@@ -388,7 +687,7 @@ async function main(): Promise<void> {
   });
 
   checks.push({
-    name: 'automatic provider configuration',
+    name: 'provider clearing configuration',
     failures: await count`
       SELECT COUNT(*) AS count
       FROM "Party" p
@@ -396,7 +695,7 @@ async function main(): Promise<void> {
         AND p."isActive" = true
         AND (
           p."collectsOrderPayments" = false
-          OR p."automaticOrderSettlement" = false
+          OR p."automaticOrderSettlement" = true
           OR p."defaultSettlementAccountId" IS NULL
           OR (p."externalKey" = 'HI_EXPRESS' AND p."providerFeeMode" <> 'ORDER_DELIVERY_COST')
           OR (p."externalKey" = 'WAYL' AND (
@@ -409,18 +708,32 @@ async function main(): Promise<void> {
   });
 
   checks.push({
-    name: 'automatic order fees are classified and bounded',
+    name: 'provider order fees are classified and bounded',
     failures: await count`
       SELECT COUNT(*) AS count
       FROM "FinanceEntry" fee
       JOIN "Order" o ON o.id = fee."orderId"
-      WHERE fee."importKey" LIKE 'ORD:%:PROVIDER:FEE'
+      WHERE (
+          fee."importKey" LIKE 'ORD:%:PROVIDER:FEE'
+          OR fee."importKey" LIKE 'SHIP:%:COST'
+        )
         AND fee."archivedAt" IS NULL
         AND fee."reversedAt" IS NULL
         AND fee."reversalOfId" IS NULL
         AND (
           fee.type <> 'EXPENSE'
-          OR fee."accountId" IS NULL
+          OR NOT (
+            (
+              fee.obligation = true
+              AND fee."obligationKind" = 'PAYABLE'
+              AND fee."accountId" IS NULL
+            )
+            OR (
+              fee.obligation = false
+              AND fee."obligationKind" IS NULL
+              AND fee."accountId" IS NOT NULL
+            )
+          )
           OR fee."costRole" NOT IN ('DIRECT_DELIVERY', 'PAYMENT_PROCESSING')
           OR fee.amount <= 0
           OR fee.amount > GREATEST(
@@ -433,25 +746,38 @@ async function main(): Promise<void> {
   });
 
   checks.push({
-    name: 'branding purchase is a fixed asset',
+    name: 'orders have at most one active direct delivery cost',
+    failures: await count`
+      SELECT COUNT(*) AS count
+      FROM (
+        SELECT fee."orderId"
+        FROM "FinanceEntry" fee
+        WHERE fee."orderId" IS NOT NULL
+          AND fee."costRole" = 'DIRECT_DELIVERY'
+          AND fee."archivedAt" IS NULL
+          AND fee."reversedAt" IS NULL
+          AND fee."reversalOfId" IS NULL
+        GROUP BY fee."orderId"
+        HAVING COUNT(*) > 1
+      ) duplicates
+    `,
+  });
+
+  checks.push({
+    name: 'branding payments consolidate to one fixed asset',
     failures: await count`
       SELECT CASE
         WHEN NOT EXISTS (
-          SELECT 1 FROM "FinanceEntry" WHERE "recordKey" = 'DOC000169'
+          SELECT 1 FROM "FinanceEntry" WHERE "recordKey" = 'DOC000144'
         ) THEN 0
-        WHEN EXISTS (
-          SELECT 1
-          FROM "FinanceEntry" e
-          JOIN "LedgerEntryLine" l ON l."financeEntryId" = e.id
-          JOIN "FixedAsset" a ON a."financeEntryId" = e.id
-          WHERE e."recordKey" = 'DOC000169'
-            AND e.type = 'PURCHASE'
-            AND e."recordClass" = 'PURCHASE'
-            AND e."categoryType" = 'EQUIPMENT'
-            AND l."itemType" = 'ASSET'
-            AND l."categoryType" = 'EQUIPMENT'
-            AND a.category = 'Brand identity'
-            AND a."totalCost" = 1500000
+        WHEN (
+          SELECT COUNT(*) = 1 AND SUM("totalCost") = 6000000
+          FROM "FixedAsset"
+          WHERE "importKey" = 'ASSET:BRAND_IDENTITY:LAHEEB' AND "isActive" = true
+        ) AND (
+          SELECT COUNT(*) = 3 AND SUM(amount) = 6000000
+          FROM "FixedAssetCostAllocation"
+          WHERE "importKey" LIKE 'ASSET:BRAND_IDENTITY:LAHEEB:DOC%'
         ) THEN 0
         ELSE 1
       END AS count
@@ -459,25 +785,66 @@ async function main(): Promise<void> {
   });
 
   checks.push({
-    name: 'matched Wayl wallet commissions',
+    name: 'Wayl statement and clearing wallet',
     failures: await count`
       SELECT CASE
         WHEN NOT EXISTS (
-          SELECT 1 FROM "Setting" WHERE "key" = 'wayl_wallet_unmatched_sales'
-        ) THEN 0
-        WHEN NOT EXISTS (
           SELECT 1
-          FROM "Order"
-          WHERE COALESCE(notes, '') ~* '(1A52C792|998C8C52|E3FCD7DA|EB5369GD|I9D0FC09|I56H8BB5|G8G9AHEI)'
+          FROM "PaymentReconciliationItem" item
+          JOIN "Party" provider ON provider.id = item."providerPartyId"
+          WHERE provider."externalKey" = 'WAYL'
         ) THEN 0
         WHEN (
-          SELECT COUNT(*) = 7 AND COALESCE(SUM(amount), 0) = 9553
+          SELECT COUNT(*) = 12
+            AND COALESCE(SUM(item."grossAmount"), 0) = 275000
+            AND COALESCE(SUM(item."feeAmount"), 0) = 16822
+            AND COUNT(*) FILTER (WHERE item.status = 'NEEDS_ORDER') = 5
+          FROM "PaymentReconciliationItem" item
+          JOIN "Party" provider ON provider.id = item."providerPartyId"
+          WHERE provider."externalKey" = 'WAYL'
+            AND item."createdAt" <= (
+              SELECT value::timestamp
+              FROM "Setting"
+              WHERE "key" = 'finance_integrity_expected_cutoff'
+            )
+        ) AND (
+          SELECT COALESCE(SUM(CASE
+            WHEN e."accountId" = account.id THEN
+              CASE
+                WHEN e.type IN ('INCOME', 'PAYMENT_IN', 'CAPITAL_IN') THEN e.amount
+                WHEN e.type IN ('EXPENSE', 'PURCHASE', 'PAYMENT_OUT', 'DRAWING', 'TRANSFER') THEN -e.amount
+                ELSE 0
+              END
+            WHEN e."toAccountId" = account.id AND e.type = 'TRANSFER' THEN e.amount
+            ELSE 0
+          END), 0) + account."openingBalance"
+          FROM "FinanceAccount" account
+          LEFT JOIN "FinanceEntry" e
+            ON (e."accountId" = account.id OR e."toAccountId" = account.id)
+            AND e.obligation = false
+            AND e."archivedAt" IS NULL
+            AND e."reversedAt" IS NULL
+            AND e."reversalOfId" IS NULL
+            AND e."createdAt" <= (
+              SELECT value::timestamp
+              FROM "Setting"
+              WHERE "key" = 'finance_integrity_expected_cutoff'
+            )
+          WHERE account."externalKey" = 'WAYL_WALLET'
+          GROUP BY account.id
+        ) = 55253 AND (
+          SELECT COUNT(*) = 12 AND COALESCE(SUM(amount), 0) = 16822
           FROM "FinanceEntry"
-          WHERE "importKey" LIKE 'WAYL:COMMISSION:%'
+          WHERE "importKey" LIKE 'WAYL:STATEMENT:%:FEE'
             AND "archivedAt" IS NULL
             AND "reversedAt" IS NULL
             AND "reversalOfId" IS NULL
             AND "costRole" = 'PAYMENT_PROCESSING'
+            AND "createdAt" <= (
+              SELECT value::timestamp
+              FROM "Setting"
+              WHERE "key" = 'finance_integrity_expected_cutoff'
+            )
         ) THEN 0
         ELSE 1
       END AS count
@@ -506,6 +873,7 @@ async function main(): Promise<void> {
         LEFT JOIN "ListOption" status_role
           ON status_role."listKey" = 'orderStatus' AND status_role.code = o.status
         WHERE COALESCE(status_role."metricRole", CASE WHEN o.status = 'COMPLETED' THEN 'SALE' END) = 'SALE'
+          AND o.purpose = 'SALE'
           AND "customerId" IS NOT NULL
         GROUP BY "customerId"
       ) actual ON actual."customerId" = c.id
@@ -534,9 +902,9 @@ async function main(): Promise<void> {
       GROUP BY e.id
       HAVING e."recordClass" IS DISTINCT FROM CASE
         WHEN e.type = 'EXPENSE' THEN 'EXPENSE'::"LedgerRecordClass"
-        WHEN bool_or(l."itemType" IN ('INVENTORY', 'ASSET'))
-          AND bool_or(l."itemType" IN ('EXPENSE', 'SERVICE', 'OTHER')) THEN 'MIXED'::"LedgerRecordClass"
-        WHEN bool_or(l."itemType" IN ('EXPENSE', 'SERVICE', 'OTHER')) THEN 'EXPENSE'::"LedgerRecordClass"
+          WHEN bool_or(l."spendTreatment" IN ('INVENTORY', 'CAPEX'))
+            AND bool_or(l."spendTreatment" IN ('OPEX', 'REVIEW')) THEN 'MIXED'::"LedgerRecordClass"
+          WHEN bool_or(l."spendTreatment" IN ('OPEX', 'REVIEW')) THEN 'EXPENSE'::"LedgerRecordClass"
         ELSE 'PURCHASE'::"LedgerRecordClass"
       END
     `;

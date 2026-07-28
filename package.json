@@ -11,6 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "check:reconciliation": "tsx scripts/check-reconciliation.ts",
+    "check:translations": "tsx scripts/check-translations.ts",
     "check:import-package": "tsx scripts/check-import-package.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",

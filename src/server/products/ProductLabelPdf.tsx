@@ -8,14 +8,16 @@ registerLaheebPdfFonts();
 const MM = 72 / 25.4;
 const PAGE_WIDTH = 60 * MM;
 const PAGE_HEIGHT = 30 * MM;
-const PAGE_PADDING = 1.4 * MM;
-const BARCODE_WIDTH = 32.2 * MM;
+const SAFE_MARGIN = 1.5 * MM;
+const BARCODE_WIDTH = 54 * MM;
+const BAR_HEIGHT = 25;
+const GUARD_HEIGHT = 28.5;
 
 const styles = StyleSheet.create({
   page: {
     width: PAGE_WIDTH,
     height: PAGE_HEIGHT,
-    padding: PAGE_PADDING,
+    padding: SAFE_MARGIN,
     backgroundColor: '#FFFFFF',
     color: '#000000',
     fontFamily: 'Amiri',
@@ -23,99 +25,89 @@ const styles = StyleSheet.create({
   label: {
     width: '100%',
     height: '100%',
-    display: 'flex',
-    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     overflow: 'hidden',
   },
   copy: {
-    flex: 1,
-    height: '100%',
-    borderLeftWidth: 0.55,
-    borderLeftColor: '#000000',
-    paddingLeft: 4,
-    paddingRight: 1,
-    paddingVertical: 1,
+    width: '100%',
+    flexGrow: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
     overflow: 'hidden',
   },
   main: {
+    width: '100%',
     color: '#000000',
-    fontSize: 10.2,
     fontWeight: 700,
-    lineHeight: 1.04,
-    marginBottom: 2,
-    maxHeight: 22,
+    lineHeight: 1.02,
+    textAlign: 'center',
   },
   variation: {
+    width: '100%',
     color: '#000000',
-    fontSize: 7.2,
     fontWeight: 700,
-    lineHeight: 1.08,
-    maxHeight: 16,
+    fontSize: 7,
+    lineHeight: 1.02,
+    textAlign: 'center',
+    marginTop: 0.8,
   },
-  specsBlock: {
-    marginTop: 'auto',
-    borderTopWidth: 0.45,
-    borderTopColor: '#000000',
-    paddingTop: 2,
-  },
-  spec: {
+  specs: {
+    width: '100%',
     color: '#000000',
     fontSize: 5.15,
-    lineHeight: 1.12,
-    marginBottom: 0.35,
+    lineHeight: 1.05,
+    textAlign: 'center',
+    marginTop: 0.65,
   },
   barcodePanel: {
-    width: 34.2 * MM,
-    height: '100%',
-    paddingRight: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  barcode: {
     width: BARCODE_WIDTH,
-    height: 57,
+    marginTop: 0.6,
+    alignItems: 'center',
   },
   digits: {
+    width: '100%',
     color: '#000000',
     fontFamily: 'Helvetica',
-    fontSize: 6.7,
-    letterSpacing: 1.25,
+    fontSize: 5.6,
+    letterSpacing: 1.15,
     lineHeight: 1,
     textAlign: 'center',
-    marginTop: 0.4,
+    marginTop: 0.15,
   },
 });
 
 function clipped(value: string, maxLength: number) {
   if (value.length <= maxLength) return value;
-  return `${value.slice(0, maxLength - 3).trimEnd()}...`;
+  return `${value.slice(0, maxLength - 1).trimEnd()}…`;
+}
+
+function titleSize(value: string) {
+  if (value.length > 42) return 7.7;
+  if (value.length > 28) return 8.8;
+  return 10.2;
 }
 
 export function ProductLabelPdf({ label, copies = 1 }: { label: ProductLabelData; copies?: number }) {
   const safeCopies = Math.min(24, Math.max(1, Math.trunc(copies)));
-  const textDirection = label.locale === 'ar' ? { textAlign: 'right' as const } : { textAlign: 'left' as const };
 
   return (
     <Document title="Laheeb product label">
       {Array.from({ length: safeCopies }, (_, index) => (
         <Page key={index} size={[PAGE_WIDTH, PAGE_HEIGHT]} style={styles.page}>
           <View style={styles.label}>
-            <View style={styles.barcodePanel}>
-              <PdfBarcode value={label.retailBarcode} />
-            </View>
             <View style={styles.copy}>
-              <Text style={[styles.main, textDirection]}>{clipped(label.mainName, 44)}</Text>
+              <Text style={[styles.main, { fontSize: titleSize(label.mainName) }]}>
+                {clipped(label.mainName, 58)}
+              </Text>
               {label.variationName ? (
-                <Text style={[styles.variation, textDirection]}>{clipped(label.variationName, 42)}</Text>
+                <Text style={styles.variation}>{clipped(label.variationName, 58)}</Text>
               ) : null}
-              <View style={styles.specsBlock}>
-                {label.specItems.map((item) => (
-                  <Text key={`${item.label}-${item.value}`} style={[styles.spec, textDirection]}>
-                    {clipped(`${item.label}: ${item.value}`, 38)}
-                  </Text>
-                ))}
-              </View>
+              {label.specLines.map((line) => (
+                <Text key={line} style={styles.specs}>{clipped(line, 72)}</Text>
+              ))}
             </View>
+            <PdfBarcode value={label.retailBarcode} />
           </View>
         </Page>
       ))}
@@ -129,21 +121,23 @@ function PdfBarcode({ value }: { value: string }) {
   const quietRight = 7;
   const totalModules = quietLeft + modules.length + quietRight;
   const moduleWidth = BARCODE_WIDTH / totalModules;
-  const barHeight = 44;
-  const guardHeight = 49;
   const groupedDigits = `${value[0]}  ${value.slice(1, 7)}  ${value.slice(7)}`;
 
   return (
-    <View style={styles.barcode}>
-      <Svg width={BARCODE_WIDTH} height={guardHeight} viewBox={`0 0 ${BARCODE_WIDTH} ${guardHeight}`}>
-        <Rect x="0" y="0" width={BARCODE_WIDTH} height={guardHeight} fill="#FFFFFF" />
+    <View style={styles.barcodePanel}>
+      <Svg
+        width={BARCODE_WIDTH}
+        height={GUARD_HEIGHT}
+        viewBox={`0 0 ${BARCODE_WIDTH} ${GUARD_HEIGHT}`}
+      >
+        <Rect x="0" y="0" width={BARCODE_WIDTH} height={GUARD_HEIGHT} fill="#FFFFFF" />
         {modules.filter((module) => module.bar).map((module) => (
           <Rect
             key={module.index}
             x={(quietLeft + module.index) * moduleWidth}
             y="0"
             width={moduleWidth}
-            height={module.guard ? guardHeight : barHeight}
+            height={module.guard ? GUARD_HEIGHT : BAR_HEIGHT}
             fill="#000000"
           />
         ))}

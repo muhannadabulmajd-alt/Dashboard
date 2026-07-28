@@ -21,6 +21,10 @@ import { toMinor, convertToIqd } from '@/lib/money';
 import { getUsdToIqd } from '@/server/settings';
 import { syncActiveCost } from '@/server/inventory/fifo';
 import { ledgerRecordClassForLines } from '@/lib/ledger-record-class';
+import {
+  classificationStatusForTreatment,
+  spendTreatmentForItemType,
+} from '@/lib/spend-treatment';
 import { preflightImport } from './preflight';
 import { upsertImportedOrder } from '@/server/orders/import-sync';
 import { upsertImportedShipment } from '@/server/shipments/import-sync';
@@ -196,6 +200,7 @@ async function ingestPurchaseRecord(
       });
     }
 
+    const spendTreatment = spendTreatmentForItemType(line.itemType);
     await tx.ledgerEntryLine.create({
       data: {
         financeEntryId: entry.id,
@@ -213,6 +218,13 @@ async function ingestPurchaseRecord(
         lineTotal: line.lineAmountIqd,
         branchId,
         notes: line.notes ?? null,
+        spendTreatment,
+        classificationStatus: classificationStatusForTreatment(spendTreatment),
+        classificationSource: 'purchase-import',
+        classificationNote:
+          spendTreatment === 'REVIEW'
+            ? 'Imported line requires an Owner/Admin classification.'
+            : null,
       },
     });
   }
@@ -242,7 +254,7 @@ async function syncImportedAssets(purchases: PurchaseInput[], userId: string | n
       const totalCost = lines.reduce((sum, line) => sum + line.lineTotal, 0);
       const quantity = Math.max(...lines.map((line) => Number(line.quantity)));
       const references = lines.map((line) => line.financeEntry.reference).filter(Boolean) as string[];
-      await tx.fixedAsset.upsert({
+      const asset = await tx.fixedAsset.upsert({
         where: { importKey: `ASSET:HISTORICAL_SPEND:${assetKey}` },
         create: {
           importKey: `ASSET:HISTORICAL_SPEND:${assetKey}`,
@@ -276,6 +288,18 @@ async function syncImportedAssets(purchases: PurchaseInput[], userId: string | n
           archivedById: null,
           archiveReason: null,
         },
+        select: { id: true },
+      });
+      await tx.fixedAssetCostAllocation.deleteMany({ where: { fixedAssetId: asset.id } });
+      await tx.fixedAssetCostAllocation.createMany({
+        data: lines.map((line) => ({
+          importKey: `ASSET-ALLOCATION:${assetKey}:${line.financeEntryId}:${line.id}`,
+          fixedAssetId: asset.id,
+          financeEntryId: line.financeEntryId,
+          ledgerLineId: line.id,
+          amount: line.lineTotal,
+          notes: `Imported asset allocation for ${line.financeEntry.reference ?? line.financeEntryId}`,
+        })),
       });
     }, { timeout: 60_000 });
   }

@@ -39,7 +39,12 @@ export function InvoicePdf({ data, labels, locale }: { data: InvoiceData; labels
   const paymentRows = financeEntries.filter((entry) => {
     if (!activeInvoiceFinanceEntry(entry)) return false;
     if (payment.providerReceivableIds.includes(entry.id)) return true;
-    if (entry.type === 'INCOME' && !entry.obligation && entry.orderId === order.id) return true;
+    if (
+      (entry.type === 'INCOME' || entry.type === 'PAYMENT_IN') &&
+      !entry.obligation &&
+      !entry.settlesId &&
+      entry.orderId === order.id
+    ) return true;
     return entry.type === 'PAYMENT_IN' && Boolean(
       entry.settlesId &&
       [...payment.receivableIds, ...payment.providerReceivableIds].includes(entry.settlesId),

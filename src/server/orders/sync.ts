@@ -38,7 +38,7 @@ export async function syncCustomerStats(
 ): Promise<void> {
   if (!customerId) return;
   const stats = await tx.order.aggregate({
-    where: { customerId, status: { in: saleStatuses } },
+    where: { customerId, status: { in: saleStatuses }, purpose: 'SALE' },
     _count: { _all: true },
     _min: { placedAt: true },
     _max: { placedAt: true },

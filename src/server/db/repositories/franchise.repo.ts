@@ -1,8 +1,9 @@
 import 'server-only';
 import { prisma } from '../client';
-import { getOrderLines } from './sales.repo';
+import { getOrderLines, getOrders } from './sales.repo';
 import type { DashboardFilters } from '@/lib/filters';
 import type { ResolvedRange } from '@/lib/dates';
+import { netSales } from '@/lib/metrics';
 
 type Scope = { branchId?: string };
 
@@ -38,21 +39,35 @@ export async function getBranchPerformance(
     select: { id: true, code: true, nameEn: true, nameAr: true, isFranchise: true },
   });
 
-  const lines = await getOrderLines(filters, scope, range);
+  const [orders, lines] = await Promise.all([
+    getOrders(filters, scope, range),
+    getOrderLines(filters, scope, range),
+  ]);
 
   const agg = new Map<
     string,
     { net: number; cogs: number; units: number; orders: Set<string>; customers: Set<string> }
   >();
+  for (const order of orders) {
+    if (!order.branchId) continue;
+    const entry = agg.get(order.branchId) ?? {
+      net: 0,
+      cogs: 0,
+      units: 0,
+      orders: new Set(),
+      customers: new Set(),
+    };
+    entry.net += netSales([order]);
+    entry.orders.add(order.id);
+    if (order.customerId) entry.customers.add(order.customerId);
+    agg.set(order.branchId, entry);
+  }
   for (const l of lines) {
     const bId = l.branchId;
     if (!bId) continue;
     const e = agg.get(bId) ?? { net: 0, cogs: 0, units: 0, orders: new Set(), customers: new Set() };
-    e.net += l.lineNet;
     e.cogs += l.unitCogsSnapshot * l.quantity;
     e.units += l.quantity;
-    if (l.orderId) e.orders.add(l.orderId);
-    if (l.customerId) e.customers.add(l.customerId);
     agg.set(bId, e);
   }
 

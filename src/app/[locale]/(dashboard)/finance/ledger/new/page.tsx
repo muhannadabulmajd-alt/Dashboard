@@ -38,7 +38,11 @@ export default async function NewEntryPage({
   const t = await getTranslations('finance');
   const tr = await getTranslations('records');
   const [accounts, parties, branches, inventoryItems] = await Promise.all([
-    prisma.financeAccount.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true, currency: true } }),
+    prisma.financeAccount.findMany({
+      where: { isActive: true, type: { not: 'PAYMENT_GATEWAY' } },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true, currency: true },
+    }),
     prisma.party.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true, type: true } }),
     prisma.branch.findMany({ where: { isActive: true }, orderBy: { nameEn: 'asc' }, select: { id: true, nameEn: true, nameAr: true } }),
     prisma.inventoryItem.findMany({

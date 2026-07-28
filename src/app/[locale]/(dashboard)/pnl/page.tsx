@@ -1,8 +1,7 @@
 import { getTranslations } from 'next-intl/server';
 import { getPageContext } from '@/server/page-context';
-import { getOrders, getOrderLines } from '@/server/db/repositories/sales.repo';
-import { getExpenses, getPaymentProcessingCosts } from '@/server/db/repositories/finance.repo';
 import { getSpendTotals } from '@/server/finance/spend';
+import { getProfitFacts } from '@/server/finance/facts';
 import * as M from '@/lib/metrics';
 import { enumLabel } from '@/lib/enums';
 import { buildExportHref, buildFinanceExportHref } from '@/lib/filters';
@@ -35,16 +34,17 @@ export default async function PnlPage({
 
   const now = new Date();
   const mtdRange = resolveRange({ range: 'this_month' }, now);
-  const [orders, lines, expenses, paymentProcessingCosts, spendTotals, mtdOrders] = await Promise.all([
-    getOrders(filters, scope, range),
-    getOrderLines(filters, scope, range),
-    getExpenses(filters, scope, range),
-    getPaymentProcessingCosts(filters, scope, range),
+  const [
+    profitFacts,
+    spendTotals,
+    mtdProfitFacts,
+  ] = await Promise.all([
+    getProfitFacts(filters, scope, range),
     getSpendTotals(filters, scope, range),
-    getOrders(filters, scope, { start: mtdRange.start, end: mtdRange.end }),
+    getProfitFacts(filters, scope, { start: mtdRange.start, end: mtdRange.end }),
   ]);
 
-  const pnl = M.buildPnlSnapshot(orders, lines, expenses, { paymentProcessingCosts });
+  const { pnl, lines, operatingExpenses: expenses } = profitFacts;
   const {
     grossRevenue: gross,
     discounts,
@@ -53,11 +53,13 @@ export default async function PnlPage({
     cogs,
     operatingExpenses: opex,
     directDeliveryCost: deliveryCosts,
+    paymentProcessingCosts,
+    promotionCosts: promotionCostTotal,
     operatingProfit: profit,
   } = pnl;
   const margin = { amount: pnl.grossProfit, pct: pnl.grossMarginPct };
   const contribution = pnl.contributionProfit;
-  const averageOrderValue = orders.length ? Math.round(net / orders.length) : 0;
+  const averageOrderValue = profitFacts.averageOrderValue;
 
   // Cost/margin alerts (§9/§17): active products priced below cost or thin margin.
   const products = await prisma.product.findMany({
@@ -72,7 +74,7 @@ export default async function PnlPage({
     .sort((a, b) => rank[a.status] - rank[b.status]);
 
   const { dayOfMonth, daysInMonth } = monthProgress();
-  const runRate = M.runRate(M.netSales(mtdOrders), dayOfMonth, daysInMonth);
+  const runRate = M.runRate(mtdProfitFacts.pnl.netSales, dayOfMonth, daysInMonth);
 
   const waterfall: WaterfallStep[] = [
     { label: t('revenue'), value: gross, kind: 'total' },
@@ -83,6 +85,7 @@ export default async function PnlPage({
     { label: t('grossMargin'), value: margin.amount, kind: 'total' },
     { label: t('deliveryCosts'), value: deliveryCosts, kind: 'dec' },
     { label: t('paymentProcessingCosts'), value: paymentProcessingCosts, kind: 'dec' },
+    { label: t('promotionCosts'), value: promotionCostTotal, kind: 'dec' },
     { label: t('contributionProfit'), value: contribution, kind: 'total' },
     { label: t('operatingCosts'), value: opex, kind: 'dec' },
     { label: t('operatingProfit'), value: profit, kind: 'total' },
@@ -135,18 +138,19 @@ export default async function PnlPage({
       />
 
       <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <KpiCard label={t('salesEarned')} value={formatMoney(net, 'IQD', locale)} locale={locale} />
-        <KpiCard label={t('totalSpent')} value={formatMoney(spendTotals.totalSpent, 'IQD', locale)} locale={locale} invertDelta />
-        <KpiCard label={t('averageOrderValue')} value={formatMoney(averageOrderValue, 'IQD', locale)} locale={locale} />
-        <KpiCard label={tk('cogs')} value={formatMoney(cogs, 'IQD', locale)} locale={locale} invertDelta />
+        <KpiCard label={t('salesEarned')} value={formatMoney(net, 'IQD', locale)} locale={locale} href="/sales" />
+        <KpiCard label={t('totalSpent')} value={formatMoney(spendTotals.totalSpent, 'IQD', locale)} locale={locale} href="/finance/spend?bucket=all" invertDelta />
+        <KpiCard label={t('averageOrderValue')} value={formatMoney(averageOrderValue, 'IQD', locale)} locale={locale} href="/sales" />
+        <KpiCard label={tk('cogs')} value={formatMoney(cogs, 'IQD', locale)} locale={locale} href="/finance/spend?bucket=cogs" invertDelta />
         <KpiCard label={tk('grossMargin')} value={formatPercent(margin.pct, locale)} sub={formatMoney(margin.amount, 'IQD', locale)} locale={locale} />
         <KpiCard label={t('contributionProfit')} value={formatMoney(contribution, 'IQD', locale)} locale={locale} />
         <KpiCard label={tk('operatingProfit')} value={formatMoney(profit, 'IQD', locale)} locale={locale} />
-        <KpiCard label={t('operatingCosts')} value={formatMoney(opex, 'IQD', locale)} locale={locale} invertDelta />
-        <KpiCard label={t('deliveryCosts')} value={formatMoney(deliveryCosts, 'IQD', locale)} locale={locale} invertDelta />
-        <KpiCard label={t('paymentProcessingCosts')} value={formatMoney(paymentProcessingCosts, 'IQD', locale)} locale={locale} invertDelta />
-        <KpiCard label={t('capex')} value={formatMoney(spendTotals.capex, 'IQD', locale)} locale={locale} />
-        <KpiCard label={t('inventoryPurchases')} value={formatMoney(spendTotals.inventory, 'IQD', locale)} locale={locale} />
+        <KpiCard label={t('operatingCosts')} value={formatMoney(opex, 'IQD', locale)} locale={locale} href="/finance/spend?bucket=overhead" invertDelta />
+        <KpiCard label={t('deliveryCosts')} value={formatMoney(deliveryCosts, 'IQD', locale)} locale={locale} href="/finance/spend?bucket=direct&category=SHIPPING" invertDelta />
+        <KpiCard label={t('paymentProcessingCosts')} value={formatMoney(paymentProcessingCosts, 'IQD', locale)} locale={locale} href="/finance/spend?bucket=direct&category=TECH" invertDelta />
+        <KpiCard label={t('promotionCosts')} value={formatMoney(promotionCostTotal, 'IQD', locale)} locale={locale} href="/finance/spend?bucket=promotion" invertDelta />
+        <KpiCard label={t('capex')} value={formatMoney(spendTotals.capex, 'IQD', locale)} locale={locale} href="/finance/spend?bucket=capex" />
+        <KpiCard label={t('inventoryPurchases')} value={formatMoney(spendTotals.inventory, 'IQD', locale)} locale={locale} href="/finance/spend?bucket=inventory" />
         <KpiCard label={tk('runRate')} value={formatMoney(runRate, 'IQD', locale)} locale={locale} />
       </section>
 

@@ -14,7 +14,18 @@ import { BackLink } from '@/components/records/parts';
 import { PageHeader } from '@/components/ui/primitives';
 import { Link } from '@/i18n/navigation';
 
-const BUCKETS: SpendBucket[] = ['all', 'capex', 'inventory', 'opex', 'direct', 'cogs'];
+const BUCKETS: SpendBucket[] = [
+  'all',
+  'capex',
+  'inventory',
+  'operating',
+  'overhead',
+  'opex',
+  'review',
+  'direct',
+  'cogs',
+  'promotion',
+];
 
 function bucketFrom(value: string | string[] | undefined): SpendBucket {
   const raw = Array.isArray(value) ? value[0] : value;
@@ -54,7 +65,9 @@ export default async function FinanceSpendPage({
   const tableRows = rows.map((row) => [
     formatDate(row.date, locale),
     row.sourceHref ? <Link href={row.sourceHref}>{row.description}</Link> : row.description,
-    row.bucket === 'cogs' ? row.category : enumLabel(row.category, locale),
+    row.bucket === 'cogs' || row.bucket === 'promotion'
+      ? row.category
+      : enumLabel(row.category, locale),
     row.party ?? '—',
     row.reference ?? '—',
     formatMoney(row.amount, 'IQD', locale),
