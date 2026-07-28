@@ -3,8 +3,8 @@ import { encodeEan13 } from '@/lib/barcode';
 import {
   PRODUCT_LABEL_COLUMN_GAP_MM,
   PRODUCT_LABEL_DETAILS_PERCENT,
+  PRODUCT_LABEL_PDF_LINE_HEIGHT,
   PRODUCT_LABEL_SAFE_MARGIN_MM,
-  productLabelPdfLineHeight,
   productLabelTypography,
   softWrapLabelText,
 } from '@/lib/product-label-layout';
@@ -96,7 +96,7 @@ export function ProductLabelPdf({ label, copies = 1 }: { label: ProductLabelData
                   styles.main,
                   {
                     fontSize: typography.titlePt,
-                    lineHeight: productLabelPdfLineHeight(typography.titlePt, 1.12),
+                    lineHeight: PRODUCT_LABEL_PDF_LINE_HEIGHT.title,
                     textAlign,
                   },
                 ]}
@@ -106,12 +106,12 @@ export function ProductLabelPdf({ label, copies = 1 }: { label: ProductLabelData
               {label.variationName ? (
                 <Text
                   style={[
-                    styles.variation,
-                    {
-                      fontSize: typography.variationPt,
-                      lineHeight: productLabelPdfLineHeight(typography.variationPt, 1.18),
-                      textAlign,
-                    },
+                  styles.variation,
+                  {
+                    fontSize: typography.variationPt,
+                    lineHeight: PRODUCT_LABEL_PDF_LINE_HEIGHT.variation,
+                    textAlign,
+                  },
                   ]}
                 >
                   {softWrapLabelText(label.variationName)}
@@ -121,12 +121,12 @@ export function ProductLabelPdf({ label, copies = 1 }: { label: ProductLabelData
                 <Text
                   key={`${item.label}-${item.value}`}
                   style={[
-                    styles.specs,
-                    {
-                      fontSize: typography.specsPt,
-                      lineHeight: productLabelPdfLineHeight(typography.specsPt, 1.28),
-                      textAlign,
-                    },
+                  styles.specs,
+                  {
+                    fontSize: typography.specsPt,
+                    lineHeight: PRODUCT_LABEL_PDF_LINE_HEIGHT.specs,
+                    textAlign,
+                  },
                   ]}
                 >
                   {softWrapLabelText(`${item.label}: ${item.value}`)}
