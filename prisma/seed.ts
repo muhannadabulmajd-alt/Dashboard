@@ -119,7 +119,8 @@ async function seedBranchesAndUsers() {
   ];
   await prisma.user.createMany({ data: users });
   const ops = await prisma.user.findUnique({ where: { email: 'ops@laheeb.coffee' } });
-  return { hq, branches: [hq, karada, erbil], opsId: ops!.id };
+  const owner = await prisma.user.findUnique({ where: { email: 'owner@laheeb.coffee' } });
+  return { hq, branches: [hq, karada, erbil], opsId: ops!.id, ownerId: owner!.id };
 }
 
 // ---------------------------------------------------------------------------
@@ -312,6 +313,7 @@ async function seedOrders(
   customerIds: string[],
   offerIds: string[],
   branches: { value: string; weight: number }[],
+  createdById: string,
 ) {
   const orders: Prisma.OrderCreateManyInput[] = [];
   const lines: Prisma.OrderLineCreateManyInput[] = [];
@@ -388,6 +390,7 @@ async function seedOrders(
         placedAt,
         customerId,
         branchId: weighted(branches),
+        createdById,
         channel,
         governorate,
         fulfillmentMethod,
@@ -471,6 +474,7 @@ async function seedOrders(
       accountId: seedCashAccount.id,
       branchId: order.branchId,
       orderId: order.id,
+      createdById,
       paymentMethod: 'Cash',
       importKey: `SEED:ORDER:${order.id}:PAID`,
       reference: order.orderNumber,
@@ -691,7 +695,7 @@ async function main() {
   await clear();
 
   console.log('Seeding branches and users…');
-  const { hq, branches, opsId } = await seedBranchesAndUsers();
+  const { hq, branches, opsId, ownerId } = await seedBranchesAndUsers();
   // HQ takes the bulk of orders; the two franchise cafes share the rest.
   const branchWeights = [
     { value: branches[0].id, weight: 68 },
@@ -708,7 +712,13 @@ async function main() {
   const offerIds = await seedOffers();
 
   console.log('Seeding orders (this can take a moment)…');
-  const { orderCount, lineCount } = await seedOrders(products, customerIds, offerIds, branchWeights);
+  const { orderCount, lineCount } = await seedOrders(
+    products,
+    customerIds,
+    offerIds,
+    branchWeights,
+    ownerId,
+  );
   console.log(`  ${orderCount} orders, ${lineCount} lines`);
 
   console.log('Seeding roast batches…');
