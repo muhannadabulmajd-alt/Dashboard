@@ -64,6 +64,7 @@ const styles = StyleSheet.create({
   },
   barcodePanel: {
     width: BARCODE_WIDTH,
+    marginRight: COLUMN_GAP,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -89,7 +90,8 @@ export function ProductLabelPdf({ label, copies = 1 }: { label: ProductLabelData
     <Document title="Laheeb product label">
       {Array.from({ length: safeCopies }, (_, index) => (
         <Page key={index} size={[PAGE_WIDTH, PAGE_HEIGHT]} style={styles.page}>
-          <View style={[styles.label, rtl ? { flexDirection: 'row-reverse' } : {}]}>
+          <View style={styles.label}>
+            <PdfBarcode value={label.retailBarcode} />
             <View style={styles.details}>
               <Text style={[styles.main, { fontSize: typography.titlePt, textAlign }]}>
                 {softWrapLabelText(label.mainName)}
@@ -110,7 +112,6 @@ export function ProductLabelPdf({ label, copies = 1 }: { label: ProductLabelData
                 </Text>
               ))}
             </View>
-            <PdfBarcode value={label.retailBarcode} rtl={rtl} />
           </View>
         </Page>
       ))}
@@ -118,7 +119,7 @@ export function ProductLabelPdf({ label, copies = 1 }: { label: ProductLabelData
   );
 }
 
-function PdfBarcode({ value, rtl }: { value: string; rtl: boolean }) {
+function PdfBarcode({ value }: { value: string }) {
   const modules = encodeEan13(value);
   const quietLeft = 11;
   const quietRight = 7;
@@ -127,12 +128,7 @@ function PdfBarcode({ value, rtl }: { value: string; rtl: boolean }) {
   const groupedDigits = `${value[0]}  ${value.slice(1, 7)}  ${value.slice(7)}`;
 
   return (
-    <View
-      style={[
-        styles.barcodePanel,
-        rtl ? { marginRight: COLUMN_GAP } : { marginLeft: COLUMN_GAP },
-      ]}
-    >
+    <View style={styles.barcodePanel}>
       <Svg
         width={BARCODE_WIDTH}
         height={GUARD_HEIGHT}

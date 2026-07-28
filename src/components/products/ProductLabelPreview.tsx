@@ -15,19 +15,26 @@ export function ProductLabelPreview({ label, locale }: { label: ProductLabelData
   return (
     <section
       className="sku-label-printable bg-white text-black"
-      dir={rtl ? 'rtl' : 'ltr'}
+      dir="ltr"
       aria-label="SKU sticker label"
       style={{ width: '60mm', height: '30mm' }}
     >
       <div
-        className={`flex h-full w-full items-stretch ${rtl ? 'flex-row-reverse' : 'flex-row'}`}
+        className="flex h-full w-full flex-row items-stretch"
         style={{
           gap: `${PRODUCT_LABEL_COLUMN_GAP_MM}mm`,
           padding: `${PRODUCT_LABEL_SAFE_MARGIN_MM}mm`,
         }}
       >
+        <div className="flex min-w-0 flex-1 items-center justify-center">
+          <ProductBarcode
+            value={label.retailBarcode}
+            className="h-[22mm] w-full max-w-full shrink-0"
+          />
+        </div>
         <div
           className={`flex min-w-0 shrink-0 flex-col justify-center ${rtl ? 'text-right' : 'text-left'}`}
+          dir={rtl ? 'rtl' : 'ltr'}
           style={{ width: `${PRODUCT_LABEL_DETAILS_PERCENT}%` }}
         >
           <h2
@@ -68,12 +75,6 @@ export function ProductLabelPreview({ label, locale }: { label: ProductLabelData
               </p>
             ))}
           </div>
-        </div>
-        <div className="flex min-w-0 flex-1 items-center justify-center">
-          <ProductBarcode
-            value={label.retailBarcode}
-            className="h-[22mm] w-full max-w-full shrink-0"
-          />
         </div>
       </div>
     </section>
