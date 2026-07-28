@@ -182,7 +182,7 @@ export default async function OrderDetailPage({
             { label: ti('payment') },
             { label: ti('provider') },
             { label: ti('account') },
-            { label: t('f.amount'), align: 'end' },
+            { label: ti('amount'), align: 'end' },
             { label: t('open') },
           ]}
           rows={financeRows}
