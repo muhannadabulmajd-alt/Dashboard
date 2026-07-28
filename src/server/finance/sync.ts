@@ -289,6 +289,7 @@ export async function syncOrderProviderCollection(
       const feeData = {
         date: order.placedAt,
         type: 'EXPENSE' as const,
+        recordClass: 'EXPENSE' as const,
         amount: fee,
         currency: 'IQD' as const,
         categoryType: provider.providerFeeMode === 'ORDER_DELIVERY_COST' ? 'SHIPPING' : 'TECH',
