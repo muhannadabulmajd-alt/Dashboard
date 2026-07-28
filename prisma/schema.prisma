@@ -927,6 +927,18 @@ enum PartyType {
   OTHER
 }
 
+enum ProviderFeeMode {
+  NONE
+  PERCENT_PLUS_FIXED
+  ORDER_DELIVERY_COST
+}
+
+enum FinanceCostRole {
+  OPERATING
+  DIRECT_DELIVERY
+  PAYMENT_PROCESSING
+}
+
 enum FinanceType {
   EXPENSE
   PURCHASE
@@ -986,6 +998,10 @@ model Party {
   defaultSettlementAccountId String?
   netFeesFromRemittance Boolean @default(false)
   collectsOrderPayments Boolean @default(false)
+  automaticOrderSettlement Boolean @default(false)
+  providerFeeMode ProviderFeeMode @default(NONE)
+  feeRateBps Int @default(0)
+  fixedFee Int @default(0)
   isActive          Boolean   @default(true)
   createdAt         DateTime  @default(now())
 
@@ -1046,6 +1062,7 @@ model FinanceEntry {
   toAccountId    String?
   partyId        String?
   categoryType   ExpenseCategoryType?
+  costRole        FinanceCostRole?
   paymentMethod  String?
   settlesId      String? // payment that settles an obligation (partial allowed)
   importKey      String?              @unique // idempotent bulk import (re-uploads upsert)
@@ -1079,6 +1096,7 @@ model FinanceEntry {
   @@index([date])
   @@index([type])
   @@index([recordClass])
+  @@index([costRole])
   @@index([obligation])
   @@index([accountId])
   @@index([partyId])

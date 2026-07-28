@@ -1,5 +1,6 @@
 import {
   AlertTriangle,
+  BadgeDollarSign,
   Clock,
   HandCoins,
   Package,
@@ -7,6 +8,7 @@ import {
   TrendingDown,
   UsersRound,
   Wallet,
+  type LucideIcon,
 } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
 import { getPageContext } from '@/server/page-context';
@@ -19,6 +21,9 @@ import { financeTotals, netCash, type FinanceEntryLike } from '@/lib/metrics/fin
 import { getUsdToIqd } from '@/server/settings';
 import { setUsdToIqd } from '@/server/finance/settings';
 import { getSpendRows, getSpendTotals, spendByCategory, spendByMonth, spendByParty } from '@/server/finance/spend';
+import { getOrders, getOrderLines } from '@/server/db/repositories/sales.repo';
+import { getExpenses, getPaymentProcessingCosts } from '@/server/db/repositories/finance.repo';
+import * as M from '@/lib/metrics';
 import { RateEditor } from '@/components/finance/RateEditor';
 import { Badge, Card, CardContent, CardHeader, CardTitle, PageHeader } from '@/components/ui/primitives';
 import { KpiCard } from '@/components/kpi/KpiCard';
@@ -36,6 +41,19 @@ const ALERT_TONES = {
 } as const;
 
 type FinancialAlert = { title: string; body: string; href: string; tone: keyof typeof ALERT_TONES };
+type WalletIssue = { count: number; grossAmount: number };
+
+function parseWalletIssue(value: string | undefined): WalletIssue | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as Partial<WalletIssue>;
+    return typeof parsed.count === 'number' && typeof parsed.grossAmount === 'number'
+      ? { count: parsed.count, grossAmount: parsed.grossAmount }
+      : null;
+  } catch {
+    return null;
+  }
+}
 
 function filteredHref(base: string, filters: Parameters<typeof serializeFilters>[0], extra?: Record<string, string | undefined>) {
   const sp = serializeFilters(filters);
@@ -61,7 +79,19 @@ export default async function FinancePage({
       ? { branchId: { in: filters.branchId } }
       : {};
 
-  const [accounts, entriesRaw, rate, spendTotals, opexRows] = await Promise.all([
+  const [
+    accounts,
+    entriesRaw,
+    rate,
+    spendTotals,
+    allSpendRows,
+    opexRows,
+    orders,
+    orderLines,
+    operatingExpenses,
+    paymentProcessingCosts,
+    walletIssueSetting,
+  ] = await Promise.all([
     prisma.financeAccount.findMany({ where: { isActive: true, ...branchWhere }, orderBy: { createdAt: 'asc' } }),
     prisma.financeEntry.findMany({
       where: { archivedAt: null, reversedAt: null, reversalOfId: null, date: { lte: range.end }, ...branchWhere },
@@ -84,8 +114,22 @@ export default async function FinancePage({
     }),
     getUsdToIqd(),
     getSpendTotals(filters, scope, range),
+    getSpendRows('all', filters, scope, range),
     getSpendRows('opex', filters, scope, range),
+    getOrders(filters, scope, range),
+    getOrderLines(filters, scope, range),
+    getExpenses(filters, scope, range),
+    getPaymentProcessingCosts(filters, scope, range),
+    prisma.setting.findUnique({
+      where: { key: 'wayl_wallet_unmatched_sales' },
+      select: { value: true },
+    }),
   ]);
+  const pnl = M.buildPnlSnapshot(orders, orderLines, operatingExpenses, {
+    paymentProcessingCosts,
+  });
+  const averageOrderValue = orders.length ? Math.round(pnl.netSales / orders.length) : 0;
+  const walletIssue = parseWalletIssue(walletIssueSetting?.value);
   const entries = entriesRaw as ChartEntry[];
 
   const currencies = Array.from(new Set([...accounts.map((a) => a.currency), ...entries.map((e) => e.currency)]));
@@ -138,6 +182,17 @@ export default async function FinancePage({
     .map((entry) => Math.max(0, iqd(entry) - (paidByObligation.get(entry.id) ?? 0)))
     .filter((amount) => amount > 0);
   const financialAlerts: FinancialAlert[] = [
+    ...(walletIssue?.count
+      ? [{
+          title: t('alerts.walletUnmatched.title'),
+          body: t('alerts.walletUnmatched.body', {
+            count: walletIssue.count,
+            amount: formatMoney(walletIssue.grossAmount, 'IQD', locale),
+          }),
+          href: '/finance/ledger',
+          tone: 'warning' as const,
+        }]
+      : []),
     ...(overdue.payables > 0
       ? [{
           title: t('alerts.overduePayables.title'),
@@ -187,36 +242,111 @@ export default async function FinancePage({
   ];
 
   const spendBase = '/finance/spend';
-  const monthChart = spendByMonth(opexRows).map((row) => ({
+  const monthChart = spendByMonth(allSpendRows).map((row) => ({
     label: row.key,
     value: row.amount,
-    href: filteredHref(spendBase, filters, { bucket: 'opex', month: row.key }),
+    href: filteredHref(spendBase, filters, { bucket: 'all', month: row.key }),
   }));
-  const categoryChart = spendByCategory(opexRows).map((row) => ({
+  const categoryChart = spendByCategory(allSpendRows).map((row) => ({
     label: enumLabel(row.key, locale),
     value: row.amount,
-    href: filteredHref(spendBase, filters, { bucket: 'opex', category: row.key }),
+    href: filteredHref(spendBase, filters, { bucket: 'all', category: row.key }),
   }));
-  const partyChart = spendByParty(opexRows).slice(0, 8).map((row) => ({
+  const partyChart = spendByParty(allSpendRows).slice(0, 8).map((row) => ({
     label: row.key,
     value: row.amount,
-    href: filteredHref(spendBase, filters, { bucket: 'opex', party: row.key }),
+    href: filteredHref(spendBase, filters, { bucket: 'all', party: row.key }),
   }));
 
-  const cards = [
+  const cards: Array<{
+    label: string;
+    value: number;
+    icon: LucideIcon;
+    href: string;
+    tone: 'accent' | 'success' | 'warning' | 'danger';
+    emphasis?: boolean;
+  }> = [
+    {
+      label: t('salesEarned'),
+      value: pnl.netSales,
+      icon: BadgeDollarSign,
+      href: '/pnl',
+      tone: 'success' as const,
+      emphasis: true,
+    },
+    {
+      label: t('totalSpent'),
+      value: spendTotals.totalSpent,
+      icon: TrendingDown,
+      href: filteredHref(spendBase, filters, { bucket: 'all' }),
+      tone: 'danger' as const,
+    },
     {
       label: t('totalAvailable'),
       value: combined.cash,
       icon: Wallet,
       href: '/finance/accounts',
       tone: combined.cash >= 0 ? 'success' as const : 'danger' as const,
-      emphasis: true,
+    },
+    {
+      label: t('operatingProfit'),
+      value: pnl.operatingProfit,
+      icon: HandCoins,
+      href: '/pnl',
+      tone: pnl.operatingProfit >= 0 ? 'success' as const : 'danger' as const,
     },
     { label: t('receivables'), value: combined.receivable, icon: HandCoins, href: '/finance/dues', tone: 'accent' as const },
     { label: t('payables'), value: combined.payable, icon: Clock, href: '/finance/dues', tone: 'warning' as const },
-    { label: t('capex'), value: spendTotals.capex, icon: Package, href: filteredHref(spendBase, filters, { bucket: 'capex' }), tone: 'default' as const },
-    { label: t('opex'), value: spendTotals.opex, icon: TrendingDown, href: filteredHref(spendBase, filters, { bucket: 'opex' }), tone: 'danger' as const },
-    { label: t('cogs'), value: spendTotals.cogs, icon: Package, href: filteredHref(spendBase, filters, { bucket: 'cogs' }), tone: 'warning' as const },
+  ];
+  const insightCards: Array<{ label: string; value: number; sub: string; href: string }> = [
+    {
+      label: t('cogs'),
+      value: pnl.cogs,
+      sub: t('explain.cogs'),
+      href: filteredHref(spendBase, filters, { bucket: 'cogs' }),
+    },
+    {
+      label: t('grossProfit'),
+      value: pnl.grossProfit,
+      sub: `${t('explain.grossProfit')} · ${t('marginValue', { value: `${(pnl.grossMarginPct * 100).toFixed(1)}%` })}`,
+      href: '/pnl',
+    },
+    {
+      label: t('contributionProfit'),
+      value: pnl.contributionProfit,
+      sub: t('explain.contributionProfit'),
+      href: '/pnl',
+    },
+    {
+      label: t('opex'),
+      value: spendTotals.opex,
+      sub: t('explain.opex'),
+      href: filteredHref(spendBase, filters, { bucket: 'opex' }),
+    },
+    {
+      label: t('capex'),
+      value: spendTotals.capex,
+      sub: t('explain.capex'),
+      href: filteredHref(spendBase, filters, { bucket: 'capex' }),
+    },
+    {
+      label: t('inventoryBought'),
+      value: spendTotals.inventory,
+      sub: t('explain.inventory'),
+      href: filteredHref(spendBase, filters, { bucket: 'inventory' }),
+    },
+    {
+      label: t('directSellingCosts'),
+      value: spendTotals.direct,
+      sub: t('explain.directCosts'),
+      href: filteredHref(spendBase, filters, { bucket: 'direct' }),
+    },
+    {
+      label: t('averageOrderValue'),
+      value: averageOrderValue,
+      sub: t('explain.aov'),
+      href: '/sales',
+    },
   ];
   const controlLinks = [
     {
@@ -260,7 +390,7 @@ export default async function FinancePage({
     {
       label: t('financeSpend'),
       hint: t('spendControlHint'),
-      href: filteredHref(spendBase, filters, { bucket: 'opex' }),
+      href: filteredHref(spendBase, filters, { bucket: 'all' }),
       icon: TrendingDown,
     },
     {
@@ -297,37 +427,6 @@ export default async function FinancePage({
 
       {canManage ? <RateEditor action={setUsdToIqd} locale={locale} rate={rate} label={t('rate')} apply={t('apply')} /> : null}
 
-      <Card variant="surface">
-        <CardHeader>
-          <div>
-            <CardTitle>{t('financeControlTitle')}</CardTitle>
-            <p className="mt-1 text-sm leading-5 text-muted-foreground">{t('financeControlSubtitle')}</p>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
-            {controlLinks.map((item) => {
-              const Icon = item.icon;
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className="group flex min-h-24 items-start gap-3 rounded-xl border border-border/75 bg-card p-3 text-start transition-colors hover:border-primary/45 hover:bg-linen/35"
-                >
-                  <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-linen/65 text-primary group-hover:bg-primary group-hover:text-primary-foreground">
-                    <Icon className="size-5" />
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block text-sm font-bold text-roast">{item.label}</span>
-                    <span className="mt-1 block text-xs leading-5 text-muted-foreground">{item.hint}</span>
-                  </span>
-                </Link>
-              );
-            })}
-          </div>
-        </CardContent>
-      </Card>
-
       <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
         {cards.map((card) => (
           <KpiCard
@@ -341,6 +440,48 @@ export default async function FinancePage({
             locale={locale}
           />
         ))}
+      </section>
+
+      <section className="space-y-3">
+        <div>
+          <h2 className="text-base font-bold text-roast">{t('understandNumbers')}</h2>
+          <p className="mt-1 text-sm text-muted-foreground">{t('understandNumbersHint')}</p>
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {insightCards.map((card) => (
+            <KpiCard
+              key={card.label}
+              label={card.label}
+              value={formatMoney(card.value, 'IQD', locale)}
+              sub={card.sub}
+              href={card.href}
+              locale={locale}
+            />
+          ))}
+        </div>
+      </section>
+
+      <section className="space-y-2 rounded-[var(--radius)] border bg-card p-3">
+        <div>
+          <h2 className="text-sm font-bold text-roast">{t('financeControlTitle')}</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">{t('financeControlSubtitle')}</p>
+        </div>
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          {controlLinks.map((item) => {
+            const Icon = item.icon;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                title={item.hint}
+                className="inline-flex min-h-10 shrink-0 items-center gap-2 rounded-lg border border-border/75 bg-background px-3 py-2 text-sm font-semibold text-roast hover:border-primary/45 hover:bg-linen/35"
+              >
+                <Icon className="size-4 text-primary" />
+                {item.label}
+              </Link>
+            );
+          })}
+        </div>
       </section>
 
       <Card>
@@ -375,7 +516,7 @@ export default async function FinancePage({
         </CardContent>
       </Card>
 
-      {opexRows.length ? (
+      {allSpendRows.length ? (
         <section className="space-y-4">
           <div className="grid gap-4 lg:grid-cols-2">
             <BarChartCard title={t('spendByMonth')} data={monthChart} locale={locale} valueKind="iqd" />

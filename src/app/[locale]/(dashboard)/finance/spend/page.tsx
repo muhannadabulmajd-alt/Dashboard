@@ -14,11 +14,11 @@ import { BackLink } from '@/components/records/parts';
 import { PageHeader } from '@/components/ui/primitives';
 import { Link } from '@/i18n/navigation';
 
-const BUCKETS: SpendBucket[] = ['capex', 'opex', 'cogs'];
+const BUCKETS: SpendBucket[] = ['all', 'capex', 'inventory', 'opex', 'direct', 'cogs'];
 
 function bucketFrom(value: string | string[] | undefined): SpendBucket {
   const raw = Array.isArray(value) ? value[0] : value;
-  return BUCKETS.includes(raw as SpendBucket) ? (raw as SpendBucket) : 'opex';
+  return BUCKETS.includes(raw as SpendBucket) ? (raw as SpendBucket) : 'all';
 }
 
 export default async function FinanceSpendPage({

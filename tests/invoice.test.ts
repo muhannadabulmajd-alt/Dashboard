@@ -140,6 +140,34 @@ describe('invoice helpers', () => {
     expect(remitted.providerOutstanding).toBe(0);
   });
 
+  it('counts an automatically deposited provider collection exactly once', () => {
+    const paidAt = new Date('2026-07-28T09:00:00.000Z');
+    const snapshot = invoicePaymentSnapshot(order(), [
+      entry({
+        id: 'wayl-auto-deposit',
+        type: 'INCOME',
+        amount: 95_000,
+        date: paidAt,
+        paymentMethod: 'ONLINE_PAYMENT',
+        account: { name: 'FIB' },
+        party: {
+          id: 'wayl',
+          name: 'Wayl',
+          collectsOrderPayments: true,
+        },
+      }),
+    ]);
+
+    expect(snapshot.status).toBe('PAID');
+    expect(snapshot.route).toBe('PROVIDER');
+    expect(snapshot.paid).toBe(95_000);
+    expect(snapshot.paidRaw).toBe(95_000);
+    expect(snapshot.providerCollected).toBe(95_000);
+    expect(snapshot.providerRemitted).toBe(95_000);
+    expect(snapshot.providerOutstanding).toBe(0);
+    expect(snapshot.accountName).toBe('FIB');
+  });
+
   it('supports a direct partial payment followed by provider collection for the balance', () => {
     const snapshot = invoicePaymentSnapshot(order(), [
       entry({

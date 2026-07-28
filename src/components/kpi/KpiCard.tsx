@@ -61,7 +61,7 @@ export function KpiCard({
           </div>
           <div
             className={cn(
-              'mt-1 max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-[clamp(1.65rem,8vw,2.15rem)] font-bold leading-tight tracking-[-0.01em] tabular sm:text-[clamp(1.45rem,1.65vw,2rem)]',
+              'mt-1 max-w-full whitespace-nowrap text-[clamp(1.35rem,6vw,2.15rem)] font-bold leading-tight tracking-[-0.01em] tabular sm:text-[clamp(1.25rem,1.45vw,1.85rem)]',
               emphasis ? 'text-primary-foreground' : 'text-roast',
             )}
             title={value}

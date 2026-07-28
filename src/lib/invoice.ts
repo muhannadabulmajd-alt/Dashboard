@@ -105,8 +105,17 @@ export function invoicePaymentSnapshot(
       entry.type === 'INCOME' &&
       !entry.settlesId,
   );
-  const providerCollected = providerReceivables.reduce((sum, entry) => sum + entry.amount, 0);
-  const providerRemittedRaw = providerSettlements
+  const providerDirectPayments = directPayments.filter(
+    (entry) => entry.party?.collectsOrderPayments === true,
+  );
+  const customerDirectPayments = directPayments.filter(
+    (entry) => entry.party?.collectsOrderPayments !== true,
+  );
+  const providerDirectTotal = providerDirectPayments.reduce((sum, entry) => sum + entry.amount, 0);
+  const providerCollected =
+    providerReceivables.reduce((sum, entry) => sum + entry.amount, 0) +
+    providerDirectTotal;
+  const providerRemittedRaw = providerDirectTotal + providerSettlements
     .filter((entry) => Boolean(entry.account))
     .reduce((sum, entry) => sum + entry.amount, 0);
   const providerFeesOffsetRaw = providerSettlements
@@ -122,7 +131,7 @@ export function invoicePaymentSnapshot(
     providerFeesOffsetRaw,
   );
   const paidFromSettlements = customerSettlements.reduce((sum, entry) => sum + entry.amount, 0);
-  const paidDirectly = directPayments.reduce((sum, entry) => sum + entry.amount, 0);
+  const paidDirectly = customerDirectPayments.reduce((sum, entry) => sum + entry.amount, 0);
   const paidRaw = paidDirectly + paidFromSettlements + providerCollected;
   const paid = Math.min(total, paidRaw);
   const terminal = order.status === 'CANCELLED' || order.status === 'RETURNED' || order.status === 'REFUNDED';
@@ -131,7 +140,10 @@ export function invoicePaymentSnapshot(
     .filter((entry) => entry.date)
     .sort((a, b) => (a.date?.getTime() ?? 0) - (b.date?.getTime() ?? 0));
   const latestPayment = paymentEvents.at(-1) ?? null;
-  const provider = providerReceivables.find((entry) => entry.party?.name)?.party ?? null;
+  const provider =
+    providerDirectPayments.find((entry) => entry.party?.name)?.party ??
+    providerReceivables.find((entry) => entry.party?.name)?.party ??
+    null;
   const accountPayment = [...directPayments, ...customerSettlements]
     .reverse()
     .find((entry) => entry.account?.name);

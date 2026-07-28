@@ -1,7 +1,8 @@
 import { getTranslations } from 'next-intl/server';
 import { getPageContext } from '@/server/page-context';
 import { getOrders, getOrderLines } from '@/server/db/repositories/sales.repo';
-import { getExpenses } from '@/server/db/repositories/finance.repo';
+import { getExpenses, getPaymentProcessingCosts } from '@/server/db/repositories/finance.repo';
+import { getSpendTotals } from '@/server/finance/spend';
 import * as M from '@/lib/metrics';
 import { enumLabel } from '@/lib/enums';
 import { buildExportHref, buildFinanceExportHref } from '@/lib/filters';
@@ -34,17 +35,29 @@ export default async function PnlPage({
 
   const now = new Date();
   const mtdRange = resolveRange({ range: 'this_month' }, now);
-  const [orders, lines, expenses, mtdOrders] = await Promise.all([
+  const [orders, lines, expenses, paymentProcessingCosts, spendTotals, mtdOrders] = await Promise.all([
     getOrders(filters, scope, range),
     getOrderLines(filters, scope, range),
     getExpenses(filters, scope, range),
+    getPaymentProcessingCosts(filters, scope, range),
+    getSpendTotals(filters, scope, range),
     getOrders(filters, scope, { start: mtdRange.start, end: mtdRange.end }),
   ]);
 
-  const pnl = M.buildPnlSnapshot(orders, lines, expenses);
-  const { grossRevenue: gross, discounts, refunds, netSales: net, cogs, operatingExpenses: opex, directDeliveryCost: deliveryCosts, operatingProfit: profit } = pnl;
+  const pnl = M.buildPnlSnapshot(orders, lines, expenses, { paymentProcessingCosts });
+  const {
+    grossRevenue: gross,
+    discounts,
+    refunds,
+    netSales: net,
+    cogs,
+    operatingExpenses: opex,
+    directDeliveryCost: deliveryCosts,
+    operatingProfit: profit,
+  } = pnl;
   const margin = { amount: pnl.grossProfit, pct: pnl.grossMarginPct };
-  const contribution = M.contributionMargin(net, cogs, { delivery: deliveryCosts });
+  const contribution = pnl.contributionProfit;
+  const averageOrderValue = orders.length ? Math.round(net / orders.length) : 0;
 
   // Cost/margin alerts (§9/§17): active products priced below cost or thin margin.
   const products = await prisma.product.findMany({
@@ -69,6 +82,8 @@ export default async function PnlPage({
     { label: t('cogs'), value: cogs, kind: 'dec' },
     { label: t('grossMargin'), value: margin.amount, kind: 'total' },
     { label: t('deliveryCosts'), value: deliveryCosts, kind: 'dec' },
+    { label: t('paymentProcessingCosts'), value: paymentProcessingCosts, kind: 'dec' },
+    { label: t('contributionProfit'), value: contribution, kind: 'total' },
     { label: t('operatingCosts'), value: opex, kind: 'dec' },
     { label: t('operatingProfit'), value: profit, kind: 'total' },
   ];
@@ -120,14 +135,19 @@ export default async function PnlPage({
       />
 
       <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <KpiCard label={tk('netSales')} value={formatMoney(net, 'IQD', locale)} locale={locale} />
+        <KpiCard label={t('salesEarned')} value={formatMoney(net, 'IQD', locale)} locale={locale} />
+        <KpiCard label={t('totalSpent')} value={formatMoney(spendTotals.totalSpent, 'IQD', locale)} locale={locale} invertDelta />
+        <KpiCard label={t('averageOrderValue')} value={formatMoney(averageOrderValue, 'IQD', locale)} locale={locale} />
         <KpiCard label={tk('cogs')} value={formatMoney(cogs, 'IQD', locale)} locale={locale} invertDelta />
         <KpiCard label={tk('grossMargin')} value={formatPercent(margin.pct, locale)} sub={formatMoney(margin.amount, 'IQD', locale)} locale={locale} />
-        <KpiCard label={tk('contributionMargin')} value={formatMoney(contribution, 'IQD', locale)} locale={locale} />
+        <KpiCard label={t('contributionProfit')} value={formatMoney(contribution, 'IQD', locale)} locale={locale} />
         <KpiCard label={tk('operatingProfit')} value={formatMoney(profit, 'IQD', locale)} locale={locale} />
-        <KpiCard label={tk('runRate')} value={formatMoney(runRate, 'IQD', locale)} locale={locale} />
         <KpiCard label={t('operatingCosts')} value={formatMoney(opex, 'IQD', locale)} locale={locale} invertDelta />
         <KpiCard label={t('deliveryCosts')} value={formatMoney(deliveryCosts, 'IQD', locale)} locale={locale} invertDelta />
+        <KpiCard label={t('paymentProcessingCosts')} value={formatMoney(paymentProcessingCosts, 'IQD', locale)} locale={locale} invertDelta />
+        <KpiCard label={t('capex')} value={formatMoney(spendTotals.capex, 'IQD', locale)} locale={locale} />
+        <KpiCard label={t('inventoryPurchases')} value={formatMoney(spendTotals.inventory, 'IQD', locale)} locale={locale} />
+        <KpiCard label={tk('runRate')} value={formatMoney(runRate, 'IQD', locale)} locale={locale} />
       </section>
 
       {marginAlerts.length ? (

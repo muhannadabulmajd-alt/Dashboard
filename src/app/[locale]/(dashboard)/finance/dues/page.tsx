@@ -6,7 +6,7 @@ import { convertToIqd, formatMoney } from '@/lib/money';
 import { formatDate } from '@/lib/dates';
 import { agingBuckets, type AgingBuckets } from '@/lib/metrics/finance';
 import { can } from '@/lib/rbac';
-import { ActionLink, PageHeader } from '@/components/ui/primitives';
+import { PageHeader } from '@/components/ui/primitives';
 import { DataTable, type Column } from '@/components/data-table/DataTable';
 import { RecordsSummary, type SummaryStat } from '@/components/records/Summary';
 import { BackLink } from '@/components/records/parts';
@@ -105,7 +105,6 @@ export default async function DuesPage({
       <PageHeader
         title={t('dues')}
         subtitle={t('subtitle')}
-        actions={canManage ? <ActionLink href="/finance/dues/provider-settlement">{t('providerSettlement.action')}</ActionLink> : undefined}
       />
       <SectionGuide
         title={t('guide.dues.title')}

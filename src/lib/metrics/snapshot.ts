@@ -13,6 +13,8 @@ export interface PnlMetricSnapshot {
   grossProfit: number;
   grossMarginPct: number;
   directDeliveryCost: number;
+  paymentProcessingCosts: number;
+  contributionProfit: number;
   operatingExpenses: number;
   operatingProfit: number;
 }
@@ -55,6 +57,7 @@ export function buildPnlSnapshot(
   orders: OrderLike[],
   lines: OrderLineLike[],
   expenses: ExpenseLike[],
+  directCosts: { paymentProcessingCosts?: number } = {},
 ): PnlMetricSnapshot {
   const grossRevenue = grossSales(orders);
   const discounts = discountTotal(orders);
@@ -63,6 +66,8 @@ export function buildPnlSnapshot(
   const costOfGoods = cogs(lines);
   const gross = grossMargin(net, costOfGoods);
   const directDeliveryCost = deliveryCostTotal(orders);
+  const paymentProcessingCosts = directCosts.paymentProcessingCosts ?? 0;
+  const contributionProfit = gross.amount - directDeliveryCost - paymentProcessingCosts;
   const opex = operatingExpenses(expenses, 'IQD');
   return {
     grossRevenue,
@@ -73,7 +78,13 @@ export function buildPnlSnapshot(
     grossProfit: gross.amount,
     grossMarginPct: gross.pct,
     directDeliveryCost,
+    paymentProcessingCosts,
+    contributionProfit,
     operatingExpenses: opex,
-    operatingProfit: operatingProfit(gross.amount, opex, directDeliveryCost),
+    operatingProfit: operatingProfit(
+      gross.amount,
+      opex,
+      directDeliveryCost + paymentProcessingCosts,
+    ),
   };
 }

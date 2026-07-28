@@ -51,6 +51,7 @@ export async function getOperatingExpenseFacts(
         currency: true,
         date: true,
         branchId: true,
+        costRole: true,
         party: { select: { name: true } },
         type: true,
         categoryType: true,
@@ -71,6 +72,7 @@ export async function getOperatingExpenseFacts(
       partyName: r.vendor,
     })),
     ...financeRows.flatMap((r) => {
+      if (r.costRole === 'DIRECT_DELIVERY' || r.costRole === 'PAYMENT_PROCESSING') return [];
       if (r.type === 'EXPENSE') {
         return [{ amount: convertToIqd(r.amount, r.currency, rate), currency: 'IQD' as const, incurredAt: r.date, categoryType: r.categoryType ?? 'OVERHEAD', branchId: r.branchId, partyName: r.party?.name ?? null }];
       }
@@ -92,6 +94,33 @@ export async function getOperatingExpenseFacts(
       return [{ amount: convertToIqd(allocation.operatingExpense, r.currency, rate), currency: 'IQD' as const, incurredAt: r.date, categoryType, branchId: r.branchId, partyName: r.party?.name ?? null }];
     }),
   ];
+}
+
+export async function getPaymentProcessingCosts(
+  filters: DashboardFilters,
+  scope: Scope,
+  range: ResolvedRange,
+): Promise<number> {
+  const [rows, rate] = await Promise.all([
+    prisma.financeEntry.findMany({
+      where: {
+        type: 'EXPENSE',
+        costRole: 'PAYMENT_PROCESSING',
+        date: { gte: range.start, lte: range.end },
+        archivedAt: null,
+        reversedAt: null,
+        reversalOfId: null,
+        ...(scope.branchId
+          ? { branchId: scope.branchId }
+          : filters.branchId?.length
+            ? { branchId: { in: filters.branchId } }
+            : {}),
+      },
+      select: { amount: true, currency: true },
+    }),
+    getUsdToIqd(),
+  ]);
+  return rows.reduce((sum, row) => sum + convertToIqd(row.amount, row.currency, rate), 0);
 }
 
 export async function getExpenses(

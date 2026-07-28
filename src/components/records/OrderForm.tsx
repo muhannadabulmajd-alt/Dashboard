@@ -85,7 +85,7 @@ function HeaderField({
         min={min}
         step={step}
         aria-describedby={hint ? hintId : undefined}
-        aria-invalid={Boolean(error)}
+        data-invalid={Boolean(error) || undefined}
         className={cn(input, disabled && disabledInput, error && inputError)}
       />
       {disabled ? <input type="hidden" name={name} value={defaultValue ?? ''} /> : null}
@@ -482,9 +482,7 @@ export function OrderForm({
   const [financeMode, setFinanceMode] = useState(
     editing
       ? 'KEEP'
-      : (saleStatusValues ?? []).includes(status)
-        ? ''
-        : initial?.header?.financeMode ?? 'CREDIT',
+      : initial?.header?.financeMode ?? 'AUTO',
   );
 
   const setLine = (i: number, k: keyof OrderLineInput, v: string) =>
@@ -503,8 +501,13 @@ export function OrderForm({
     (saleStatusValues ?? []).includes(status) &&
     totals.net > (paymentSummary?.paid ?? 0);
   const effectiveFinanceMode =
-    completionNeedsPayment && financeMode !== 'PAID' && financeMode !== 'PROVIDER'
-      ? ''
+    completionNeedsPayment && financeMode === 'KEEP'
+      ? 'AUTO'
+      : completionNeedsPayment &&
+          financeMode !== 'AUTO' &&
+          financeMode !== 'PAID' &&
+          financeMode !== 'PROVIDER'
+        ? 'AUTO'
       : financeMode;
   const fmt = (n: number) => new Intl.NumberFormat(locale === 'ar' ? 'ar-IQ' : 'en-US').format(n);
   const addInlineCustomer = (customer: CustomerOption) => {
@@ -631,10 +634,10 @@ export function OrderForm({
               required={completionNeedsPayment}
             >
               {completionNeedsPayment ? <option value="">{labels.choosePaymentRoute}</option> : null}
+              <option value="AUTO">{labels.financeAuto}</option>
               {!editing && !completionNeedsPayment ? <option value="CREDIT">{labels.financeCredit}</option> : null}
               <option value="PAID">{labels.financePaid}</option>
               {!editing && !completionNeedsPayment ? <option value="PARTIAL">{labels.financePartial}</option> : null}
-              <option value="PROVIDER">{labels.financeProvider}</option>
               {!editing && !completionNeedsPayment ? <option value="NONE">{labels.financeNone}</option> : null}
             </select>
             {completionNeedsPayment ? <p className="text-xs leading-5 text-warning">{labels.completionPaymentHint}</p> : null}
