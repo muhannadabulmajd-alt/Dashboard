@@ -11,6 +11,7 @@ import { RecordActions } from '@/components/records/RecordActions';
 import { archiveCustomer, deleteCustomer } from '@/server/records/customers';
 import { formatDate } from '@/lib/dates';
 import { formatMoney, formatNumber } from '@/lib/money';
+import { invoiceTotal } from '@/lib/invoice';
 import { Link } from '@/i18n/navigation';
 import { getOrderStatusRoleMap } from '@/server/lists/resolver';
 
@@ -67,16 +68,7 @@ export default async function CustomerDetailPage({
     { label: t('f.lastOrder'), value: c.lastOrderAt ? formatDate(c.lastOrderAt, locale) : '—' },
     { label: t('f.notes'), value: c.notes },
   ];
-  const netForOrder = (order: (typeof c.orders)[number]) =>
-    Math.max(
-      0,
-      order.grossAmount -
-        order.discountAmount -
-        order.refundAmount +
-        order.deliveryFee +
-        order.extraCharges,
-    );
-  const totalSpend = spendOrders.reduce((sum, order) => sum + netForOrder(order), 0);
+  const totalSpend = spendOrders.reduce((sum, order) => sum + invoiceTotal(order), 0);
   const productCounts = new Map<string, number>();
   for (const order of c.orders) {
     for (const line of order.lines) {
@@ -103,7 +95,7 @@ export default async function CustomerDetailPage({
   const orderRows = c.orders.map((order) => [
     order.orderNumber,
     formatDate(order.placedAt, locale),
-    formatMoney(netForOrder(order), order.currency, locale),
+    formatMoney(invoiceTotal(order), order.currency, locale),
     enumLabel(order.status, locale),
     <Link key="o" href={`/admin/records/orders/${order.id}`} className="font-medium text-primary hover:underline">
       {t('open')}
