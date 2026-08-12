@@ -42,6 +42,36 @@
       "admin": "Management"
     }
   },
+  "quickAdd": {
+    "title": "Add to Atlas",
+    "subtitle": "Choose what you want to create.",
+    "buttonLabel": "Open quick add",
+    "closeLabel": "Close quick add",
+    "order": {
+      "label": "New order / invoice",
+      "description": "Create a sale and its invoice."
+    },
+    "customer": {
+      "label": "New customer",
+      "description": "Add customer contact details."
+    },
+    "record": {
+      "label": "New finance record",
+      "description": "Record money, spending, stock, or an asset."
+    },
+    "product": {
+      "label": "New product / SKU",
+      "description": "Add a sellable product variation."
+    },
+    "stock": {
+      "label": "New stock item",
+      "description": "Add a material or inventory item."
+    },
+    "party": {
+      "label": "New party / supplier",
+      "description": "Add a supplier or other business party."
+    }
+  },
   "finance": {
     "title": "Finance",
     "subtitle": "Money in and out, balances, dues, and capital — all in one place.",

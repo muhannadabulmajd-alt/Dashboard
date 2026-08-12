@@ -157,12 +157,13 @@ export interface NavItem {
   group: NavGroupKey;
 }
 
-// Sidebar groups, in display order. Admin starts collapsed (secondary tooling).
+// Sidebar groups, in display order. Every section starts collapsed so the
+// navigation remains quick to scan on desktop and mobile.
 export const NAV_GROUPS: { key: NavGroupKey; defaultOpen: boolean }[] = [
-  { key: 'overview', defaultOpen: true },
-  { key: 'sales', defaultOpen: true },
-  { key: 'operations', defaultOpen: true },
-  { key: 'finance', defaultOpen: true },
+  { key: 'overview', defaultOpen: false },
+  { key: 'sales', defaultOpen: false },
+  { key: 'operations', defaultOpen: false },
+  { key: 'finance', defaultOpen: false },
   { key: 'admin', defaultOpen: false },
 ];
 
