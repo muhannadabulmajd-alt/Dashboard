@@ -32,7 +32,7 @@ const bulkOrderSchema = z.object({
   status: z.string().optional(),
   completionMode: z.enum(['AUTO', 'DIRECT', 'PROVIDER']).optional(),
   accountId: z.string().optional(),
-  providerKey: z.enum(['HI_EXPRESS', 'WAYL']).optional(),
+  providerKey: z.string().min(1).optional(),
   paymentMethod: z.string().optional(),
   date: z.coerce.date().optional(),
 });
@@ -759,10 +759,15 @@ export async function bulkUpdateOrders(_prev: ActionState, fd: FormData): Promis
       const account = input.accountId
         ? await tx.financeAccount.findUnique({
             where: { id: input.accountId },
-            select: { id: true, currency: true },
+            select: { id: true, currency: true, type: true, isActive: true },
           })
         : null;
-      if (input.accountId && (!account || account.currency !== 'IQD')) throw new Error('account');
+      if (
+        input.accountId &&
+        (!account?.isActive || account.currency !== 'IQD' || account.type === 'PAYMENT_GATEWAY')
+      ) {
+        throw new Error('account');
+      }
       const provider = input.providerKey
         ? await tx.party.findUnique({
             where: { externalKey: input.providerKey },

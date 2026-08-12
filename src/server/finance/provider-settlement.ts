@@ -9,9 +9,9 @@ import { allocateProviderDeposit } from '@/lib/provider-settlement';
 import { audit, optField, reqField, requireCap, type ActionState } from '@/server/records/shared';
 
 const schema = z.object({
-  partyKey: z.enum(['HI_EXPRESS', 'WAYL']),
+  partyKey: z.string().min(1),
   accountId: z.string().min(1),
-  amountReceived: z.coerce.number().nonnegative(),
+  amountReceived: z.coerce.number().positive(),
   date: z.coerce.date(),
   paymentMethod: z.string().optional(),
   reference: z.string().optional(),
@@ -36,14 +36,31 @@ export async function settleProvider(_prev: ActionState, fd: FormData): Promise<
     const summary = await prisma.$transaction(async (tx) => {
       const party = await tx.party.findUnique({
         where: { externalKey: input.partyKey },
-        select: { id: true, netFeesFromRemittance: true, defaultSettlementAccountId: true },
+        select: {
+          id: true,
+          isActive: true,
+          collectsOrderPayments: true,
+          netFeesFromRemittance: true,
+          defaultSettlementAccountId: true,
+          defaultSettlementAccount: {
+            select: { id: true, currency: true, type: true, isActive: true },
+          },
+        },
       });
-      if (!party) throw new Error('provider');
+      if (
+        !party?.isActive ||
+        !party.collectsOrderPayments ||
+        !party.defaultSettlementAccount?.isActive ||
+        party.defaultSettlementAccount.currency !== 'IQD' ||
+        party.defaultSettlementAccount.type === 'PAYMENT_GATEWAY'
+      ) throw new Error('provider');
       const account = await tx.financeAccount.findUnique({
         where: { id: input.accountId },
-        select: { id: true, currency: true },
+        select: { id: true, currency: true, type: true, isActive: true },
       });
-      if (!account || account.currency !== 'IQD') throw new Error('account');
+      if (!account?.isActive || account.currency !== 'IQD' || account.type === 'PAYMENT_GATEWAY') {
+        throw new Error('account');
+      }
       if (party.defaultSettlementAccountId && party.defaultSettlementAccountId !== account.id) throw new Error('account');
 
       const obligations = await tx.financeEntry.findMany({
