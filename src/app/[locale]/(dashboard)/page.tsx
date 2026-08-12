@@ -1,5 +1,5 @@
 import { getTranslations } from 'next-intl/server';
-import { AlertTriangle, CalendarClock, FileDown, LayoutDashboard, PackageX, TrendingDown } from 'lucide-react';
+import { AlertTriangle, CalendarClock, FileDown, PackageX, TrendingDown } from 'lucide-react';
 import { serializeFilters } from '@/lib/filters';
 import { getPageContext } from '@/server/page-context';
 import {
@@ -10,7 +10,6 @@ import { getInventoryItems } from '@/server/db/repositories/inventory.repo';
 import { getProfitFacts } from '@/server/finance/facts';
 import * as M from '@/lib/metrics';
 import type { AlertKind } from '@/lib/metrics';
-import { Link } from '@/i18n/navigation';
 import { can } from '@/lib/rbac';
 import { enumLabel } from '@/lib/enums';
 import { formatMoney, formatNumber, formatPercent } from '@/lib/money';
@@ -118,13 +117,7 @@ export default async function ExecutiveOverviewPage({
     <>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <PageHeader title={t('title')} subtitle={t('subtitle')} />
-        {can(user.role, 'export:data') || can(user.role, 'view:dashboard-builder') ? <div className="flex flex-wrap items-center gap-2">
-          {can(user.role, 'view:dashboard-builder') ? (
-            <Link href="/dashboard-builder" className="inline-flex items-center gap-1.5 rounded-lg border bg-card px-3 py-1.5 text-xs font-medium hover:bg-muted">
-              <LayoutDashboard className="size-3.5" />
-              {tc('customizeDashboard')}
-            </Link>
-          ) : null}
+        {can(user.role, 'export:data') || can(user.role, 'export:financial') ? <div className="flex flex-wrap items-center gap-2">
           {['OWNER', 'ADMIN'].includes(user.role) && can(user.role, 'export:financial') ? (
             <ShareholderReportMenu locale={locale} label={tc('shareholderReport')} />
           ) : null}

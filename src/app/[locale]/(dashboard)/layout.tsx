@@ -5,10 +5,13 @@ import { prisma } from '@/server/db/client';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { TopBar } from '@/components/layout/TopBar';
 import { getNavGroups } from '@/components/layout/nav';
+import { GlobalQuickAdd } from '@/components/layout/GlobalQuickAdd';
+import { getQuickAddItems } from '@/components/layout/quick-add';
 import { StaleDataBanner } from '@/components/layout/StaleDataBanner';
 import { FilterBar } from '@/components/filters/FilterBar';
 import { getListOptions } from '@/server/lists/resolver';
 import type { AppLocale } from '@/lib/money';
+import { getTranslations } from 'next-intl/server';
 
 export default async function DashboardLayout({
   children,
@@ -22,6 +25,8 @@ export default async function DashboardLayout({
   const scope = buildBranchScope(user);
   const lastUpdated = await getLatestActivityDate(scope);
   const navGroups = await getNavGroups(user.role);
+  const quickAddItems = await getQuickAddItems(user.role);
+  const tQuickAdd = await getTranslations('quickAdd');
 
   // Branch filter is shown only to non-scoped roles (others are locked to their branch).
   const branchOptions = scope.branchId
@@ -51,6 +56,13 @@ export default async function DashboardLayout({
         <StaleDataBanner lastUpdated={lastUpdated} locale={locale as AppLocale} />
         <FilterBar branchOptions={branchOptions} listOptions={listOptions} />
         <main className="min-w-0 flex-1 space-y-5 overflow-x-clip p-3 sm:p-4 lg:space-y-6 lg:p-6">{children}</main>
+        <GlobalQuickAdd
+          items={quickAddItems}
+          title={tQuickAdd('title')}
+          subtitle={tQuickAdd('subtitle')}
+          buttonLabel={tQuickAdd('buttonLabel')}
+          closeLabel={tQuickAdd('closeLabel')}
+        />
       </div>
     </div>
   );

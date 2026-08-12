@@ -80,17 +80,17 @@ function NavLinksInner({
     .filter((item) => isActive(item.href, pathname))
     .sort((a, b) => b.href.length - a.href.length)[0]?.href;
 
-  // A group starts open when it's a default-open group or holds the active page.
+  // Navigation stays compact by default. The user opens only the section they need.
   const [open, setOpen] = useState<Record<string, boolean>>(() => {
     const o: Record<string, boolean> = {};
-    for (const g of groups) o[g.key] = g.defaultOpen || g.items.some((it) => isActive(it.href, pathname));
+    for (const g of groups) o[g.key] = false;
     return o;
   });
 
   return (
     <nav className="flex flex-col gap-2">
       {groups.map((group) => {
-        const expanded = open[group.key] ?? group.defaultOpen;
+        const expanded = open[group.key] ?? false;
         return (
           <div key={group.key} className="flex flex-col gap-1">
             <button
