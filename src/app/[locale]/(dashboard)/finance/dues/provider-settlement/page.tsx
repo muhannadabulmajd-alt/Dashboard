@@ -17,19 +17,40 @@ export default async function ProviderSettlementPage({
   const { locale } = await getPageContext(params, searchParams, 'manage:finance');
   const t = await getTranslations('finance');
   const tr = await getTranslations('records');
-  const [accounts, paymentMethods] = await Promise.all([
+  const [accounts, paymentMethods, providers] = await Promise.all([
     prisma.financeAccount.findMany({
       where: { isActive: true, currency: 'IQD', type: { not: 'PAYMENT_GATEWAY' } },
       orderBy: { name: 'asc' },
       select: { id: true, name: true },
     }),
     getListOptions('paymentMethod', locale),
+    prisma.party.findMany({
+      where: {
+        isActive: true,
+        collectsOrderPayments: true,
+        externalKey: { not: null },
+        defaultSettlementAccount: {
+          is: {
+            isActive: true,
+            currency: 'IQD',
+            type: { not: 'PAYMENT_GATEWAY' },
+          },
+        },
+      },
+      orderBy: { name: 'asc' },
+      select: { externalKey: true, name: true },
+    }),
   ]);
   const fields: FieldDef[] = [
-    { name: 'partyKey', label: t('providerSettlement.provider'), type: 'select', required: true, options: [
-      { value: 'HI_EXPRESS', label: 'Hi-Express' },
-      { value: 'WAYL', label: 'Wayl' },
-    ] },
+    {
+      name: 'partyKey',
+      label: t('providerSettlement.provider'),
+      type: 'select',
+      required: true,
+      options: providers.flatMap((provider) => provider.externalKey
+        ? [{ value: provider.externalKey, label: provider.name }]
+        : []),
+    },
     { name: 'accountId', label: t('f.account'), type: 'select', required: true, options: accounts.map((account) => ({ value: account.id, label: account.name })) },
     { name: 'amountReceived', label: t('providerSettlement.received'), type: 'number', required: true, hint: t('providerSettlement.hint') },
     { name: 'paymentMethod', label: t('f.paymentMethod'), type: 'select', options: paymentMethods },

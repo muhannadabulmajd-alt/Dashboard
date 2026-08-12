@@ -152,12 +152,21 @@ export default async function OrdersRecordsPage({
   ];
 
   const sortOpts = ['newest', 'oldest', 'amountDesc', 'amountAsc'].map((v) => ({ value: v, label: t(`tools.${v}`) }));
-  const [statusOpts, channels, branches, paymentMethods, accounts] = await Promise.all([
+  const [statusOpts, channels, branches, paymentMethods, accounts, providers] = await Promise.all([
     getListOptions('orderStatus', locale),
     getListOptions('channel', locale),
     prisma.branch.findMany({ where: { isActive: true }, orderBy: { code: 'asc' }, select: { id: true, code: true, nameEn: true, nameAr: true } }),
     getListOptions('paymentMethod', locale),
-    prisma.financeAccount.findMany({ where: { isActive: true, currency: 'IQD' }, orderBy: { name: 'asc' }, select: { id: true, name: true } }),
+    prisma.financeAccount.findMany({
+      where: { isActive: true, currency: 'IQD', type: { not: 'PAYMENT_GATEWAY' } },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true },
+    }),
+    prisma.party.findMany({
+      where: { isActive: true, collectsOrderPayments: true, externalKey: { not: null } },
+      orderBy: { name: 'asc' },
+      select: { externalKey: true, name: true },
+    }),
   ]);
   const paymentStatusOpts = (['PAID', 'UNPAID', 'PARTIAL', 'REFUNDED', 'CANCELED'] as const).map((value) => ({
     value,
@@ -218,6 +227,7 @@ export default async function OrdersRecordsPage({
         statuses={statusOpts}
         saleStatusValues={saleStatuses}
         accounts={accounts.map((account) => ({ value: account.id, label: account.name }))}
+        providers={providers.flatMap((provider) => provider.externalKey ? [{ value: provider.externalKey, label: provider.name }] : [])}
         paymentMethods={paymentMethods}
         labels={{
           selectAll: t('bulk.selectAll'), selected: t.raw('bulk.selected') as string, select: t('bulk.select'), order: t('f.orderNumber'), date: t('f.date'), customer: t('f.customer'), channel: t('f.channel'), total: t('f.total'), payment: ti('payment'), status: t('f.status'), open: t('open'), reviewTotal: t('bulk.reviewTotal'), bulkActions: t('bulk.title'), action: t('bulk.action'), updateStatus: t('bulk.updateStatus'), recordPaid: t('bulk.recordPaid'), assignProvider: t('bulk.assignProvider'), account: t('f.account'), paymentMethod: ti('paymentMethod'), provider: t('bulk.provider'), apply: t('bulk.apply'), success: t('bulk.success'), invalid: t('err.invalid'), forbidden: t('err.forbidden'), notfound: t('err.notfound'), accountError: t('err.account'), receivableError: t('bulk.receivableError'), providerError: t('bulk.providerError'), statusError: t('bulk.statusError'), amount_exceeds_open: t('bulk.amountError'), payment_requiredError: t('err.payment_required'), completionPaymentHint: t('bulk.completionPaymentHint'), completionMode: t('bulk.completionMode'), automaticPayment: t('bulk.automaticPayment'), directPayment: t('bulk.directPayment'), providerCollection: t('bulk.providerCollection'),

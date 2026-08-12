@@ -29,6 +29,7 @@ export function OrdersBulkTable({
   statuses,
   saleStatusValues,
   accounts,
+  providers,
   paymentMethods,
   labels,
 }: {
@@ -38,6 +39,7 @@ export function OrdersBulkTable({
   statuses: Option[];
   saleStatusValues: string[];
   accounts: Option[];
+  providers: Option[];
   paymentMethods: Option[];
   labels: Record<string, string>;
 }) {
@@ -102,7 +104,7 @@ export function OrdersBulkTable({
           <input type="hidden" name="locale" value={locale} /><input type="hidden" name="orderIds" value={JSON.stringify(selected)} />
           <div className="mb-4 flex items-center justify-between"><div><h2 className="text-lg font-bold">{labels.bulkActions}</h2><p className="text-xs text-muted-foreground">{labels.selected.replace('{count}', String(selected.length))}</p></div><button type="button" onClick={() => setOpen(false)} className="grid size-11 place-items-center rounded-lg border"><X className="size-5" /></button></div>
           <div className="grid gap-4">
-            <label className="grid gap-1 text-sm font-semibold">{labels.action}<select name="operation" value={operation} onChange={(event) => setOperation(event.target.value)} className={control}><option value="STATUS">{labels.updateStatus}</option><option value="RECORD_PAID">{labels.recordPaid}</option></select></label>
+            <label className="grid gap-1 text-sm font-semibold">{labels.action}<select name="operation" value={operation} onChange={(event) => setOperation(event.target.value)} className={control}><option value="STATUS">{labels.updateStatus}</option><option value="RECORD_PAID">{labels.recordPaid}</option><option value="ASSIGN_PROVIDER">{labels.assignProvider}</option></select></label>
             {operation === 'STATUS' ? (
               <>
                 <label className="grid gap-1 text-sm font-semibold">
@@ -131,6 +133,7 @@ export function OrdersBulkTable({
                       >
                         <option value="AUTO">{labels.automaticPayment}</option>
                         <option value="DIRECT">{labels.directPayment}</option>
+                        <option value="PROVIDER">{labels.providerCollection}</option>
                       </select>
                     </label>
                     {completionMode === 'DIRECT' ? (
@@ -139,6 +142,15 @@ export function OrdersBulkTable({
                         <select name="accountId" className={control}>
                           <option value="">—</option>
                           {accounts.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                        </select>
+                      </label>
+                    ) : null}
+                    {completionMode === 'PROVIDER' ? (
+                      <label className="grid gap-1 text-sm font-semibold">
+                        {labels.provider}
+                        <select name="providerKey" className={control}>
+                          <option value="">—</option>
+                          {providers.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                         </select>
                       </label>
                     ) : null}
@@ -161,6 +173,7 @@ export function OrdersBulkTable({
               </>
             ) : null}
             {operation === 'RECORD_PAID' ? <><label className="grid gap-1 text-sm font-semibold">{labels.account}<select name="accountId" className={control}>{accounts.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label><label className="grid gap-1 text-sm font-semibold">{labels.paymentMethod}<select name="paymentMethod" className={control}>{paymentMethods.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label><label className="grid gap-1 text-sm font-semibold">{labels.date}<input name="date" type="date" defaultValue={new Date().toISOString().slice(0, 10)} className={control} /></label></> : null}
+            {operation === 'ASSIGN_PROVIDER' ? <><label className="grid gap-1 text-sm font-semibold">{labels.provider}<select name="providerKey" className={control}><option value="">—</option>{providers.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label><label className="grid gap-1 text-sm font-semibold">{labels.paymentMethod}<select name="paymentMethod" className={control}>{paymentMethods.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label><label className="grid gap-1 text-sm font-semibold">{labels.date}<input name="date" type="date" defaultValue={new Date().toISOString().slice(0, 10)} className={control} /></label></> : null}
             {state?.error ? <p role="alert" className="rounded-lg border border-danger/20 bg-danger-soft p-3 text-sm font-semibold text-danger">{labels[`${state.error}Error`] ?? labels[state.error] ?? state.error}</p> : null}
             {state?.ok ? <p role="status" className="rounded-lg border border-success/20 bg-success-soft p-3 text-sm font-semibold text-success">{labels.success}</p> : null}
             <button type="submit" disabled={pending} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-primary px-4 font-bold text-primary-foreground disabled:opacity-60">{pending ? <Loader2 className="size-4 animate-spin" /> : null}{labels.apply}</button>

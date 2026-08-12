@@ -691,13 +691,13 @@ async function main(): Promise<void> {
     failures: await count`
       SELECT COUNT(*) AS count
       FROM "Party" p
-      WHERE p."externalKey" IN ('HI_EXPRESS', 'WAYL')
+      WHERE p."externalKey" IN ('HI_EXPRESS', 'WAYL', 'STORIX')
         AND p."isActive" = true
         AND (
           p."collectsOrderPayments" = false
           OR p."automaticOrderSettlement" = true
           OR p."defaultSettlementAccountId" IS NULL
-          OR (p."externalKey" = 'HI_EXPRESS' AND p."providerFeeMode" <> 'ORDER_DELIVERY_COST')
+          OR (p."externalKey" IN ('HI_EXPRESS', 'STORIX') AND p."providerFeeMode" <> 'ORDER_DELIVERY_COST')
           OR (p."externalKey" = 'WAYL' AND (
             p."providerFeeMode" <> 'PERCENT_PLUS_FIXED'
             OR p."feeRateBps" <> 350
@@ -793,20 +793,20 @@ async function main(): Promise<void> {
           FROM "PaymentReconciliationItem" item
           JOIN "Party" provider ON provider.id = item."providerPartyId"
           WHERE provider."externalKey" = 'WAYL'
+        ) AND NOT EXISTS (
+          SELECT 1
+          FROM "Setting"
+          WHERE "key" = 'external_reports_reconciliation_version'
+            AND value = '2026-08-12-v1'
         ) THEN 0
         WHEN (
-          SELECT COUNT(*) = 12
-            AND COALESCE(SUM(item."grossAmount"), 0) = 275000
-            AND COALESCE(SUM(item."feeAmount"), 0) = 16822
-            AND COUNT(*) FILTER (WHERE item.status = 'NEEDS_ORDER') = 5
+          SELECT COUNT(*) = 17
+            AND COALESCE(SUM(item."grossAmount"), 0) = 402000
+            AND COALESCE(SUM(item."feeAmount"), 0) = 24266
+            AND COUNT(*) FILTER (WHERE item.status = 'NEEDS_ORDER') = 0
           FROM "PaymentReconciliationItem" item
           JOIN "Party" provider ON provider.id = item."providerPartyId"
           WHERE provider."externalKey" = 'WAYL'
-            AND item."createdAt" <= (
-              SELECT value::timestamp
-              FROM "Setting"
-              WHERE "key" = 'finance_integrity_expected_cutoff'
-            )
         ) AND (
           SELECT COALESCE(SUM(CASE
             WHEN e."accountId" = account.id THEN
@@ -825,27 +825,147 @@ async function main(): Promise<void> {
             AND e."archivedAt" IS NULL
             AND e."reversedAt" IS NULL
             AND e."reversalOfId" IS NULL
-            AND e."createdAt" <= (
-              SELECT value::timestamp
-              FROM "Setting"
-              WHERE "key" = 'finance_integrity_expected_cutoff'
-            )
           WHERE account."externalKey" = 'WAYL_WALLET'
           GROUP BY account.id
-        ) = 55253 AND (
-          SELECT COUNT(*) = 12 AND COALESCE(SUM(amount), 0) = 16822
+        ) = 14840 AND (
+          SELECT COUNT(*) = 17 AND COALESCE(SUM(amount), 0) = 24266
           FROM "FinanceEntry"
           WHERE "importKey" LIKE 'WAYL:STATEMENT:%:FEE'
             AND "archivedAt" IS NULL
             AND "reversedAt" IS NULL
             AND "reversalOfId" IS NULL
             AND "costRole" = 'PAYMENT_PROCESSING'
-            AND "createdAt" <= (
-              SELECT value::timestamp
-              FROM "Setting"
-              WHERE "key" = 'finance_integrity_expected_cutoff'
-            )
         ) THEN 0
+        ELSE 1
+      END AS count
+    `,
+  });
+
+  checks.push({
+    name: 'external report order snapshot',
+    failures: await count`
+      WITH reconciliation AS (
+        SELECT 1
+        FROM "Setting"
+        WHERE "key" = 'external_reports_reconciliation_version'
+          AND value = '2026-08-12-v1'
+      ), external_orders AS (
+        SELECT orders.id, orders.status
+        FROM "Order" orders
+        WHERE orders.id LIKE 'ext-order-%'
+      )
+      SELECT CASE
+        WHEN NOT EXISTS (SELECT 1 FROM reconciliation) THEN 0
+        WHEN (SELECT COUNT(*) FROM external_orders) = 26
+          AND (SELECT COUNT(*) FROM external_orders WHERE status = 'COMPLETED') = 20
+          AND (SELECT COUNT(*) FROM external_orders WHERE status = 'PENDING') = 6
+        THEN 0
+        ELSE 1
+      END AS count
+    `,
+  });
+
+  checks.push({
+    name: 'pending external orders have no finance or sold stock',
+    failures: await count`
+      WITH reconciliation AS (
+        SELECT 1
+        FROM "Setting"
+        WHERE "key" = 'external_reports_reconciliation_version'
+          AND value = '2026-08-12-v1'
+      ), pending_orders AS (
+        SELECT orders.id
+        FROM "Order" orders
+        WHERE orders.id LIKE 'ext-order-%' AND orders.status = 'PENDING'
+      )
+      SELECT CASE
+        WHEN NOT EXISTS (SELECT 1 FROM reconciliation) THEN 0
+        ELSE (
+          SELECT COUNT(*)
+          FROM pending_orders
+          WHERE EXISTS (
+            SELECT 1 FROM "FinanceEntry" entry WHERE entry."orderId" = pending_orders.id
+          ) OR EXISTS (
+            SELECT 1
+            FROM "StockMovement" movement
+            WHERE movement."orderId" = pending_orders.id AND movement.reason = 'SOLD'
+          )
+        )
+      END AS count
+    `,
+  });
+
+  checks.push({
+    name: 'Storix completed invoices and outstanding balance',
+    failures: await count`
+      WITH reconciliation AS (
+        SELECT 1
+        FROM "Setting"
+        WHERE "key" = 'external_reports_reconciliation_version'
+          AND value = '2026-08-12-v1'
+      ), active_finance AS (
+        SELECT *
+        FROM "FinanceEntry"
+        WHERE "archivedAt" IS NULL AND "reversedAt" IS NULL AND "reversalOfId" IS NULL
+      ), storix_receivables AS (
+        SELECT
+          receivable.id,
+          receivable."orderId",
+          orders.status,
+          receivable.amount - COALESCE(SUM(settlement.amount), 0)::integer AS outstanding
+        FROM active_finance receivable
+        JOIN "Party" storix
+          ON storix.id = receivable."partyId" AND storix."externalKey" = 'STORIX'
+        JOIN "Order" orders ON orders.id = receivable."orderId"
+        LEFT JOIN active_finance settlement ON settlement."settlesId" = receivable.id
+        WHERE receivable.obligation = true
+          AND receivable."obligationKind" = 'RECEIVABLE'
+        GROUP BY receivable.id, receivable."orderId", orders.status, receivable.amount
+      )
+      SELECT CASE
+        WHEN NOT EXISTS (SELECT 1 FROM reconciliation) THEN 0
+        WHEN (SELECT COUNT(*) FROM storix_receivables) = 5
+          AND (SELECT COUNT(DISTINCT "orderId") FROM storix_receivables) = 5
+          AND NOT EXISTS (SELECT 1 FROM storix_receivables WHERE status <> 'COMPLETED')
+          AND (SELECT COALESCE(SUM(outstanding), 0) FROM storix_receivables) = 70500
+        THEN 0
+        ELSE 1
+      END AS count
+    `,
+  });
+
+  checks.push({
+    name: 'external reconciliation Wayl payouts',
+    failures: await count`
+      WITH reconciliation AS (
+        SELECT 1
+        FROM "Setting"
+        WHERE "key" = 'external_reports_reconciliation_version'
+          AND value = '2026-08-12-v1'
+      ), payouts AS (
+        SELECT payout.*
+        FROM "FinanceEntry" payout
+        WHERE payout."importKey" LIKE 'WAYL:PAYOUT:%'
+          AND payout."archivedAt" IS NULL
+          AND payout."reversedAt" IS NULL
+          AND payout."reversalOfId" IS NULL
+      )
+      SELECT CASE
+        WHEN NOT EXISTS (SELECT 1 FROM reconciliation) THEN 0
+        WHEN (SELECT COALESCE(SUM(amount), 0) FROM payouts) = 362894
+          AND NOT EXISTS (
+            SELECT 1
+            FROM payouts payout
+            LEFT JOIN "FinanceAccount" source ON source.id = payout."accountId"
+            LEFT JOIN "FinanceAccount" destination ON destination.id = payout."toAccountId"
+            WHERE payout.type <> 'TRANSFER'
+              OR payout.amount <= 0
+              OR payout.currency <> 'IQD'
+              OR payout.obligation = true
+              OR source."externalKey" IS DISTINCT FROM 'WAYL_WALLET'
+              OR destination."externalKey" IS DISTINCT FROM 'FIB'
+          )
+        THEN 0
         ELSE 1
       END AS count
     `,
