@@ -10,6 +10,7 @@ import { getInventoryItems } from '@/server/db/repositories/inventory.repo';
 import { getProfitFacts } from '@/server/finance/facts';
 import * as M from '@/lib/metrics';
 import type { AlertKind } from '@/lib/metrics';
+import { Link } from '@/i18n/navigation';
 import { can } from '@/lib/rbac';
 import { enumLabel } from '@/lib/enums';
 import { formatMoney, formatNumber, formatPercent } from '@/lib/money';
