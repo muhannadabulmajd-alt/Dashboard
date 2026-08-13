@@ -28,7 +28,8 @@ export type Capability =
   | 'manage:lists'
   | 'upload:data'
   | 'export:data'
-  | 'export:financial';
+  | 'export:financial'
+  | 'use:ai-assistant';
 
 const ALL: Capability[] = [
   'view:dashboard',
@@ -58,6 +59,7 @@ const ALL: Capability[] = [
   'upload:data',
   'export:data',
   'export:financial',
+  'use:ai-assistant',
 ];
 
 export const ROLE_CAPABILITIES: Record<Role, Capability[]> = {

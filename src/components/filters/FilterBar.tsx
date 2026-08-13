@@ -34,7 +34,7 @@ function pageConfig(path: string): FilterConfig | null {
     return { groups: ['channel'], branch: false };
   }
   if (path.startsWith('/finance/reports')) return { groups: [], branch: true };
-  if (path.startsWith('/finance') || path.startsWith('/admin')) return null;
+  if (path.startsWith('/finance') || path.startsWith('/admin') || path.startsWith('/ai-assistant')) return null;
   const map: Record<string, FilterConfig> = {
     '/': { groups: ALL_GROUPS, branch: true },
     '/sales': { groups: ALL_GROUPS, branch: true },

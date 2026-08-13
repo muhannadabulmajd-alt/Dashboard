@@ -5,7 +5,14 @@ import { revalidatePath } from 'next/cache';
 import { prisma } from '@/server/db/client';
 import { getCurrentUser } from '@/server/auth/session';
 import { getUsdToIqd } from '@/server/settings';
-import { audit, optField, reqField, type ActionState } from '@/server/records/shared';
+import {
+  audit,
+  optField,
+  reqField,
+  type ActionState,
+  type CommandCommitHook,
+  type CommandPreconditionHook,
+} from '@/server/records/shared';
 import { can } from '@/lib/rbac';
 import { toMinor, convertToIqd } from '@/lib/money';
 import { parseDecimalInput } from '@/lib/decimal';
@@ -18,6 +25,7 @@ import {
 } from '@/lib/spend-treatment';
 import { isMeasurementUnit } from '@/lib/units';
 import { syncActiveCost } from '@/server/inventory/fifo';
+import { normalizeIraqiPhone } from '@/lib/phone';
 import { syncAllocatedAssetTotals } from '@/server/finance/asset-allocations';
 import {
   captureLayerBaseCosts,
@@ -337,15 +345,18 @@ async function resolveInventoryItem(
   fd: FormData,
   userId: string,
   unitCost: string,
-): Promise<{ id: string; category: string; branchId: string | null; nameEn: string; nameAr: string } | null> {
+): Promise<{ id: string; category: string; branchId: string | null; nameEn: string; nameAr: string; unit: string } | null> {
   const mode = reqField(fd, 'inventoryItemMode') || 'existing';
   if (mode === 'existing') {
     const id = reqField(fd, 'inventoryItemId');
     if (!id) return null;
     const item = await tx.inventoryItem.findUnique({
       where: { id },
-      select: { id: true, category: true, branchId: true, nameEn: true, nameAr: true },
+      select: { id: true, category: true, branchId: true, nameEn: true, nameAr: true, unit: true, isActive: true },
     });
+    if (!item?.isActive || item.unit !== reqField(fd, 'unit')) return null;
+    const requestedBranch = optField(fd, 'branchId');
+    if (requestedBranch && item.branchId && requestedBranch !== item.branchId) return null;
     return item;
   }
 
@@ -366,7 +377,7 @@ async function resolveInventoryItem(
       unitCost,
       reorderPoint: reorderPoint ? decimalData(parseDecimalInput(reorderPoint, 3) ?? 0) : null,
     },
-    select: { id: true, category: true, branchId: true, nameEn: true, nameAr: true },
+    select: { id: true, category: true, branchId: true, nameEn: true, nameAr: true, unit: true },
   });
   await tx.auditLog.create({
     data: {
@@ -387,10 +398,13 @@ async function resolveLineInventoryItem(
 ): Promise<{ id: string; category: string; branchId: string | null; nameEn: string; nameAr: string; unit: string } | null> {
   if (line.inventoryItemMode === 'existing') {
     if (!line.inventoryItemId) return null;
-    return tx.inventoryItem.findUnique({
+    const item = await tx.inventoryItem.findUnique({
       where: { id: line.inventoryItemId },
-      select: { id: true, category: true, branchId: true, nameEn: true, nameAr: true, unit: true },
+      select: { id: true, category: true, branchId: true, nameEn: true, nameAr: true, unit: true, isActive: true },
     });
+    if (!item?.isActive || item.unit !== line.unit) return null;
+    if (line.branchId && item.branchId && line.branchId !== item.branchId) return null;
+    return item;
   }
 
   const category = oneOf(line.newItemCategory, INVENTORY_CATEGORIES);
@@ -462,13 +476,15 @@ export async function quickCreateCustomer(fd: FormData): Promise<QuickCreateResu
   if (!user) return { ok: false, error: 'forbidden' };
   const name = reqField(fd, 'name');
   if (!name) return { ok: false, error: 'invalid' };
+  const phone = optField(fd, 'phone') ?? null;
   const result = await prisma.$transaction(async (tx) => {
     const customer = await tx.customer.create({
       data: {
         externalId: await nextCustomerCode(tx),
         nameEn: name,
         nameAr: optField(fd, 'nameAr') ?? name,
-        phone: optField(fd, 'phone') ?? null,
+        phone,
+        normalizedPhone: normalizeIraqiPhone(phone),
         email: optField(fd, 'email') ?? null,
         address1: optField(fd, 'address') ?? null,
         notes: optField(fd, 'notes') ?? null,
@@ -480,7 +496,7 @@ export async function quickCreateCustomer(fd: FormData): Promise<QuickCreateResu
       data: {
         name,
         type: 'CUSTOMER',
-        phone: optField(fd, 'phone') ?? null,
+        phone,
         email: optField(fd, 'email') ?? null,
         address: optField(fd, 'address') ?? null,
         notes: `Linked customer ${customer.externalId}`,
@@ -511,10 +527,15 @@ export async function quickCreateCustomer(fd: FormData): Promise<QuickCreateResu
   return { ok: true, id: result.id, label: result.name };
 }
 
-export async function createCentralRecord(_prev: ActionState, fd: FormData): Promise<ActionState> {
+export async function createCentralRecordCommand(
+  fd: FormData,
+  options: {
+    beforeExecute?: CommandPreconditionHook;
+    onCommitted?: CommandCommitHook<{ recordId: string }>;
+  } = {},
+): Promise<ActionState> {
   const user = await requireFinanceUser();
   if (!user) return { error: 'forbidden' };
-  const locale = reqField(fd, 'locale') || 'ar';
   const kind = oneOf(reqField(fd, 'recordKind'), RECORD_KINDS);
   const date = parseDate(reqField(fd, 'date'));
   if (!kind || !date) return { error: 'invalid' };
@@ -547,7 +568,8 @@ export async function createCentralRecord(_prev: ActionState, fd: FormData): Pro
   const touchedItems: string[] = [];
   try {
     await prisma.$transaction(async (tx) => {
-    if (isMultiLinePurchase && linePayload) {
+      await options.beforeExecute?.(tx);
+      if (isMultiLinePurchase && linePayload) {
       const paymentMethod = parsePaymentMethod(fd);
       const entry = await tx.financeEntry.create({
         data: {
@@ -707,8 +729,9 @@ export async function createCentralRecord(_prev: ActionState, fd: FormData): Pro
         await syncActiveCost(itemId, tx);
       }
       newId = entry.id;
-      return;
-    }
+      await options.onCommitted?.(tx, { recordId: newId });
+        return;
+      }
 
     if (kind === 'STOCK_PURCHASE') {
       const qty = quantity as number;
@@ -812,6 +835,7 @@ export async function createCentralRecord(_prev: ActionState, fd: FormData): Pro
       newId = entry.id;
       touchedItems.push(item.id);
       await syncActiveCost(item.id, tx);
+      await options.onCommitted?.(tx, { recordId: newId });
       return;
     }
 
@@ -913,6 +937,7 @@ export async function createCentralRecord(_prev: ActionState, fd: FormData): Pro
         });
       }
       newId = entry.id;
+      await options.onCommitted?.(tx, { recordId: newId });
       return;
     }
 
@@ -982,13 +1007,21 @@ export async function createCentralRecord(_prev: ActionState, fd: FormData): Pro
       },
     });
     newId = entry.id;
+    await options.onCommitted?.(tx, { recordId: newId });
     });
-  } catch {
-    return { error: 'invalid' };
+  } catch (error) {
+    return { error: error instanceof Error && error.message === 'action_stale' ? 'action_stale' : 'invalid' };
   }
 
   revalidateFinancePaths();
-  redirect(`/${locale}/finance/ledger/${newId}`);
+  return { ok: true, recordId: newId };
+}
+
+export async function createCentralRecord(_prev: ActionState, fd: FormData): Promise<ActionState> {
+  const locale = reqField(fd, 'locale') || 'ar';
+  const result = await createCentralRecordCommand(fd);
+  if (!result?.ok || !result.recordId) return result;
+  redirect(`/${locale}/finance/ledger/${result.recordId}`);
 }
 
 export async function updateCentralPurchase(

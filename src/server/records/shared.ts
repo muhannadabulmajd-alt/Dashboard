@@ -12,7 +12,20 @@ export type ActionState = {
   fieldErrors?: Record<string, string>;
   stage?: string;
   debugId?: string;
+  recordId?: string;
+  recordNumber?: string;
 } | undefined;
+
+/** Optional transaction hook used by trusted server adapters such as the AI confirmation flow. */
+export type CommandCommitHook<T> = (
+  tx: Prisma.TransactionClient,
+  result: T,
+) => Promise<void>;
+
+/** Optional guard that runs inside the same transaction, before any mutation. */
+export type CommandPreconditionHook = (
+  tx: Prisma.TransactionClient,
+) => Promise<void>;
 
 /** Return the current user iff they hold the capability, else null. */
 export async function requireCap(capability: Capability) {

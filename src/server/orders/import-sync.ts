@@ -4,6 +4,7 @@ import type { OrderInput } from '@/server/ingestion/parsers';
 import type { OrderMetricRole } from '@/lib/metrics/status';
 import { syncOrderFinance } from '@/server/finance/sync';
 import { applySoldMovements, syncCustomerStats } from '@/server/orders/sync';
+import { syncActiveCostForProducts } from '@/server/inventory/fifo';
 
 type Tx = Prisma.TransactionClient;
 
@@ -118,6 +119,7 @@ export async function upsertImportedOrder(
   if (input.statusRole === 'SALE' && order.inventorySyncMode === 'NORMAL') {
     await applySoldMovements(tx, orderId, order.placedAt, lineData);
   }
+  await syncActiveCostForProducts(lineData.map((line) => line.productId), tx);
 
   const financeMode = input.statusRole === 'SALE' ? order.paymentMode : 'NONE';
   await syncOrderFinance(tx, orderId, {

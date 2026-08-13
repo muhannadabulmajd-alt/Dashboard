@@ -158,3 +158,15 @@ export function formatDateTime(date: Date, _locale: 'ar' | 'en' = 'en'): string 
 export function dateInputValue(date: Date = new Date()): string {
   return formatInTimeZone(date, TZ, 'yyyy-MM-dd');
 }
+
+/** Parse explicit instants as-is and naive date/time values as Baghdad local time. */
+export function parseBaghdadDateTime(value: string | null | undefined): Date | null {
+  if (!value) return null;
+  const text = value.trim();
+  if (!text) return null;
+  const hasExplicitZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(text);
+  const candidate = hasExplicitZone
+    ? new Date(text)
+    : fromZonedTime(/^\d{4}-\d{2}-\d{2}$/.test(text) ? `${text}T00:00:00` : text, TZ);
+  return Number.isNaN(candidate.getTime()) ? null : candidate;
+}

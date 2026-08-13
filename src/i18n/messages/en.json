@@ -47,6 +47,10 @@
     "subtitle": "Choose what you want to create.",
     "buttonLabel": "Open quick add",
     "closeLabel": "Close quick add",
+    "assistant": {
+      "label": "Atlas AI Assistant",
+      "description": "Ask questions or prepare a record safely."
+    },
     "order": {
       "label": "New order / invoice",
       "description": "Create a sale and its invoice."
@@ -70,6 +74,51 @@
     "party": {
       "label": "New party / supplier",
       "description": "Add a supplier or other business party."
+    }
+  },
+  "aiAssistant": {
+    "eyebrow": "Private operational assistant",
+    "title": "Atlas AI Assistant",
+    "subtitle": "Ask about live Atlas data or prepare a record for your confirmation.",
+    "newChat": "New conversation",
+    "history": "Conversation history",
+    "closeHistory": "Close conversation history",
+    "transcript": "Assistant conversation",
+    "userMessage": "Your message",
+    "assistantMessage": "Atlas Assistant message",
+    "emptyTitle": "What would you like to do?",
+    "emptyBody": "I can analyze live Atlas data and prepare safe, reviewable actions.",
+    "placeholder": "Ask Atlas about sales, stock, orders, or a new record...",
+    "composerLabel": "Message Atlas Assistant",
+    "send": "Send",
+    "retry": "Retry",
+    "viewInAtlas": "View in Atlas",
+    "open": "Open",
+    "stopWait": "Working...",
+    "confirm": "Confirm and execute",
+    "cancel": "Cancel",
+    "confirmed": "Completed",
+    "processing": "Processing securely...",
+    "cancelled": "Cancelled",
+    "failed": "Failed",
+    "expired": "Expired",
+    "stale": "Needs a fresh preview",
+    "confirmationRequired": "Review before Atlas changes anything",
+    "expiresAt": "Available until {date}.",
+    "generatedAt": "Generated {date}",
+    "noHistory": "No previous conversations yet.",
+    "privacy": "Private to your account · retained for {days} days · processed by OpenAI without response storage",
+    "disabledTitle": "AI Assistant is not available yet",
+    "disabledBody": "Configure and enable the assistant in this environment before using it.",
+    "quickActions": {
+      "sales": "Analyze sales",
+      "order": "Find order",
+      "inventory": "Check inventory",
+      "expenses": "Review expenses",
+      "createOrder": "Create order",
+      "expense": "Record expense",
+      "purchase": "Record purchase",
+      "status": "Update order status"
     }
   },
   "finance": {
@@ -848,6 +897,7 @@
       "productGroup": "Link this variation to its main product so reporting and setup stay together.",
       "variationType": "Describe what makes this variation different, such as size, grind, roast or packaging.",
       "sellingPrice": "Used for new orders by default. Price history keeps old orders unchanged.",
+      "aliases": "Used by order search and the assistant. Separate names with commas.",
       "inventoryUnit": "Use the unit you count day to day, such as g, kg, bag, box or unit.",
       "linkedVariation": "When linked, completed orders can deduct this stock automatically.",
       "reorderPoint": "Low-stock alerts trigger when current stock falls below this level.",
@@ -964,7 +1014,8 @@
       "none": "—", "createdAt": "Added",
       "address1": "Address", "street": "Street / landmark", "notes": "Notes", "source": "Source",
       "code": "Code", "description": "Description", "variations": "Variations", "variation": "Variation", "group": "Product group", "mainProduct": "Main product",
-      "productType": "Product type", "productTypeHint": "e.g. Coffee, Gift, Merch", "imageUrl": "Image URL"
+      "productType": "Product type", "productTypeHint": "e.g. Coffee, Gift, Merch", "imageUrl": "Image URL",
+      "aliases": "Search aliases", "aliasesHint": "Arabic, English, or operational names separated by commas"
     }
   },
   "common": {

@@ -131,7 +131,7 @@ async function main(): Promise<void> {
             AND e."reversedAt" IS NULL
             AND e."reversalOfId" IS NULL
             AND e."createdAt" <= (
-              SELECT value::timestamp
+              SELECT value::timestamp(3)
               FROM "Setting"
               WHERE "key" = 'finance_integrity_expected_cutoff'
             )
@@ -163,7 +163,7 @@ async function main(): Promise<void> {
             AND e."reversedAt" IS NULL
             AND e."reversalOfId" IS NULL
             AND e."createdAt" <= (
-              SELECT value::timestamp
+              SELECT value::timestamp(3)
               FROM "Setting"
               WHERE "key" = 'finance_integrity_expected_cutoff'
             )
@@ -181,7 +181,7 @@ async function main(): Promise<void> {
             AND e."reversedAt" IS NULL
             AND e."reversalOfId" IS NULL
             AND e."createdAt" <= (
-              SELECT value::timestamp
+              SELECT value::timestamp(3)
               FROM "Setting"
               WHERE "key" = 'finance_integrity_expected_cutoff'
             )
@@ -199,7 +199,7 @@ async function main(): Promise<void> {
             AND e."reversedAt" IS NULL
             AND e."reversalOfId" IS NULL
             AND e."createdAt" <= (
-              SELECT value::timestamp
+              SELECT value::timestamp(3)
               FROM "Setting"
               WHERE "key" = 'finance_integrity_expected_cutoff'
             )
@@ -229,7 +229,7 @@ async function main(): Promise<void> {
           WHERE status = 'COMPLETED'
             AND purpose = 'SALE'
             AND "createdAt" <= (
-              SELECT value::timestamp
+              SELECT value::timestamp(3)
               FROM "Setting"
               WHERE "key" = 'finance_integrity_expected_cutoff'
             )
@@ -242,7 +242,7 @@ async function main(): Promise<void> {
           WHERE status = 'COMPLETED'
             AND purpose = 'SALE'
             AND "createdAt" <= (
-              SELECT value::timestamp
+              SELECT value::timestamp(3)
               FROM "Setting"
               WHERE "key" = 'finance_integrity_expected_cutoff'
             )
@@ -255,7 +255,7 @@ async function main(): Promise<void> {
           WHERE status = 'COMPLETED'
             AND purpose = 'PROMOTION'
             AND "createdAt" <= (
-              SELECT value::timestamp
+              SELECT value::timestamp(3)
               FROM "Setting"
               WHERE "key" = 'finance_integrity_expected_cutoff'
             )

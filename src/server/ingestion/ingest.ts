@@ -31,6 +31,7 @@ import { upsertImportedShipment } from '@/server/shipments/import-sync';
 import { upsertImportedRoastBatch } from '@/server/roastery/import-sync';
 import { getOrderStatusRoleMap } from '@/server/lists/resolver';
 import { generateProductBarcode, generateRetailBarcode } from '@/server/records/numbering';
+import { normalizeIraqiPhone } from '@/lib/phone';
 
 const DATASET_TYPE: Record<ImportDataset, DatasetType> = {
   products: 'PRODUCTS',
@@ -411,12 +412,13 @@ export async function ingestCsv(
       errors.push(...e);
       for (const c of valid) {
         const { externalId, ...rest } = c;
+        const data = { ...rest, normalizedPhone: normalizeIraqiPhone(rest.phone) };
         const existing = await prisma.customer.findUnique({ where: { externalId }, select: { id: true } });
         if (existing) {
-          await prisma.customer.update({ where: { externalId }, data: rest });
+          await prisma.customer.update({ where: { externalId }, data });
           updated += 1;
         } else {
-          await prisma.customer.create({ data: { externalId, ...rest } });
+          await prisma.customer.create({ data: { externalId, ...data } });
           inserted += 1;
         }
       }

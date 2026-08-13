@@ -40,6 +40,7 @@ export default async function EditProductPage({
     grind: p.grind,
     roastLevel: p.roastLevel ?? '',
     origin: p.origin ?? '',
+    aliases: p.aliases.join(', '),
     imageUrl: p.imageUrl ?? '',
     sellingPrice: p.sellingPrice,
     cogsPerUnit: p.cogsPerUnit,

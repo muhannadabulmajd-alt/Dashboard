@@ -17,6 +17,12 @@ const QUICK_ADD_ITEMS: Array<{
   icon: string;
 }> = [
   {
+    key: 'assistant',
+    href: '/ai-assistant',
+    capability: 'use:ai-assistant',
+    icon: 'Sparkles',
+  },
+  {
     key: 'order',
     href: '/admin/records/orders/new',
     capability: 'manage:orders',

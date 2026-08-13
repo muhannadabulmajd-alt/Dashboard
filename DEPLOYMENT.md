@@ -5,11 +5,13 @@ Target stack: **Vercel** (Next.js host) + **Neon** (free serverless PostgreSQL).
 ## 1. Create the database (Neon) — ~2 min
 
 1. Create a project at <https://neon.tech> (free).
-2. On the dashboard, open **Connection string**, turn the **"Connection pooling"** toggle **OFF**, and copy the string. It looks like:
+2. On the dashboard, open **Connection string**, turn **Connection pooling ON**, and copy the string. It looks like:
    ```
-   postgresql://USER:PASSWORD@ep-xxxx.REGION.aws.neon.tech/neondb?sslmode=require
+   postgresql://USER:PASSWORD@ep-xxxx-pooler.REGION.aws.neon.tech/neondb?sslmode=require
    ```
-   This single URL is your `DATABASE_URL` (the direct connection works for both migrations and the app at this scale).
+   Use this pooled URL as `DATABASE_URL` for normal application traffic.
+3. Turn **Connection pooling OFF** and copy the matching direct URL. Use it as
+   `DIRECT_URL` so Prisma migrations have a stable session and advisory lock.
 
 ## 2. Import the repo into Vercel
 
@@ -21,7 +23,8 @@ Target stack: **Vercel** (Next.js host) + **Neon** (free serverless PostgreSQL).
 
 | Variable | Value |
 |---|---|
-| `DATABASE_URL` | the Neon connection string from step 1 |
+| `DATABASE_URL` | the pooled Neon connection string from step 1 |
+| `DIRECT_URL` | the matching non-pooled Neon connection string used by Prisma migrations |
 | `AUTH_SECRET` | `openssl rand -base64 32` |
 | `AUTH_TRUST_HOST` | `true` |
 | `ADMIN_EMAIL` | the email you want to log in with (becomes the Owner) |
@@ -32,6 +35,11 @@ Target stack: **Vercel** (Next.js host) + **Neon** (free serverless PostgreSQL).
 | `RESEND_API_KEY` | *(optional)* enables emailed scheduled reports |
 | `REPORT_FROM` | *(optional)* e.g. `Laheeb Atlas <reports@yourdomain.com>` (Resend-verified domain) |
 | `REPORT_RECIPIENTS` | *(optional)* comma-separated; defaults to owner/admin/finance users |
+| `OPENAI_API_KEY` | OpenAI project secret; use different keys for Preview and Production |
+| `AI_ASSISTANT_ENABLED` | `true` to expose the Owner/Admin assistant, `false` for immediate rollback |
+| `AI_ASSISTANT_MODEL` | `gpt-5.4-mini-2026-03-17` |
+| `AI_ASSISTANT_MAX_REQUESTS_PER_MINUTE` | `10` |
+| `AI_ASSISTANT_HISTORY_RETENTION_DAYS` | `90` |
 
 ## 4. That's it — no terminal
 
@@ -61,12 +69,14 @@ Once you're in, you can **delete `ADMIN_PASSWORD`** from Vercel to turn the env-
 - **Scheduled report/connector crons** are declared in `vercel.json` (all run at most once/day, so they work on Vercel's free Hobby plan). They authenticate with `CRON_SECRET`.
 - **Emailed reports:** set `RESEND_API_KEY` + a verified `REPORT_FROM` domain; otherwise reports generate but only log.
 - **Connectors:** configure the credentialed HTTP-CSV connector at **/admin/connectors**; tokens are encrypted with `ENCRYPTION_KEY`.
+- **Atlas AI Assistant:** add the five AI variables above separately to Vercel Preview and Production. Chats remain private in Atlas, expire after the configured retention period, and OpenAI requests use `store: false`.
 
 ## Manual alternative (if you prefer the CLI)
 
 ```bash
 git clone https://github.com/muhannadabulmajd-alt/Dashboard && cd Dashboard && pnpm install
 export DATABASE_URL="<NEON_URL>"
+export DIRECT_URL="<NEON_DIRECT_URL>"
 pnpm prisma migrate deploy
 ADMIN_EMAIL="you@laheeb.coffee" ADMIN_PASSWORD="a-strong-password" pnpm create-admin
 ```
@@ -80,7 +90,9 @@ ADMIN_EMAIL="you@laheeb.coffee" ADMIN_PASSWORD="a-strong-password" pnpm create-a
 ## Production checklist
 
 - [ ] Strong, unique `AUTH_SECRET`, `CRON_SECRET`, `ENCRYPTION_KEY` set in Vercel.
-- [ ] `DATABASE_URL` set to the Neon connection string.
+- [ ] `DATABASE_URL` set to the pooled Neon connection string.
+- [ ] `DIRECT_URL` set to the matching non-pooled Neon connection string.
 - [ ] `ADMIN_EMAIL` / `ADMIN_PASSWORD` set; first sign-in creates the Owner.
 - [ ] Demo seed **not** run on the live DB.
+- [ ] Separate Preview and Production `OPENAI_API_KEY` values configured; `AI_ASSISTANT_ENABLED=true` only where launch is intended.
 - [ ] *(optional)* `RESEND_API_KEY` for emailed reports.

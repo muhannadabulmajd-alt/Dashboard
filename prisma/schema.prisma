@@ -9,8 +9,9 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 // ---------------------------------------------------------------------------
@@ -206,6 +207,54 @@ enum DatasetType {
   SHIPMENTS
 }
 
+enum AiConversationStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum AiMessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+enum AiMessageKind {
+  TEXT
+  CLARIFICATION
+  RESULT
+  ACTION_PREVIEW
+  SUCCESS
+  ERROR
+}
+
+enum AiPendingActionType {
+  CREATE_CUSTOMER
+  CREATE_ORDER
+  CREATE_EXPENSE
+  CREATE_PURCHASE
+  UPDATE_ORDER_STATUS
+}
+
+enum AiPendingActionRisk {
+  MEDIUM
+}
+
+enum AiPendingActionStatus {
+  PENDING
+  EXECUTING
+  CANCELLED
+  EXECUTED
+  FAILED
+  EXPIRED
+  STALE
+}
+
+enum AiRequestStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+}
+
 // ---------------------------------------------------------------------------
 // Identity & access
 // ---------------------------------------------------------------------------
@@ -232,6 +281,10 @@ model User {
   dashboardShares     DashboardShare[]
   auditLogs           AuditLog[]
   providerSettlements ProviderSettlement[]
+  aiConversations     AiConversation[]
+  aiPendingActions    AiPendingAction[]
+  aiRequestLogs       AiRequestLog[]
+  aiRateLimitBuckets  AiRateLimitBucket[]
 
   @@index([role])
   @@index([branchId])
@@ -334,6 +387,7 @@ model Product {
   sku                String      @unique
   barcodeValue       String      @unique
   retailBarcode      String      @unique
+  aliases            String[]    @default([])
   nameEn             String
   nameAr             String
   productLine        ProductLine
@@ -437,28 +491,30 @@ model ProductGroup {
 // ---------------------------------------------------------------------------
 
 model Customer {
-  id             String          @id @default(cuid())
-  externalId     String?         @unique
-  phone          String?
-  email          String?
-  nameEn         String?
-  nameAr         String?
-  governorate    String? // list-managed code
-  address1       String? // CR-6: street address line
-  street         String? // CR-6: extra street / landmark details
-  notes          String? // CR-6: free-form customer notes
-  segment        CustomerSegment @default(NEW)
-  campaignSource String? // CR-6: acquisition source (Instagram/Facebook/…)
-  firstOrderAt   DateTime?
-  lastOrderAt    DateTime?
-  ordersCount    Int             @default(0)
-  isActive       Boolean         @default(true)
-  createdAt      DateTime        @default(now())
+  id              String          @id @default(cuid())
+  externalId      String?         @unique
+  phone           String?
+  normalizedPhone String?
+  email           String?
+  nameEn          String?
+  nameAr          String?
+  governorate     String? // list-managed code
+  address1        String? // CR-6: street address line
+  street          String? // CR-6: extra street / landmark details
+  notes           String? // CR-6: free-form customer notes
+  segment         CustomerSegment @default(NEW)
+  campaignSource  String? // CR-6: acquisition source (Instagram/Facebook/…)
+  firstOrderAt    DateTime?
+  lastOrderAt     DateTime?
+  ordersCount     Int             @default(0)
+  isActive        Boolean         @default(true)
+  createdAt       DateTime        @default(now())
 
   orders Order[]
 
   @@index([segment])
   @@index([governorate])
+  @@index([normalizedPhone])
 }
 
 // ---------------------------------------------------------------------------
@@ -867,6 +923,114 @@ model AuditLog {
 
   @@index([userId])
   @@index([createdAt])
+}
+
+model AiConversation {
+  id            String               @id @default(cuid())
+  userId        String
+  locale        String               @default("en")
+  title         String?
+  status        AiConversationStatus @default(ACTIVE)
+  lastMessageAt DateTime             @default(now())
+  expiresAt     DateTime
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+
+  user           User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages       AiMessage[]
+  pendingActions AiPendingAction[]
+  requestLogs    AiRequestLog[]
+
+  @@unique([id, userId])
+  @@index([userId, lastMessageAt])
+  @@index([expiresAt])
+}
+
+model AiMessage {
+  id             String        @id @default(cuid())
+  conversationId String
+  role           AiMessageRole
+  kind           AiMessageKind @default(TEXT)
+  content        String?
+  payload        Json?
+  model          String?
+  inputTokens    Int?
+  outputTokens   Int?
+  requestId      String?
+  createdAt      DateTime      @default(now())
+
+  conversation  AiConversation    @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sourceActions AiPendingAction[] @relation("AiPendingActionSource")
+
+  @@index([conversationId, createdAt])
+  @@index([requestId])
+}
+
+model AiPendingAction {
+  id               String                @id @default(cuid())
+  conversationId   String
+  userId           String
+  sourceMessageId  String?
+  type             AiPendingActionType
+  risk             AiPendingActionRisk   @default(MEDIUM)
+  extractedData    Json
+  validatedData    Json?
+  missingFields    Json?
+  preview          Json
+  preconditionHash String
+  executionKey     String                @unique
+  status           AiPendingActionStatus @default(PENDING)
+  expiresAt        DateTime
+  executedAt       DateTime?
+  recordType       String?
+  recordId         String?
+  result           Json?
+  errorCode        String?
+  debugId          String?
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+
+  conversation  AiConversation @relation(fields: [conversationId, userId], references: [id, userId], onDelete: Cascade)
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sourceMessage AiMessage?     @relation("AiPendingActionSource", fields: [sourceMessageId], references: [id], onDelete: SetNull)
+
+  @@index([conversationId, status])
+  @@index([userId, status])
+  @@index([sourceMessageId])
+  @@index([expiresAt])
+}
+
+model AiRequestLog {
+  id             String          @id @default(cuid())
+  userId         String
+  conversationId String?
+  model          String
+  requestId      String?
+  status         AiRequestStatus @default(PENDING)
+  inputTokens    Int?
+  outputTokens   Int?
+  latencyMs      Int?
+  errorCode      String?
+  createdAt      DateTime        @default(now())
+
+  user         User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation AiConversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([conversationId])
+  @@index([requestId])
+}
+
+model AiRateLimitBucket {
+  userId      String
+  bucketStart DateTime
+  count       Int      @default(1)
+  updatedAt   DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, bucketStart])
+  @@index([bucketStart])
 }
 
 // ---------------------------------------------------------------------------

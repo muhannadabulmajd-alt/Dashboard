@@ -2,6 +2,7 @@ import { PrismaClient, type Prisma } from '@prisma/client';
 import { faker } from '@faker-js/faker';
 import bcrypt from 'bcryptjs';
 import { formatProductBarcode, formatRetailBarcode } from '../src/lib/barcode';
+import { normalizeIraqiPhone } from '../src/lib/phone';
 import { subDays, addDays, startOfMonth, eachMonthOfInterval } from 'date-fns';
 
 const prisma = new PrismaClient();
@@ -25,6 +26,11 @@ function at(date: Date, hour: number, minute = faker.number.int({ min: 0, max: 5
 
 async function clear() {
   // Delete in dependency order.
+  await prisma.aiMessage.deleteMany();
+  await prisma.aiPendingAction.deleteMany();
+  await prisma.aiRequestLog.deleteMany();
+  await prisma.aiRateLimitBucket.deleteMany();
+  await prisma.aiConversation.deleteMany();
   await prisma.auditLog.deleteMany();
   await prisma.paymentReconciliationItem.deleteMany();
   await prisma.inventoryLandedCostAllocation.deleteMany();
@@ -266,10 +272,12 @@ const GOVERNORATES = [
 async function seedCustomers(count: number): Promise<string[]> {
   const data: Prisma.CustomerCreateManyInput[] = [];
   for (let i = 1; i <= count; i++) {
+    const phone = `+9647${faker.string.numeric(9)}`;
     data.push({
       id: `cust_${i}`,
       externalId: `C-${1000 + i}`,
-      phone: `+9647${faker.string.numeric(9)}`,
+      phone,
+      normalizedPhone: normalizeIraqiPhone(phone),
       governorate: weighted(GOVERNORATES.map((g) => ({ value: g.value, weight: g.weight }))),
       segment: 'NEW',
       campaignSource: faker.helpers.maybe(() => pick(['instagram', 'tiktok', 'referral', 'google']), {

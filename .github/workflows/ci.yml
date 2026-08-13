@@ -7,6 +7,7 @@ on:
 
 env:
   DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/laheeb_ci?schema=public
+  DIRECT_URL: postgresql://postgres:postgres@127.0.0.1:5432/laheeb_ci?schema=public
   AUTH_SECRET: github-ci-secret-at-least-32-characters
   AUTH_TRUST_HOST: "true"
   NEXT_PUBLIC_USD_PER_IQD: "0.000667"
@@ -47,6 +48,8 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm check:translations
+      - run: pnpm check:ai-evals
+      - run: pnpm exec vitest run tests/ai-assistant.test.ts tests/ai-tool-contracts.test.ts tests/ai-orchestrator.test.ts
       - run: pnpm exec vitest run tests/barcode.test.ts tests/invoice.test.ts tests/provider-fees.test.ts tests/provider-settlement.test.ts tests/spend-treatment.test.ts
       - run: pnpm test
       - run: pnpm exec prisma migrate deploy
