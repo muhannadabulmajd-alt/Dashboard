@@ -386,7 +386,13 @@ export function AssistantWorkspace({
 
   useEffect(() => {
     const viewport = viewportRef.current;
-    if (viewport && shouldFollowRef.current) viewport.scrollTop = viewport.scrollHeight;
+    if (!viewport) return;
+    if (!messages.length) {
+      viewport.scrollTop = 0;
+      shouldFollowRef.current = true;
+      return;
+    }
+    if (shouldFollowRef.current) viewport.scrollTop = viewport.scrollHeight;
   }, [messages]);
 
   useEffect(() => {
