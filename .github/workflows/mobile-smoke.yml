@@ -5,6 +5,7 @@ on:
 
 env:
   DATABASE_URL: postgresql://postgres:postgres@localhost:5432/laheeb_mobile?schema=public
+  DIRECT_URL: postgresql://postgres:postgres@localhost:5432/laheeb_mobile?schema=public
   AUTH_SECRET: mobile-smoke-secret-at-least-32-characters
   AUTH_TRUST_HOST: "true"
   NEXTAUTH_URL: http://127.0.0.1:3000

@@ -7,6 +7,7 @@ on:
 
 env:
   DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/laheeb_ci?schema=public
+  DIRECT_URL: postgresql://postgres:postgres@127.0.0.1:5432/laheeb_ci?schema=public
   AUTH_SECRET: github-ci-secret-at-least-32-characters
   AUTH_TRUST_HOST: "true"
   NEXT_PUBLIC_USD_PER_IQD: "0.000667"

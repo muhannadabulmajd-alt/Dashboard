@@ -5,11 +5,13 @@ Target stack: **Vercel** (Next.js host) + **Neon** (free serverless PostgreSQL).
 ## 1. Create the database (Neon) — ~2 min
 
 1. Create a project at <https://neon.tech> (free).
-2. On the dashboard, open **Connection string**, turn the **"Connection pooling"** toggle **OFF**, and copy the string. It looks like:
+2. On the dashboard, open **Connection string**, turn **Connection pooling ON**, and copy the string. It looks like:
    ```
-   postgresql://USER:PASSWORD@ep-xxxx.REGION.aws.neon.tech/neondb?sslmode=require
+   postgresql://USER:PASSWORD@ep-xxxx-pooler.REGION.aws.neon.tech/neondb?sslmode=require
    ```
-   This single URL is your `DATABASE_URL` (the direct connection works for both migrations and the app at this scale).
+   Use this pooled URL as `DATABASE_URL` for normal application traffic.
+3. Turn **Connection pooling OFF** and copy the matching direct URL. Use it as
+   `DIRECT_URL` so Prisma migrations have a stable session and advisory lock.
 
 ## 2. Import the repo into Vercel
 
@@ -21,7 +23,8 @@ Target stack: **Vercel** (Next.js host) + **Neon** (free serverless PostgreSQL).
 
 | Variable | Value |
 |---|---|
-| `DATABASE_URL` | the Neon connection string from step 1 |
+| `DATABASE_URL` | the pooled Neon connection string from step 1 |
+| `DIRECT_URL` | the matching non-pooled Neon connection string used by Prisma migrations |
 | `AUTH_SECRET` | `openssl rand -base64 32` |
 | `AUTH_TRUST_HOST` | `true` |
 | `ADMIN_EMAIL` | the email you want to log in with (becomes the Owner) |
@@ -73,6 +76,7 @@ Once you're in, you can **delete `ADMIN_PASSWORD`** from Vercel to turn the env-
 ```bash
 git clone https://github.com/muhannadabulmajd-alt/Dashboard && cd Dashboard && pnpm install
 export DATABASE_URL="<NEON_URL>"
+export DIRECT_URL="<NEON_DIRECT_URL>"
 pnpm prisma migrate deploy
 ADMIN_EMAIL="you@laheeb.coffee" ADMIN_PASSWORD="a-strong-password" pnpm create-admin
 ```
@@ -86,7 +90,8 @@ ADMIN_EMAIL="you@laheeb.coffee" ADMIN_PASSWORD="a-strong-password" pnpm create-a
 ## Production checklist
 
 - [ ] Strong, unique `AUTH_SECRET`, `CRON_SECRET`, `ENCRYPTION_KEY` set in Vercel.
-- [ ] `DATABASE_URL` set to the Neon connection string.
+- [ ] `DATABASE_URL` set to the pooled Neon connection string.
+- [ ] `DIRECT_URL` set to the matching non-pooled Neon connection string.
 - [ ] `ADMIN_EMAIL` / `ADMIN_PASSWORD` set; first sign-in creates the Owner.
 - [ ] Demo seed **not** run on the live DB.
 - [ ] Separate Preview and Production `OPENAI_API_KEY` values configured; `AI_ASSISTANT_ENABLED=true` only where launch is intended.

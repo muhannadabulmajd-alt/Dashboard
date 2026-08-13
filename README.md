@@ -4,7 +4,7 @@ Internal Roastery & Commerce Intelligence dashboard for **Laheeb Coffee (قهو�
 
 This repository covers the **MVP**, **Phase 2** analytics, and the reporting / franchise / connector roadmap — ten dashboard pages on a full auth/RBAC/i18n/filter foundation.
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fmuhannadabulmajd-alt%2FDashboard&env=DATABASE_URL,AUTH_SECRET,AUTH_TRUST_HOST,ADMIN_EMAIL,ADMIN_PASSWORD,CRON_SECRET,ENCRYPTION_KEY,NEXT_PUBLIC_USD_PER_IQD,OPENAI_API_KEY,AI_ASSISTANT_ENABLED,AI_ASSISTANT_MODEL,AI_ASSISTANT_MAX_REQUESTS_PER_MINUTE,AI_ASSISTANT_HISTORY_RETENTION_DAYS&envDescription=Neon%20Postgres%20URL%20%2B%20app%20and%20AI%20secrets%20(see%20DEPLOYMENT.md)&envLink=https%3A%2F%2Fgithub.com%2Fmuhannadabulmajd-alt%2FDashboard%2Fblob%2Fmain%2FDEPLOYMENT.md)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fmuhannadabulmajd-alt%2FDashboard&env=DATABASE_URL,DIRECT_URL,AUTH_SECRET,AUTH_TRUST_HOST,ADMIN_EMAIL,ADMIN_PASSWORD,CRON_SECRET,ENCRYPTION_KEY,NEXT_PUBLIC_USD_PER_IQD,OPENAI_API_KEY,AI_ASSISTANT_ENABLED,AI_ASSISTANT_MODEL,AI_ASSISTANT_MAX_REQUESTS_PER_MINUTE,AI_ASSISTANT_HISTORY_RETENTION_DAYS&envDescription=Neon%20Postgres%20URLs%20%2B%20app%20and%20AI%20secrets%20(see%20DEPLOYMENT.md)&envLink=https%3A%2F%2Fgithub.com%2Fmuhannadabulmajd-alt%2FDashboard%2Fblob%2Fmain%2FDEPLOYMENT.md)
 
 No terminal needed: migrations run automatically on deploy, and your Owner account is created the first time you sign in with `ADMIN_EMAIL` / `ADMIN_PASSWORD`. Full steps: **[DEPLOYMENT.md](./DEPLOYMENT.md)**.
 
@@ -51,7 +51,7 @@ Requires Node 20+, pnpm, and a PostgreSQL database.
 
 ```bash
 pnpm install
-cp .env.example .env          # set DATABASE_URL and AUTH_SECRET
+cp .env.example .env          # set DATABASE_URL, DIRECT_URL, and AUTH_SECRET
 
 pnpm prisma migrate dev       # create schema
 pnpm db:seed                  # load realistic sample data
