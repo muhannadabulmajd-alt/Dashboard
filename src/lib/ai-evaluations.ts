@@ -17,6 +17,8 @@ export const AI_EVALUATION_CASES: AiEvaluationCase[] = [
   { id: 'en-customer-find', language: 'en', intent: 'read', prompt: 'Find the customer with phone 07811100140', expectedTool: 'search_customers', requiresConfirmation: false },
   { id: 'ar-expenses', language: 'ar', intent: 'read', prompt: 'كم صرفنا تشغيل هذا الشهر؟', expectedTool: 'expense_summary', requiresConfirmation: false },
   { id: 'en-order-create', language: 'en', intent: 'write', prompt: 'Create a new cash order for Saba with one Turkish coffee.', expectedTool: 'prepare_create_order', requiresConfirmation: true },
+  { id: 'en-order-natural-product', language: 'en', intent: 'write', prompt: 'Create an order with two Turkish coffee blend with cardamom 225 gram.', expectedTool: 'prepare_create_order', requiresConfirmation: true },
+  { id: 'ar-order-natural-product', language: 'ar', intent: 'write', prompt: 'أضف طلب عدد ٢ قهوة تركية وسط بالهيل ٢٢٥ غرام', expectedTool: 'prepare_create_order', requiresConfirmation: true },
   { id: 'ar-customer-create', language: 'ar', intent: 'write', prompt: 'أضف عميل جديد اسمه أحمد ورقمه 07800000000', expectedTool: 'prepare_create_customer', requiresConfirmation: true },
   { id: 'iqi-expense-create', language: 'iqi', intent: 'write', prompt: 'سجللي مصروف كهرباء ٢٥ ألف نقدي اليوم', expectedTool: 'prepare_create_expense', requiresConfirmation: true },
   { id: 'mixed-purchase-create', language: 'mixed', intent: 'write', prompt: 'سجل purchase مخزون 2.500 kg Guji بسعر 100000 دينار', expectedTool: 'prepare_create_purchase', requiresConfirmation: true },

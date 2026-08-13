@@ -2,7 +2,7 @@ import 'server-only';
 import type { AiPendingActionType, Prisma } from '@prisma/client';
 import { normalizeIraqiPhone } from '@/lib/phone';
 import { decimalNumber } from '@/lib/decimal';
-import { CHANNELS, GOVERNORATES, ORDER_STATUSES } from '@/lib/enums';
+import { CHANNELS, FULFILLMENT_METHODS, GOVERNORATES, ORDER_STATUSES } from '@/lib/enums';
 import { effectivePrice } from '@/lib/metrics/pricing';
 import { orderStatusRole, type OrderMetricRole } from '@/lib/metrics/status';
 import { invoicePaymentSnapshot } from '@/lib/invoice';
@@ -260,7 +260,7 @@ async function automaticFinanceState(
 
 async function orderPreconditions(raw: unknown, db: Db) {
   const input = ResolvedOrderActionSchema.parse(raw);
-  const [products, customer, account, provider, status, channel, governorate] = await Promise.all([
+  const [products, customer, account, provider, status, channel, governorate, fulfillment] = await Promise.all([
     productStates(input.lines.map((line) => line.productId), db),
     input.customerExternalId
       ? db.customer.findUnique({
@@ -278,6 +278,7 @@ async function orderPreconditions(raw: unknown, db: Db) {
     managedListState(db, 'orderStatus', input.status, ORDER_STATUSES),
     managedListState(db, 'channel', input.channel, CHANNELS),
     managedListState(db, 'governorate', input.governorate, GOVERNORATES),
+    managedListState(db, 'fulfillment', input.fulfillmentMethod, FULFILLMENT_METHODS),
   ]);
   const newCustomerPhone = normalizeIraqiPhone(input.newCustomer?.phone);
   const possibleNewCustomerDuplicates = newCustomerPhone
@@ -288,7 +289,7 @@ async function orderPreconditions(raw: unknown, db: Db) {
       })
     : [];
   const automaticFinance = await automaticFinanceState(input, status.role ?? 'UNKNOWN', db);
-  return { products, customer, possibleNewCustomerDuplicates, account, provider, automaticFinance, status, channel, governorate };
+  return { products, customer, possibleNewCustomerDuplicates, account, provider, automaticFinance, status, channel, governorate, fulfillment };
 }
 
 async function expensePreconditions(raw: unknown, db: Db) {
@@ -508,6 +509,7 @@ export function actionPreconditionIssues(
     issues.push(...productIssues(products, input.lines, status?.role === 'SALE'));
     if (!(state.channel as ManagedListState | undefined)?.active) issues.push({ field: 'channel', code: 'channel_invalid' });
     if (!(state.governorate as ManagedListState | undefined)?.active) issues.push({ field: 'governorate', code: 'governorate_invalid' });
+    if (!(state.fulfillment as ManagedListState | undefined)?.active) issues.push({ field: 'fulfillmentMethod', code: 'fulfillment_invalid' });
     if (!status?.active || status.role === 'UNKNOWN') issues.push({ field: 'status', code: 'status_invalid' });
     const customer = state.customer as { isActive?: boolean } | null;
     if (input.customerExternalId && (!customer || !customer.isActive)) issues.push({ field: 'customerQuery', code: 'customer_inactive' });

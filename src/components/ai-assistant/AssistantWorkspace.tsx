@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowUp,
   BarChart3,
@@ -23,6 +23,14 @@ import { useTranslations } from 'next-intl';
 import type { AiActionPreview, AiClarification, AiResultCard, AiStreamEvent } from '@/lib/ai-assistant';
 import { Link } from '@/i18n/navigation';
 import { cn } from '@/lib/utils';
+import { GuidedOrderComposer, type QuickOrderPrepared } from './GuidedOrderComposer';
+import type {
+  QuickOrderCatalogItem,
+  QuickOrderCustomer,
+  QuickOrderDefaults,
+  QuickOrderOption,
+} from '@/lib/ai-quick-order';
+import { AssistantText } from './AssistantText';
 
 type ConversationSummary = {
   id: string;
@@ -360,10 +368,20 @@ export function AssistantWorkspace({
   locale,
   initialConversations,
   retentionDays,
+  quickOrder,
 }: {
   locale: 'ar' | 'en';
   initialConversations: ConversationSummary[];
   retentionDays: number;
+  quickOrder: {
+    catalog: QuickOrderCatalogItem[];
+    customers: QuickOrderCustomer[];
+    channelOptions: QuickOrderOption[];
+    governorateOptions: QuickOrderOption[];
+    fulfillmentOptions: QuickOrderOption[];
+    statusOptions: QuickOrderOption[];
+    defaults: QuickOrderDefaults;
+  };
 }) {
   const t = useTranslations('aiAssistant');
   const [conversations, setConversations] = useState(initialConversations);
@@ -373,6 +391,7 @@ export function AssistantWorkspace({
   const [sending, setSending] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [actionBusy, setActionBusy] = useState<string | null>(null);
+  const [quickOrderOpen, setQuickOrderOpen] = useState(false);
   const viewportRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const historyTriggerRef = useRef<HTMLButtonElement>(null);
@@ -618,6 +637,14 @@ export function AssistantWorkspace({
     }
   };
 
+  const handleQuickOrderPrepared = (result: QuickOrderPrepared) => {
+    setConversationId(result.conversationId);
+    setMessages((current) => [...current, ...result.messages]);
+    shouldFollowRef.current = true;
+    void refreshHistory();
+  };
+  const closeQuickOrder = useCallback(() => setQuickOrderOpen(false), []);
+
   return (
     <section className="relative grid h-[max(34rem,calc(100dvh-13rem))] max-h-[56rem] overflow-hidden rounded-[var(--radius)] border border-border/80 bg-card shadow-[0_14px_40px_rgba(83,45,31,0.07)] lg:h-[calc(100dvh-12rem)] lg:grid-cols-[17rem_minmax(0,1fr)]">
       <aside className="hidden min-h-0 border-e border-border/70 bg-linen/20 lg:block">
@@ -635,9 +662,10 @@ export function AssistantWorkspace({
             <History className="size-4" />
             {t('history')}
           </button>
-          <button type="button" onClick={newConversation} aria-label={t('newChat')} className="inline-flex size-10 items-center justify-center rounded-lg bg-grove text-primary-foreground">
-            <MessageSquarePlus className="size-4" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={() => setQuickOrderOpen(true)} aria-label={t('quickActions.createOrder')} className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-border bg-card px-3 text-sm font-semibold text-roast"><ShoppingBag className="size-4" />{t('quickActions.createOrder')}</button>
+            <button type="button" onClick={newConversation} aria-label={t('newChat')} className="inline-flex size-10 items-center justify-center rounded-lg bg-grove text-primary-foreground"><MessageSquarePlus className="size-4" /></button>
+          </div>
         </div>
 
         <div
@@ -665,7 +693,7 @@ export function AssistantWorkspace({
                   <button
                     key={key}
                     type="button"
-                    onClick={() => void sendMessage(quickPrompts[key])}
+                    onClick={() => key === 'createOrder' ? setQuickOrderOpen(true) : void sendMessage(quickPrompts[key])}
                     className="flex min-h-20 items-start gap-3 rounded-xl border border-border bg-card p-3 text-start hover:border-amber/45 hover:bg-linen/30"
                   >
                     <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-amber/12 text-primary"><Icon className="size-4" /></span>
@@ -686,7 +714,7 @@ export function AssistantWorkspace({
                     'max-w-[min(100%,46rem)]',
                     message.role === 'USER' ? 'rounded-2xl rounded-ee-md bg-grove px-4 py-3 text-primary-foreground' : 'w-full',
                   )}>
-                    {message.content ? <p dir="auto" className="whitespace-pre-wrap break-words text-sm leading-7">{message.content}</p> : null}
+                    {message.content ? <AssistantText value={message.content} /> : null}
                     {message.streaming && !message.content && !message.events.length ? (
                       <div className="flex items-center gap-2 py-2 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />{t('stopWait')}</div>
                     ) : null}
@@ -732,6 +760,9 @@ export function AssistantWorkspace({
           onSubmit={(event) => { event.preventDefault(); void sendMessage(); }}
           className="border-t border-border/70 bg-card/95 p-3 pe-20 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:p-4"
         >
+          <div className="mx-auto mb-2 flex max-w-3xl justify-start">
+            <button type="button" onClick={() => setQuickOrderOpen(true)} disabled={sending} className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-border bg-card px-3 text-sm font-bold text-roast hover:border-amber/45 hover:bg-linen/35 disabled:opacity-50"><ShoppingBag className="size-4" />{t('quickActions.createOrder')}</button>
+          </div>
           <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-2xl border border-border bg-background p-2 shadow-[0_8px_24px_rgba(83,45,31,0.06)] focus-within:border-amber/50 focus-within:ring-2 focus-within:ring-amber/10">
             <textarea
               ref={composerRef}
@@ -777,6 +808,14 @@ export function AssistantWorkspace({
           </aside>
         </div>
       ) : null}
+      <GuidedOrderComposer
+        open={quickOrderOpen}
+        conversationId={conversationId}
+        locale={locale}
+        {...quickOrder}
+        onClose={closeQuickOrder}
+        onPrepared={handleQuickOrderPrepared}
+      />
     </section>
   );
 }

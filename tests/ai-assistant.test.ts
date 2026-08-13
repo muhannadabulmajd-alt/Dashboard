@@ -33,6 +33,8 @@ describe('Atlas AI assistant contracts', () => {
   it('normalizes Arabic spelling variants for operational matching', () => {
     expect(normalizeAssistantText('أُمَنيّة')).toBe(normalizeAssistantText('امنيه'));
     expect(normalizeAssistantText('  Hi-Express  ')).toBe('hi express');
+    expect(normalizeAssistantText('قُوجي ٢٥٠ غرام')).toBe('قوجي 250 غرام');
+    expect(normalizeAssistantText('كیف ۲۲۵')).toBe('كيف 225');
   });
 
   it('interprets naive operational dates in Baghdad time', () => {

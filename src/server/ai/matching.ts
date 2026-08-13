@@ -2,6 +2,7 @@ import 'server-only';
 import { normalizeAssistantText } from '@/lib/ai-assistant';
 import { normalizeIraqiPhone } from '@/lib/phone';
 import { effectivePrice } from '@/lib/metrics/pricing';
+import { rankProductCandidates } from '@/lib/product-matching';
 import { prisma } from '@/server/db/client';
 
 export type MatchResult<T> =
@@ -36,7 +37,6 @@ export async function matchCustomer(query: string) {
 }
 
 export async function matchProduct(query: string) {
-  const normalizedQuery = normalizeAssistantText(query);
   const now = new Date();
   const productRows = await prisma.product.findMany({
     where: { isActive: true },
@@ -48,12 +48,18 @@ export async function matchProduct(query: string) {
       nameEn: true,
       nameAr: true,
       aliases: true,
+      sizeGrams: true,
       sizeLabel: true,
+      grind: true,
+      roastLevel: true,
+      origin: true,
+      productLine: true,
+      variationType: true,
       sellUnit: true,
       sellingPrice: true,
       cogsPerUnit: true,
       prices: { where: { kind: 'BASE' }, select: { kind: true, price: true, effectiveFrom: true } },
-      group: { select: { nameEn: true, nameAr: true } },
+      group: { select: { code: true, nameEn: true, nameAr: true } },
     },
     orderBy: { sku: 'asc' },
   });
@@ -61,23 +67,7 @@ export async function matchProduct(query: string) {
     ...row,
     sellingPrice: effectivePrice(prices, row.sellingPrice, now),
   }));
-  const searchable = (row: typeof rows[number]) => [
-    row.sku,
-    row.barcodeValue,
-    row.retailBarcode,
-    row.nameEn,
-    row.nameAr,
-    row.group?.nameEn,
-    row.group?.nameAr,
-    ...row.aliases,
-  ].filter(Boolean).map((value) => normalizeAssistantText(value ?? ''));
-  const exact = rows.filter((row) => searchable(row).includes(normalizedQuery));
-  if (exact.length === 1) return { kind: 'exact', value: exact[0] } as const;
-  if (exact.length > 1) return { kind: 'ambiguous', candidates: exact } as const;
-  const fuzzy = rows.filter((row) => searchable(row).some((value) => value.includes(normalizedQuery))).slice(0, 8);
-  return fuzzy.length
-    ? { kind: 'ambiguous', candidates: fuzzy } as const
-    : { kind: 'none', candidates: [] } as const;
+  return rankProductCandidates(rows, query);
 }
 
 export async function matchOrder(query: string) {
