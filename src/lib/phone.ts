@@ -8,4 +8,3 @@ export function normalizeIraqiPhone(value: string | null | undefined): string | 
   if (digits.length === 10) return `+964${digits}`;
   return `+${digits}`;
 }
-

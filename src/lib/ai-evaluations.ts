@@ -31,4 +31,3 @@ export const AI_EVALUATION_CASES: AiEvaluationCase[] = [
   { id: 'ambiguous-product', language: 'ar', intent: 'write', prompt: 'أضف قهوة تركية للطلب', expectedTool: 'prepare_create_order', requiresConfirmation: true },
   { id: 'mixed-date', language: 'mixed', intent: 'read', prompt: 'Sales مال last month شكد؟', expectedTool: 'sales_summary', requiresConfirmation: false },
 ];
-

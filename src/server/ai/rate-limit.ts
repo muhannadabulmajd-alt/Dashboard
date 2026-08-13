@@ -21,4 +21,3 @@ export async function consumeAiRateLimit(userId: string, now = new Date()): Prom
     throw new AiRateLimitError(Math.max(1, 60 - now.getUTCSeconds()));
   }
 }
-
