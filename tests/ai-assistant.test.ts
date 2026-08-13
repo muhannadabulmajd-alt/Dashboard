@@ -56,7 +56,7 @@ describe('Atlas AI assistant contracts', () => {
   it('logs only support-safe OpenAI error metadata', () => {
     const error = new OpenAI.BadRequestError(
       400,
-      { message: 'sensitive provider detail', type: 'invalid_request_error', code: 'invalid_parameter' },
+      { message: 'sensitive provider detail', type: 'invalid_request_error', code: 'invalid_parameter', param: 'include[0]' },
       'sensitive provider detail',
       new Headers({ authorization: 'Bearer secret' }),
     );
@@ -65,6 +65,7 @@ describe('Atlas AI assistant contracts', () => {
     expect(safeOpenAiError(error)).toEqual({
       status: 400,
       code: 'invalid_parameter',
+      param: 'include[0]',
       type: 'BadRequestError',
       requestId: 'req_safe_123',
     });
@@ -77,12 +78,14 @@ describe('Atlas AI assistant contracts', () => {
     expect(isOpenAiCreditUnavailable({
       status: null,
       code: 'credit_balance_exhausted',
+      param: null,
       type: 'APIError',
       requestId: 'req_safe_456',
     })).toBe(true);
     expect(isOpenAiCreditUnavailable({
       status: 400,
       code: 'invalid_parameter',
+      param: null,
       type: 'BadRequestError',
       requestId: 'req_safe_789',
     })).toBe(false);
