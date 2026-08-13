@@ -148,67 +148,87 @@ async function main(): Promise<void> {
   checks.push({
     name: 'recorded spending bucket targets',
     failures: await count`
+      WITH baseline AS (
+        SELECT
+          MAX(value::bigint) FILTER (WHERE "key" = 'finance_integrity_expected_capex') AS capex,
+          MAX(value::bigint) FILTER (WHERE "key" = 'finance_integrity_expected_inventory') AS inventory,
+          MAX(value::bigint) FILTER (WHERE "key" = 'finance_integrity_expected_operating') AS operating,
+          MAX(value::timestamp(3)) FILTER (WHERE "key" = 'finance_integrity_expected_cutoff') AS cutoff
+        FROM "Setting"
+      ), current_buckets AS (
+        SELECT
+          COALESCE(SUM(l."lineTotal") FILTER (WHERE l."spendTreatment" = 'CAPEX'), 0)::bigint AS capex,
+          COALESCE(SUM(l."lineTotal") FILTER (WHERE l."spendTreatment" = 'INVENTORY'), 0)::bigint AS inventory,
+          COALESCE(SUM(l."lineTotal") FILTER (WHERE l."spendTreatment" IN ('OPEX', 'REVIEW')), 0)::bigint AS operating
+        FROM "LedgerEntryLine" l
+        JOIN "FinanceEntry" e ON e.id = l."financeEntryId"
+        CROSS JOIN baseline b
+        WHERE e.type IN ('EXPENSE', 'PURCHASE')
+          AND e."archivedAt" IS NULL
+          AND e."reversedAt" IS NULL
+          AND e."reversalOfId" IS NULL
+          AND e."createdAt" <= b.cutoff
+      ), audited_reclassifications AS (
+        SELECT
+          COALESCE(SUM(
+            CASE WHEN a.metadata->'after'->>'spendTreatment' = 'CAPEX' THEN (a.metadata->>'amount')::bigint ELSE 0 END
+            - CASE WHEN a.metadata->'before'->>'spendTreatment' = 'CAPEX' THEN (a.metadata->>'amount')::bigint ELSE 0 END
+          ), 0)::bigint AS capex,
+          COALESCE(SUM(
+            CASE WHEN a.metadata->'after'->>'spendTreatment' = 'INVENTORY' THEN (a.metadata->>'amount')::bigint ELSE 0 END
+            - CASE WHEN a.metadata->'before'->>'spendTreatment' = 'INVENTORY' THEN (a.metadata->>'amount')::bigint ELSE 0 END
+          ), 0)::bigint AS inventory,
+          COALESCE(SUM(
+            CASE WHEN a.metadata->'after'->>'spendTreatment' IN ('OPEX', 'REVIEW') THEN (a.metadata->>'amount')::bigint ELSE 0 END
+            - CASE WHEN a.metadata->'before'->>'spendTreatment' IN ('OPEX', 'REVIEW') THEN (a.metadata->>'amount')::bigint ELSE 0 END
+          ), 0)::bigint AS operating
+        FROM "AuditLog" a
+        JOIN "LedgerEntryLine" l ON l.id = a."entityId"
+        JOIN "FinanceEntry" e ON e.id = l."financeEntryId"
+        CROSS JOIN baseline b
+        WHERE a.action = 'RECLASSIFY_LEDGER_LINE'
+          AND a.entity = 'LedgerEntryLine'
+          AND a."userId" IS NOT NULL
+          AND a."createdAt" > b.cutoff
+          AND e."createdAt" <= b.cutoff
+          AND a.metadata->>'amount' ~ '^[0-9]+$'
+      ), audited_splits AS (
+        SELECT
+          COALESCE(SUM(
+            CASE WHEN a.metadata->>'splitTreatment' = 'CAPEX' THEN (a.metadata->>'splitAmount')::bigint ELSE 0 END
+            - CASE WHEN a.metadata->>'originalTreatment' = 'CAPEX' THEN (a.metadata->>'splitAmount')::bigint ELSE 0 END
+          ), 0)::bigint AS capex,
+          COALESCE(SUM(
+            CASE WHEN a.metadata->>'splitTreatment' = 'INVENTORY' THEN (a.metadata->>'splitAmount')::bigint ELSE 0 END
+            - CASE WHEN a.metadata->>'originalTreatment' = 'INVENTORY' THEN (a.metadata->>'splitAmount')::bigint ELSE 0 END
+          ), 0)::bigint AS inventory,
+          COALESCE(SUM(
+            CASE WHEN a.metadata->>'splitTreatment' IN ('OPEX', 'REVIEW') THEN (a.metadata->>'splitAmount')::bigint ELSE 0 END
+            - CASE WHEN a.metadata->>'originalTreatment' IN ('OPEX', 'REVIEW') THEN (a.metadata->>'splitAmount')::bigint ELSE 0 END
+          ), 0)::bigint AS operating
+        FROM "AuditLog" a
+        JOIN "LedgerEntryLine" l ON l.id = a."entityId"
+        JOIN "FinanceEntry" e ON e.id = l."financeEntryId"
+        CROSS JOIN baseline b
+        WHERE a.action = 'SPLIT_LEDGER_LINE'
+          AND a.entity = 'LedgerEntryLine'
+          AND a."userId" IS NOT NULL
+          AND a."createdAt" > b.cutoff
+          AND e."createdAt" <= b.cutoff
+          AND a.metadata->>'splitAmount' ~ '^[0-9]+$'
+          AND a.metadata ? 'originalTreatment'
+      )
       SELECT CASE
-        WHEN NOT EXISTS (
-          SELECT 1 FROM "Setting" WHERE "key" = 'finance_integrity_expected_capex'
-        ) THEN 0
-        WHEN (
-          SELECT COALESCE(SUM(l."lineTotal") FILTER (
-            WHERE l."spendTreatment" = 'CAPEX'
-          ), 0)
-          FROM "LedgerEntryLine" l
-          JOIN "FinanceEntry" e ON e.id = l."financeEntryId"
-          WHERE e.type IN ('EXPENSE', 'PURCHASE')
-            AND e."archivedAt" IS NULL
-            AND e."reversedAt" IS NULL
-            AND e."reversalOfId" IS NULL
-            AND e."createdAt" <= (
-              SELECT value::timestamp(3)
-              FROM "Setting"
-              WHERE "key" = 'finance_integrity_expected_cutoff'
-            )
-        ) = (
-          SELECT value::bigint FROM "Setting"
-          WHERE "key" = 'finance_integrity_expected_capex'
-        ) AND (
-          SELECT COALESCE(SUM(l."lineTotal") FILTER (
-            WHERE l."spendTreatment" = 'INVENTORY'
-          ), 0)
-          FROM "LedgerEntryLine" l
-          JOIN "FinanceEntry" e ON e.id = l."financeEntryId"
-          WHERE e.type IN ('EXPENSE', 'PURCHASE')
-            AND e."archivedAt" IS NULL
-            AND e."reversedAt" IS NULL
-            AND e."reversalOfId" IS NULL
-            AND e."createdAt" <= (
-              SELECT value::timestamp(3)
-              FROM "Setting"
-              WHERE "key" = 'finance_integrity_expected_cutoff'
-            )
-        ) = (
-          SELECT value::bigint FROM "Setting"
-          WHERE "key" = 'finance_integrity_expected_inventory'
-        ) AND (
-          SELECT COALESCE(SUM(l."lineTotal") FILTER (
-            WHERE l."spendTreatment" IN ('OPEX', 'REVIEW')
-          ), 0)
-          FROM "LedgerEntryLine" l
-          JOIN "FinanceEntry" e ON e.id = l."financeEntryId"
-          WHERE e.type IN ('EXPENSE', 'PURCHASE')
-            AND e."archivedAt" IS NULL
-            AND e."reversedAt" IS NULL
-            AND e."reversalOfId" IS NULL
-            AND e."createdAt" <= (
-              SELECT value::timestamp(3)
-              FROM "Setting"
-              WHERE "key" = 'finance_integrity_expected_cutoff'
-            )
-        ) = (
-          SELECT value::bigint FROM "Setting"
-          WHERE "key" = 'finance_integrity_expected_operating'
-        ) THEN 0
+        WHEN b.capex IS NULL OR b.inventory IS NULL OR b.operating IS NULL OR b.cutoff IS NULL THEN 0
+        WHEN c.capex = b.capex + r.capex + s.capex
+          AND c.inventory = b.inventory + r.inventory + s.inventory
+          AND c.operating = b.operating + r.operating + s.operating THEN 0
         ELSE 1
       END AS count
+      FROM baseline b
+      CROSS JOIN current_buckets c
+      CROSS JOIN audited_reclassifications r
+      CROSS JOIN audited_splits s
     `,
   });
 

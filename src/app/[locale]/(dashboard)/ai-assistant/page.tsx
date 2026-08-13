@@ -5,6 +5,9 @@ import { Card, CardContent, PageHeader } from '@/components/ui/primitives';
 import { getAiAssistantConfig } from '@/server/ai/config';
 import { prisma } from '@/server/db/client';
 import { getPageContext } from '@/server/page-context';
+import { getOrderCatalog } from '@/server/records/order-catalog';
+import { getListOptions } from '@/server/lists/resolver';
+import { getOrderOperationalDefaults } from '@/server/records/order-defaults';
 
 export default async function AiAssistantPage({
   params,
@@ -17,7 +20,7 @@ export default async function AiAssistantPage({
   const t = await getTranslations('aiAssistant');
   const config = getAiAssistantConfig();
   const available = config.enabled && config.apiKeyConfigured;
-  const rows = available ? await prisma.aiConversation.findMany({
+  const [rows, catalog, customers, channels, governorates, fulfillment, statuses, defaults] = available ? await Promise.all([prisma.aiConversation.findMany({
     where: { userId: user.id, status: 'ACTIVE', expiresAt: { gt: new Date() } },
     select: {
       id: true,
@@ -28,7 +31,31 @@ export default async function AiAssistantPage({
     },
     orderBy: { lastMessageAt: 'desc' },
     take: 50,
-  }) : [];
+  }),
+  getOrderCatalog(locale, locale === 'ar' ? 'بدون مجموعة' : 'Ungrouped'),
+  prisma.customer.findMany({
+    where: { isActive: true, externalId: { not: null } },
+    select: {
+      externalId: true,
+      nameEn: true,
+      nameAr: true,
+      phone: true,
+      governorate: true,
+      orders: {
+        orderBy: { placedAt: 'desc' },
+        take: 1,
+        select: { channel: true, governorate: true, fulfillmentMethod: true },
+      },
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 500,
+  }),
+  getListOptions('channel', locale),
+  getListOptions('governorate', locale),
+  getListOptions('fulfillment', locale),
+  getListOptions('orderStatus', locale),
+  getOrderOperationalDefaults(),
+  ]) : [[], [], [], [], [], [], [], await getOrderOperationalDefaults()];
 
   return (
     <>
@@ -54,6 +81,21 @@ export default async function AiAssistantPage({
             lastMessageAt: row.lastMessageAt.toISOString(),
             messageCount: row._count.messages,
           }))}
+          quickOrder={{
+            catalog,
+            customers: customers.map((customer) => ({
+              externalId: customer.externalId!,
+              label: `${locale === 'ar' ? customer.nameAr || customer.nameEn || customer.phone || customer.externalId : customer.nameEn || customer.nameAr || customer.phone || customer.externalId} (${customer.externalId})`,
+              phone: customer.phone,
+              governorate: customer.governorate,
+              recentOrder: customer.orders[0] ?? null,
+            })),
+            channelOptions: channels,
+            governorateOptions: governorates,
+            fulfillmentOptions: fulfillment,
+            statusOptions: statuses,
+            defaults,
+          }}
         />
       ) : (
         <Card variant="surface">

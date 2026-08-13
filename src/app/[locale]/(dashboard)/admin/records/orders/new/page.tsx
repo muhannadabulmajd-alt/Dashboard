@@ -9,6 +9,7 @@ import { getListOptions, getOrderStatusRoleMap } from '@/server/lists/resolver';
 import { createOrder } from '@/server/records/orders';
 import { createCustomerInline } from '@/server/records/customers';
 import { dateInputValue } from '@/lib/dates';
+import { getOrderOperationalDefaults } from '@/server/records/order-defaults';
 
 export default async function NewOrderPage({
   params,
@@ -21,7 +22,7 @@ export default async function NewOrderPage({
   const t = await getTranslations('records');
   // Dropdowns come from the managed system lists (§9) — relabels, reordering
   // and user-added values all apply here.
-  const [catalog, channels, governorates, fulfillment, statuses, accounts, paymentMethods, customers, providers, statusRoles] = await Promise.all([
+  const [catalog, channels, governorates, fulfillment, statuses, accounts, paymentMethods, customers, providers, statusRoles, defaults] = await Promise.all([
     getOrderCatalog(locale, t('ungrouped')),
     getListOptions('channel', locale),
     getListOptions('governorate', locale),
@@ -41,6 +42,7 @@ export default async function NewOrderPage({
       select: { id: true, name: true },
     }),
     getOrderStatusRoleMap(),
+    getOrderOperationalDefaults(),
   ]);
   const saleStatusValues = [...statusRoles]
     .filter(([, role]) => role === 'SALE')
@@ -169,11 +171,14 @@ export default async function NewOrderPage({
         initial={{
           header: {
             placedAt: dateInputValue(),
+            channel: defaults.channel,
+            governorate: defaults.governorate,
+            fulfillmentMethod: defaults.fulfillmentMethod,
             deliveryFee: '0',
             deliveryCost: '0',
             orderDiscount: '0',
             extraCharges: '0',
-            status: saleStatusValues[0] ?? statuses[0]?.value ?? 'COMPLETED',
+            status: defaults.status,
             financeMode: 'AUTO',
           },
           lines: [{ sku: '', quantity: '1', unitGrossPrice: '0', lineDiscount: '0' }],

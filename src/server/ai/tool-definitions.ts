@@ -104,7 +104,7 @@ export const AI_ASSISTANT_TOOLS: FunctionTool[] = [
   ),
   tool(
     'prepare_create_order',
-    'Prepare an order for explicit confirmation. Resolve products and prices from Atlas and never guess missing required data.',
+    'Prepare an order for explicit confirmation. Preserve the user\'s complete product wording, including name, size, grind, and flavor. Atlas supplies safe operational defaults for omitted date, channel, governorate, fulfillment, status, payment route, and zero-value adjustments.',
     object({
       customerQuery: nullableString,
       newCustomer: { anyOf: [customer, { type: 'null' }] },

@@ -13,7 +13,8 @@ import { buildBranchScope } from '@/server/filters/where-builder';
 import { getProfitFacts } from '@/server/finance/facts';
 import { getSpendRows, getSpendTotals } from '@/server/finance/spend';
 import { getInvoiceData } from '@/server/invoice/data';
-import { getListEntries } from '@/server/lists/resolver';
+import { getListEntries, getListLabel } from '@/server/lists/resolver';
+import { getOrderOperationalDefaults } from '@/server/records/order-defaults';
 import { createPendingAction } from './pending';
 import { actionPreconditionIssues, loadActionPreconditions } from './preconditions';
 import {
@@ -43,7 +44,7 @@ import {
   ResolvedPurchaseActionSchema,
 } from './action-data';
 
-type ToolContext = {
+export type ToolContext = {
   conversationId: string;
   sourceMessageId: string;
   user: CurrentUser;
@@ -162,6 +163,9 @@ async function actionResult(input: {
       account_inactive: ['The selected finance account is unavailable.', 'الحساب المالي المختار غير متاح.'],
       provider_invalid: ['The selected payment provider is unavailable or not configured.', 'مزود الدفع المختار غير متاح أو غير مهيأ.'],
       status_invalid: ['The selected status is unavailable.', 'الحالة المختارة غير متاحة.'],
+      channel_invalid: ['The selected sales channel is unavailable.', 'قناة البيع المختارة غير متاحة.'],
+      governorate_invalid: ['The selected governorate is unavailable.', 'المحافظة المختارة غير متاحة.'],
+      fulfillment_invalid: ['The selected fulfillment method is unavailable.', 'طريقة التجهيز المختارة غير متاحة.'],
       party_inactive: ['The selected party is inactive.', 'الجهة المختارة غير فعالة.'],
       branch_inactive: ['The selected branch is inactive.', 'الفرع المختار غير فعال.'],
       inventory_item_missing: ['The selected inventory item is unavailable.', 'مادة المخزون المختارة غير متاحة.'],
@@ -540,27 +544,32 @@ async function prepareCustomer(raw: unknown, context: ToolContext): Promise<Tool
 }
 
 async function prepareOrder(raw: unknown, context: ToolContext): Promise<ToolExecution> {
-  const input = PrepareOrderSchema.parse(raw);
+  const supplied = PrepareOrderSchema.parse(raw);
+  const defaults = await getOrderOperationalDefaults(context.now);
+  const input = {
+    ...supplied,
+    placedAt: supplied.placedAt || defaults.placedAt,
+    channel: supplied.channel || defaults.channel,
+    governorate: supplied.governorate || defaults.governorate,
+    fulfillmentMethod: supplied.fulfillmentMethod || defaults.fulfillmentMethod,
+    status: supplied.status || defaults.status,
+    financeMode: supplied.financeMode || defaults.financeMode,
+  };
   const missing: string[] = [];
-  if (!input.placedAt || !dateValue(input.placedAt)) missing.push(localized(context.locale, 'valid order date', 'تاريخ طلب صحيح'));
-  if (!input.channel) missing.push(localized(context.locale, 'sales channel', 'قناة البيع'));
-  if (!input.governorate) missing.push(localized(context.locale, 'governorate', 'المحافظة'));
-  if (!input.fulfillmentMethod) missing.push(localized(context.locale, 'fulfillment method', 'طريقة التجهيز'));
-  if (!input.status) missing.push(localized(context.locale, 'order status', 'حالة الطلب'));
-  if (!input.financeMode) missing.push(localized(context.locale, 'payment state', 'حالة الدفع'));
-  if (!input.customerQuery && !input.newCustomer) missing.push(localized(context.locale, 'customer or new customer details', 'العميل أو بيانات عميل جديد'));
+  if (!dateValue(input.placedAt)) missing.push(localized(context.locale, 'valid order date', 'تاريخ طلب صحيح'));
   if (missing.length) return missingResult(context.locale, missing);
 
   const [channel, governorate, status] = await Promise.all([
-    resolveManagedChoice('channel', input.channel as string, context.locale, 'channel'),
-    resolveManagedChoice('governorate', input.governorate as string, context.locale, 'governorate'),
-    resolveManagedChoice('orderStatus', input.status as string, context.locale, 'status'),
+    resolveManagedChoice('channel', input.channel, context.locale, 'channel'),
+    resolveManagedChoice('governorate', input.governorate, context.locale, 'governorate'),
+    resolveManagedChoice('orderStatus', input.status, context.locale, 'status'),
   ]);
   if (!channel.ok) return channel.result;
   if (!governorate.ok) return governorate.result;
   if (!status.ok) return status.result;
 
   let customerExternalId: string | null = null;
+  let customerLabel = localized(context.locale, 'Walk-in / no customer', 'بيع مباشر / بدون عميل');
   if (input.customerQuery) {
     const match = await matchCustomer(input.customerQuery);
     if (match.kind === 'none') return noMatch(context.locale, 'customerQuery', localized(context.locale, 'customer', 'عميل'));
@@ -574,6 +583,9 @@ async function prepareOrder(raw: unknown, context: ToolContext): Promise<ToolExe
       );
     }
     customerExternalId = match.value.externalId;
+    customerLabel = context.locale === 'ar'
+      ? match.value.nameAr || match.value.nameEn || match.value.externalId || customerLabel
+      : match.value.nameEn || match.value.nameAr || match.value.externalId || customerLabel;
     if (!customerExternalId) return noMatch(context.locale, 'customerQuery', localized(context.locale, 'customer ID', 'رقم العميل'));
   }
 
@@ -586,6 +598,9 @@ async function prepareOrder(raw: unknown, context: ToolContext): Promise<ToolExe
       return missingResult(context.locale, [localized(context.locale, 'new customer name or phone', 'اسم العميل الجديد أو الهاتف')]);
     }
     newCustomer = parsed.data;
+    customerLabel = context.locale === 'ar'
+      ? newCustomer.nameAr || newCustomer.nameEn || newCustomer.phone || customerLabel
+      : newCustomer.nameEn || newCustomer.nameAr || newCustomer.phone || customerLabel;
     if (newCustomer.phone) {
       const existing = await matchCustomer(newCustomer.phone);
       if (existing.kind === 'exact') {
@@ -612,6 +627,7 @@ async function prepareOrder(raw: unknown, context: ToolContext): Promise<ToolExe
   }
 
   const resolvedLines: z.infer<typeof ResolvedOrderActionSchema>['lines'] = [];
+  const previewLines: string[] = [];
   for (let index = 0; index < input.lines.length; index += 1) {
     const line = input.lines[index];
     const match = await matchProduct(line.productQuery);
@@ -621,7 +637,7 @@ async function prepareOrder(raw: unknown, context: ToolContext): Promise<ToolExe
         context.locale,
         `lines.${index}.productQuery`,
         match.candidates,
-        (row) => `${String(row.nameEn || row.nameAr)} · ${String(row.sku)} · ${formatMoney(Number(row.sellingPrice), 'IQD', context.locale)}`,
+        (row) => `${String(context.locale === 'ar' ? row.nameAr || row.nameEn : row.nameEn || row.nameAr)} · ${String(row.sizeLabel)} · ${String(row.sku)} · ${formatMoney(Number(row.sellingPrice), 'IQD', context.locale)}`,
         (row) => String(row.sku),
       );
     }
@@ -634,6 +650,7 @@ async function prepareOrder(raw: unknown, context: ToolContext): Promise<ToolExe
       unitGrossPrice: price,
       lineDiscount: line.lineDiscount,
     });
+    previewLines.push(`${line.quantity} x ${context.locale === 'ar' ? match.value.nameAr : match.value.nameEn} · ${match.value.sizeLabel} · ${match.value.sku}`);
   }
 
   let financeAccountId: string | null = null;
@@ -696,17 +713,27 @@ async function prepareOrder(raw: unknown, context: ToolContext): Promise<ToolExe
   });
   const subtotal = resolvedLines.reduce((sum, line) => sum + line.unitGrossPrice * line.quantity - line.lineDiscount, 0);
   const total = Math.max(0, subtotal - validated.orderDiscount + validated.deliveryFee + validated.extraCharges);
+  const [channelLabel, governorateLabel, fulfillmentLabel, statusLabel] = await Promise.all([
+    getListLabel('channel', validated.channel, context.locale),
+    getListLabel('governorate', validated.governorate, context.locale),
+    getListLabel('fulfillment', validated.fulfillmentMethod, context.locale),
+    getListLabel('orderStatus', validated.status, context.locale),
+  ]);
   return actionResult({
     context,
     type: 'CREATE_ORDER',
-    extractedData: input,
+    extractedData: supplied,
     validatedData: validated,
     title: localized(context.locale, 'Create order', 'إنشاء طلب'),
     summary: localized(context.locale, `Create an order for ${formatMoney(total, 'IQD', context.locale)}.`, `إنشاء طلب بقيمة ${formatMoney(total, 'IQD', context.locale)}.`),
     fields: [
-      { label: localized(context.locale, 'Customer', 'العميل'), value: customerExternalId || newCustomer?.nameEn || newCustomer?.nameAr || '—' },
-      { label: localized(context.locale, 'Items', 'المواد'), value: resolvedLines.map((line) => `${line.quantity} x ${line.sku}`).join(', ') },
-      { label: localized(context.locale, 'Status', 'الحالة'), value: validated.status },
+      { label: localized(context.locale, 'Customer', 'العميل'), value: customerLabel },
+      { label: localized(context.locale, 'Items', 'المواد'), value: previewLines.join(', ') },
+      { label: localized(context.locale, 'Date', 'التاريخ'), value: input.placedAt },
+      { label: localized(context.locale, 'Channel', 'القناة'), value: channelLabel },
+      { label: localized(context.locale, 'Governorate', 'المحافظة'), value: governorateLabel },
+      { label: localized(context.locale, 'Fulfillment', 'التجهيز'), value: fulfillmentLabel },
+      { label: localized(context.locale, 'Status', 'الحالة'), value: statusLabel },
       { label: localized(context.locale, 'Payment', 'الدفع'), value: validated.financeMode },
       { label: localized(context.locale, 'Total', 'الإجمالي'), value: formatMoney(total, 'IQD', context.locale) },
     ],

@@ -20,6 +20,7 @@ export type CatalogItem = {
   sku: string;
   name: string;
   group: string;
+  searchText: string;
   price: number;
   unit: string;
   barcodeValue: string;

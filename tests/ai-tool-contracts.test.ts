@@ -3,8 +3,26 @@ import { PrepareOrderSchema, PreparePurchaseSchema } from '@/server/ai/schemas';
 import { ResolvedOrderActionSchema } from '@/server/ai/action-data';
 import { AI_ASSISTANT_TOOLS } from '@/server/ai/tool-definitions';
 import { actionPreconditionIssues } from '@/server/ai/preconditions';
+import { QuickOrderDraftSchema } from '@/lib/ai-quick-order';
 
 describe('AI write tool validation', () => {
+  it('accepts a bounded guided order draft and rejects unsafe extras', () => {
+    const draft = {
+      locale: 'en' as const,
+      customerExternalId: null,
+      placedAt: '2026-08-13',
+      channel: 'WHATSAPP',
+      governorate: 'BAGHDAD',
+      fulfillmentMethod: 'PICKUP' as const,
+      status: 'PENDING',
+      notes: null,
+      lines: [{ sku: 'LHB-TRK-CRD-225-TG-MD', quantity: 2 }],
+    };
+    expect(QuickOrderDraftSchema.parse(draft)).toEqual(draft);
+    expect(() => QuickOrderDraftSchema.parse({ ...draft, sql: 'select *' })).toThrow();
+    expect(() => QuickOrderDraftSchema.parse({ ...draft, lines: [{ ...draft.lines[0], quantity: 0 }] })).toThrow();
+  });
+
   it('allows missing choice fields only at the extraction stage', () => {
     const extracted = PrepareOrderSchema.parse({
       customerQuery: null,
@@ -102,6 +120,9 @@ describe('AI write tool validation', () => {
       account: { isActive: true },
       provider: null,
       status: { code: 'COMPLETED', role: 'SALE' },
+      channel: { code: 'MANUAL', active: true },
+      governorate: { code: 'BAGHDAD', active: true },
+      fulfillment: { code: 'PICKUP', active: true },
     } as never);
     expect(issues).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'stock_insufficient' }),
