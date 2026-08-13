@@ -7,6 +7,7 @@ import { getAiAssistantConfig } from '@/server/ai/config';
 import { activePendingActionContext, getOrCreateConversation, recentConversationMessages, saveAiMessage } from '@/server/ai/history';
 import { isHttpResponse, requireAiApiUser } from '@/server/ai/http';
 import { runAssistant } from '@/server/ai/orchestrator';
+import { safeOpenAiError } from '@/server/ai/provider-error';
 import { AiRateLimitError, consumeAiRateLimit } from '@/server/ai/rate-limit';
 
 export const runtime = 'nodejs';
@@ -136,7 +137,12 @@ export async function POST(request: NextRequest) {
         } catch (error) {
           const errorCode = safeErrorCode(error);
           const message = assistantErrorMessage(parsed.data.locale, debugId);
-          console.error('AI assistant request failed', { debugId, errorCode, requestLogId: requestLog.id });
+          console.error('AI assistant request failed', {
+            debugId,
+            errorCode,
+            requestLogId: requestLog.id,
+            provider: safeOpenAiError(error),
+          });
           await Promise.allSettled([
             saveAiMessage({
               conversationId: conversation.id,

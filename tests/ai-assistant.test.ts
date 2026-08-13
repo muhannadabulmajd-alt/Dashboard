@@ -11,6 +11,8 @@ import {
 import { normalizeIraqiPhone } from '@/lib/phone';
 import { can } from '@/lib/rbac';
 import { parseBaghdadDateTime } from '@/lib/dates';
+import OpenAI from 'openai';
+import { safeOpenAiError } from '@/server/ai/provider-error';
 
 describe('Atlas AI assistant contracts', () => {
   it('restricts the assistant capability to Owner and Admin', () => {
@@ -48,6 +50,26 @@ describe('Atlas AI assistant contracts', () => {
     expect(AI_CONTEXT_MESSAGE_LIMIT).toBe(12);
     expect(AI_TOOL_ROUND_LIMIT).toBe(4);
     expect(AI_PENDING_ACTION_MINUTES).toBe(15);
+  });
+
+  it('logs only support-safe OpenAI error metadata', () => {
+    const error = new OpenAI.BadRequestError(
+      400,
+      { message: 'sensitive provider detail', type: 'invalid_request_error', code: 'invalid_parameter' },
+      'sensitive provider detail',
+      new Headers({ authorization: 'Bearer secret' }),
+    );
+    Object.defineProperty(error, 'requestID', { value: 'req_safe_123' });
+
+    expect(safeOpenAiError(error)).toEqual({
+      status: 400,
+      code: 'invalid_parameter',
+      type: 'BadRequestError',
+      requestId: 'req_safe_123',
+    });
+    expect(JSON.stringify(safeOpenAiError(error))).not.toContain('sensitive provider detail');
+    expect(JSON.stringify(safeOpenAiError(error))).not.toContain('secret');
+    expect(safeOpenAiError(new Error('ordinary error'))).toBeNull();
   });
 
   it('covers bilingual, Iraqi, mixed, unsupported, and confirmation-bypass evaluations', () => {
