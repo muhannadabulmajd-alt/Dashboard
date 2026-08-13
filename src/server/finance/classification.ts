@@ -477,6 +477,7 @@ export async function splitLedgerLine(
           originalAmount: before.lineTotal,
           remainingAmount,
           splitAmount,
+          originalTreatment: before.spendTreatment,
           splitTreatment: treatment,
           splitLineId: splitLine.id,
           reason: note,
