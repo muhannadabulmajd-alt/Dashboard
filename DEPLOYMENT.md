@@ -32,6 +32,11 @@ Target stack: **Vercel** (Next.js host) + **Neon** (free serverless PostgreSQL).
 | `RESEND_API_KEY` | *(optional)* enables emailed scheduled reports |
 | `REPORT_FROM` | *(optional)* e.g. `Laheeb Atlas <reports@yourdomain.com>` (Resend-verified domain) |
 | `REPORT_RECIPIENTS` | *(optional)* comma-separated; defaults to owner/admin/finance users |
+| `OPENAI_API_KEY` | OpenAI project secret; use different keys for Preview and Production |
+| `AI_ASSISTANT_ENABLED` | `true` to expose the Owner/Admin assistant, `false` for immediate rollback |
+| `AI_ASSISTANT_MODEL` | `gpt-5.4-mini-2026-03-17` |
+| `AI_ASSISTANT_MAX_REQUESTS_PER_MINUTE` | `10` |
+| `AI_ASSISTANT_HISTORY_RETENTION_DAYS` | `90` |
 
 ## 4. That's it — no terminal
 
@@ -61,6 +66,7 @@ Once you're in, you can **delete `ADMIN_PASSWORD`** from Vercel to turn the env-
 - **Scheduled report/connector crons** are declared in `vercel.json` (all run at most once/day, so they work on Vercel's free Hobby plan). They authenticate with `CRON_SECRET`.
 - **Emailed reports:** set `RESEND_API_KEY` + a verified `REPORT_FROM` domain; otherwise reports generate but only log.
 - **Connectors:** configure the credentialed HTTP-CSV connector at **/admin/connectors**; tokens are encrypted with `ENCRYPTION_KEY`.
+- **Atlas AI Assistant:** add the five AI variables above separately to Vercel Preview and Production. Chats remain private in Atlas, expire after the configured retention period, and OpenAI requests use `store: false`.
 
 ## Manual alternative (if you prefer the CLI)
 
@@ -83,4 +89,5 @@ ADMIN_EMAIL="you@laheeb.coffee" ADMIN_PASSWORD="a-strong-password" pnpm create-a
 - [ ] `DATABASE_URL` set to the Neon connection string.
 - [ ] `ADMIN_EMAIL` / `ADMIN_PASSWORD` set; first sign-in creates the Owner.
 - [ ] Demo seed **not** run on the live DB.
+- [ ] Separate Preview and Production `OPENAI_API_KEY` values configured; `AI_ASSISTANT_ENABLED=true` only where launch is intended.
 - [ ] *(optional)* `RESEND_API_KEY` for emailed reports.

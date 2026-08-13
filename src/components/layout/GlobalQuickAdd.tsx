@@ -9,6 +9,7 @@ import {
   Plus,
   ReceiptText,
   ShoppingBag,
+  Sparkles,
   UserRoundPlus,
   X,
   type LucideIcon,
@@ -22,6 +23,7 @@ const ICONS: Record<string, LucideIcon> = {
   PackagePlus,
   ReceiptText,
   ShoppingBag,
+  Sparkles,
   UserRoundPlus,
 };
 

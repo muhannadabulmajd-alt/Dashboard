@@ -106,12 +106,15 @@ export async function syncActiveCost(
  * and refresh each one's active FIFO cost. Called after an order create/edit so
  * stock consumption rolls the active cost forward (or back, on cancel/edit).
  */
-export async function syncActiveCostForProducts(productIds: string[]): Promise<void> {
+export async function syncActiveCostForProducts(
+  productIds: string[],
+  db: Prisma.TransactionClient = prisma,
+): Promise<void> {
   const ids = [...new Set(productIds)].filter(Boolean);
   if (!ids.length) return;
-  const items = await prisma.inventoryItem.findMany({
+  const items = await db.inventoryItem.findMany({
     where: { productId: { in: ids } },
     select: { id: true },
   });
-  for (const it of items) await syncActiveCost(it.id);
+  for (const it of items) await syncActiveCost(it.id, db);
 }

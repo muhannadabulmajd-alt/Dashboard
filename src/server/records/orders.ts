@@ -18,7 +18,20 @@ import {
 import { getOrderStatusRoleMap } from '@/server/lists/resolver';
 import { applySoldMovements, syncCustomerStats } from '@/server/orders/sync';
 import { generateOrderNumber } from '@/server/records/numbering';
-import { requireCap, audit, reqField, optField, type ActionState } from './shared';
+import {
+  createCustomerInTransaction,
+  CustomerCommandSchema,
+  type CustomerCommandInput,
+} from '@/server/commands/customers';
+import {
+  requireCap,
+  audit,
+  reqField,
+  optField,
+  type ActionState,
+  type CommandCommitHook,
+  type CommandPreconditionHook,
+} from './shared';
 
 const LIST = '/[locale]/(dashboard)/admin/records/orders';
 const FINANCE = '/[locale]/(dashboard)/finance';
@@ -57,7 +70,8 @@ type OrderCreateStage =
   | 'order_insert'
   | 'stock_sync'
   | 'finance_sync'
-  | 'customer_stats';
+  | 'customer_stats'
+  | 'commit_hook';
 
 const headerSchema = z.object({
   orderNumber: z.string().optional(),
@@ -167,6 +181,9 @@ function createOrderFailure(stage: OrderCreateStage, error: unknown, context: Re
   if (stage === 'customer_stats') {
     return { error: 'customer_stats_failed', formError: 'customer_stats_failed', fieldErrors: { customerExternalId: 'customer_stats_failed' }, stage, debugId };
   }
+  if (stage === 'commit_hook') {
+    return { error: 'commit_failed', formError: 'commit_failed', stage, debugId };
+  }
   return { error: 'create_failed', formError: 'create_failed', stage, debugId };
 }
 
@@ -227,7 +244,13 @@ async function resolveAutomaticOrderFinance(input: {
   };
 }
 
-export async function createOrder(_prev: ActionState, fd: FormData): Promise<ActionState> {
+export async function createOrderCommand(
+  fd: FormData,
+  options: {
+    beforeExecute?: CommandPreconditionHook;
+    onCommitted?: CommandCommitHook<{ recordId: string; recordNumber: string }>;
+  } = {},
+): Promise<ActionState> {
   const user = await requireCap(CAP);
   if (!user) return { error: 'forbidden' };
   const h = parseHeader(fd);
@@ -243,11 +266,26 @@ export async function createOrder(_prev: ActionState, fd: FormData): Promise<Act
   if (!parsedLines.success) return lineActionError(parsedLines);
   if (parsedLines.data.length === 0) return { error: 'nolines', fieldErrors: { lines: 'nolines' } };
 
-  const locale = reqField(fd, 'locale') || 'ar';
   if (h.data.orderNumber && await prisma.order.findUnique({ where: { orderNumber: h.data.orderNumber }, select: { id: true } }))
     return { error: 'exists', fieldErrors: { orderNumber: 'exists' } };
   if (h.data.financeMode === 'KEEP') {
     return { error: 'invalid', fieldErrors: { financeMode: 'invalid' } };
+  }
+  let newCustomer: CustomerCommandInput | null = null;
+  const newCustomerRaw = optField(fd, 'newCustomer');
+  if (newCustomerRaw) {
+    try {
+      const parsedCustomer = CustomerCommandSchema.safeParse(JSON.parse(newCustomerRaw));
+      if (!parsedCustomer.success) {
+        return { error: 'customer', fieldErrors: { customerExternalId: 'customer' } };
+      }
+      newCustomer = parsedCustomer.data;
+    } catch {
+      return { error: 'customer', fieldErrors: { customerExternalId: 'customer' } };
+    }
+  }
+  if (h.data.customerExternalId && newCustomer) {
+    return { error: 'customer', fieldErrors: { customerExternalId: 'customer' } };
   }
   const statusRoles = await getOrderStatusRoleMap();
   const statusRole = statusRoles.get(h.data.status) ?? 'UNKNOWN';
@@ -313,13 +351,13 @@ export async function createOrder(_prev: ActionState, fd: FormData): Promise<Act
     });
   }
 
-  const customer = h.data.customerExternalId
+  const existingCustomer = h.data.customerExternalId
     ? await prisma.customer.findUnique({
         where: { externalId: h.data.customerExternalId },
       select: { id: true },
     })
     : null;
-  if (h.data.customerExternalId && !customer) return { error: 'customer', fieldErrors: { customerExternalId: 'customer' } };
+  if (h.data.customerExternalId && !existingCustomer) return { error: 'customer', fieldErrors: { customerExternalId: 'customer' } };
   const branch = await prisma.branch.findFirst({ orderBy: { createdAt: 'asc' }, select: { id: true } });
   const gross = lineData.reduce((s, l) => s + l.unitGrossPrice * l.quantity, 0);
   const discount = lineData.reduce((s, l) => s + l.lineDiscount, 0) + h.data.orderDiscount;
@@ -344,8 +382,15 @@ export async function createOrder(_prev: ActionState, fd: FormData): Promise<Act
   let stage: OrderCreateStage = 'order_number';
   try {
     order = await prisma.$transaction(async (tx) => {
+      await options.beforeExecute?.(tx);
       stage = 'order_number';
       const orderNumber = await generateOrderNumber(tx, h.data.placedAt, h.data.channel);
+      const customer = newCustomer
+        ? await createCustomerInTransaction(tx, newCustomer, {
+            actorId: user.id,
+            source: 'ai-assistant-order',
+          })
+        : existingCustomer;
       stage = 'order_insert';
       const o = await tx.order.create({
         data: {
@@ -372,7 +417,10 @@ export async function createOrder(_prev: ActionState, fd: FormData): Promise<Act
       // Only statuses mapped as completed sales consume stock. Changing the role
       // on a later edit reverses or reapplies the linked movements atomically.
       stage = 'stock_sync';
-      if (statusRole === 'SALE') await applySoldMovements(tx, o.id, h.data.placedAt, lineData);
+      if (statusRole === 'SALE') {
+        await applySoldMovements(tx, o.id, h.data.placedAt, lineData);
+        await syncActiveCostForProducts(lineData.map((line) => line.productId), tx);
+      }
       stage = 'finance_sync';
       await syncOrderFinance(tx, o.id, {
         mode: financeMode as FinanceSyncMode,
@@ -387,9 +435,13 @@ export async function createOrder(_prev: ActionState, fd: FormData): Promise<Act
       });
       stage = 'customer_stats';
       await syncCustomerStats(tx, customer?.id, saleStatuses);
+      const commandResult = { recordId: o.id, recordNumber: o.orderNumber };
+      stage = 'commit_hook';
+      await options.onCommitted?.(tx, commandResult);
       return { id: o.id, orderNumber: o.orderNumber };
     });
   } catch (error) {
+    if (error instanceof Error && error.message === 'action_stale') return { error: 'action_stale' };
     return createOrderFailure(stage, error, {
       channel: h.data.channel,
       customerExternalId: h.data.customerExternalId ?? null,
@@ -401,12 +453,6 @@ export async function createOrder(_prev: ActionState, fd: FormData): Promise<Act
       total,
     });
   }
-  // Stock consumption changed → roll each linked item's active FIFO cost (§8).
-  try {
-    await syncActiveCostForProducts(lineData.map((l) => l.productId));
-  } catch (error) {
-    orderActionError(error, { stage: 'active-cost-sync', orderId: order.id, orderNumber: order.orderNumber });
-  }
   try {
     await audit(user.id, 'CREATE', 'Order', { orderNumber: order.orderNumber, lines: lineData.length });
   } catch (error) {
@@ -416,7 +462,14 @@ export async function createOrder(_prev: ActionState, fd: FormData): Promise<Act
   revalidatePath(FINANCE, 'page');
   revalidatePath(LEDGER, 'page');
   revalidatePath(DUES, 'page');
-  redirect(`/${locale}/admin/records/orders/${order.id}`);
+  return { ok: true, recordId: order.id, recordNumber: order.orderNumber };
+}
+
+export async function createOrder(_prev: ActionState, fd: FormData): Promise<ActionState> {
+  const locale = reqField(fd, 'locale') || 'ar';
+  const result = await createOrderCommand(fd);
+  if (!result?.ok || !result.recordId) return result;
+  redirect(`/${locale}/admin/records/orders/${result.recordId}`);
 }
 
 export async function updateOrder(id: string, _prev: ActionState, fd: FormData): Promise<ActionState> {
@@ -669,6 +722,10 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
           });
         }
       }
+      await syncActiveCostForProducts(
+        [...oldProductIds, ...lineData.map((line) => line.productId)],
+        tx,
+      );
       await syncCustomerStats(tx, existing.customerId, saleStatuses);
       if (customer?.id !== existing.customerId) await syncCustomerStats(tx, customer?.id, saleStatuses);
     });
@@ -681,9 +738,6 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
       debugId,
     };
   }
-  // Re-derive FIFO cost for items touched before or after the edit (a removed
-  // line reverses its consumption; an added line consumes), §8.
-  await syncActiveCostForProducts([...oldProductIds, ...lineData.map((l) => l.productId)]);
   await audit(user.id, 'UPDATE', 'Order', {
     id,
     lines: lineData.length,
@@ -719,7 +773,14 @@ export async function deleteOrder(id: string, locale: string): Promise<void> {
   redirect(`/${locale}/admin/records/orders`);
 }
 
-export async function bulkUpdateOrders(_prev: ActionState, fd: FormData): Promise<ActionState> {
+export async function bulkUpdateOrders(
+  _prev: ActionState,
+  fd: FormData,
+  options: {
+    beforeExecute?: CommandPreconditionHook;
+    onCommitted?: CommandCommitHook<{ count: number; amountApplied: number }>;
+  } = {},
+): Promise<ActionState> {
   const user = await requireCap(CAP);
   if (!user) return { error: 'forbidden' };
   let ids: unknown;
@@ -748,6 +809,7 @@ export async function bulkUpdateOrders(_prev: ActionState, fd: FormData): Promis
   const saleStatuses = [...statusRoles].filter(([, role]) => role === 'SALE').map(([code]) => code);
   try {
     const summary = await prisma.$transaction(async (tx) => {
+      await options.beforeExecute?.(tx);
       const orders = await tx.order.findMany({
         where: { id: { in: input.orderIds } },
         include: { lines: { select: { productId: true, quantity: true } } },
@@ -755,6 +817,7 @@ export async function bulkUpdateOrders(_prev: ActionState, fd: FormData): Promis
       });
       if (orders.length !== input.orderIds.length) throw new Error('notfound');
       const changedCustomers = new Set<string>();
+      const changedProducts = new Set<string>();
       let amountApplied = 0;
       const account = input.accountId
         ? await tx.financeAccount.findUnique({
@@ -834,6 +897,7 @@ export async function bulkUpdateOrders(_prev: ActionState, fd: FormData): Promis
             if (nextRole === 'SALE' && order.inventorySyncMode === 'NORMAL') {
               await applySoldMovements(tx, order.id, order.placedAt, order.lines);
             }
+            for (const line of order.lines) changedProducts.add(line.productId);
           }
           await tx.order.update({ where: { id: order.id }, data: { status: input.status } });
           if (nextRole === 'SALE' && payment.remaining > 0) {
@@ -908,6 +972,7 @@ export async function bulkUpdateOrders(_prev: ActionState, fd: FormData): Promis
         }
       }
 
+      await syncActiveCostForProducts([...changedProducts], tx);
       for (const customerId of changedCustomers) await syncCustomerStats(tx, customerId, saleStatuses);
       await tx.auditLog.create({
         data: {
@@ -925,7 +990,9 @@ export async function bulkUpdateOrders(_prev: ActionState, fd: FormData): Promis
           },
         },
       });
-      return { count: orders.length, amountApplied };
+      const commandResult = { count: orders.length, amountApplied };
+      await options.onCommitted?.(tx, commandResult);
+      return commandResult;
     }, { timeout: 60_000 });
     await audit(user.id, 'BULK_ORDER_COMPLETE', 'Order', summary);
   } catch (error) {

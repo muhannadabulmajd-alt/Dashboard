@@ -29,6 +29,7 @@ export function productFields(
     { name: 'grind', label: t('f.grind'), type: 'select', required: true, options: lists?.grinds ?? opts(GRINDS) },
     { name: 'roastLevel', label: t('f.roastLevel'), type: 'select', options: lists?.roastLevels ?? opts(ROAST_LEVELS) },
     { name: 'origin', label: t('f.origin'), type: 'text' },
+    { name: 'aliases', label: t('f.aliases'), type: 'text', placeholder: t('f.aliasesHint'), hint: t('h.aliases') },
     { name: 'imageUrl', label: t('f.imageUrl'), type: 'text', placeholder: 'https://…' },
     { name: 'sellingPrice', label: t('f.price'), type: 'number', required: true, hint: t('h.sellingPrice') },
     { name: 'cogsPerUnit', label: t('f.cost'), type: 'number', required: true, hint: t('f.costHint') },

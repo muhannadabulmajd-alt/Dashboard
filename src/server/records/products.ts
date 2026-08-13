@@ -27,6 +27,7 @@ const schema = z.object({
   groupId: z.string().optional(), // parent product group (variations module)
   sellingPrice: z.coerce.number().int().nonnegative(),
   cogsPerUnit: z.coerce.number().int().nonnegative(),
+  aliases: z.string().optional(),
 });
 
 function parse(fd: FormData) {
@@ -45,6 +46,7 @@ function parse(fd: FormData) {
     groupId: optField(fd, 'groupId'),
     sellingPrice: reqField(fd, 'sellingPrice'),
     cogsPerUnit: reqField(fd, 'cogsPerUnit'),
+    aliases: optField(fd, 'aliases'),
   });
 }
 
@@ -53,6 +55,14 @@ const withGroup = <T extends { groupId?: string; imageUrl?: string }>(data: T) =
   ...data,
   groupId: data.groupId || null,
   imageUrl: data.imageUrl || null,
+  ...('aliases' in data
+    ? {
+        aliases: String(data.aliases ?? '')
+          .split(/[,\n]/)
+          .map((alias) => alias.trim())
+          .filter(Boolean),
+      }
+    : {}),
 });
 
 export async function createProduct(_prev: ActionState, fd: FormData): Promise<ActionState> {

@@ -5,7 +5,8 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { prisma } from '@/server/db/client';
 import { CUSTOMER_SEGMENTS } from '@/lib/enums';
-import { generateCustomerExternalId } from '@/server/records/numbering';
+import { normalizeIraqiPhone } from '@/lib/phone';
+import { createCustomerCommand, customerDisplayLabel } from '@/server/commands/customers';
 import { requireCap, audit, reqField, optField, type ActionState } from './shared';
 
 const LIST = '/[locale]/(dashboard)/admin/records/customers';
@@ -46,11 +47,6 @@ export type InlineCustomerState =
   | { error: string }
   | undefined;
 
-function customerLabel(data: { externalId: string | null; nameEn: string | null; nameAr: string | null; phone: string | null }) {
-  const name = data.nameEn || data.nameAr || data.phone || data.externalId || 'Customer';
-  return data.externalId ? `${name} (${data.externalId})` : name;
-}
-
 export async function createCustomer(_prev: ActionState, fd: FormData): Promise<ActionState> {
   const user = await requireCap(CAP);
   if (!user) return { error: 'forbidden' };
@@ -59,11 +55,7 @@ export async function createCustomer(_prev: ActionState, fd: FormData): Promise<
   const locale = reqField(fd, 'locale') || 'ar';
   const { externalId, ...rest } = r.data;
   void externalId;
-  const created = await prisma.$transaction(async (tx) => {
-    const externalId = await generateCustomerExternalId(tx);
-    return tx.customer.create({ data: { ...rest, externalId } });
-  });
-  await audit(user.id, 'CREATE', 'Customer', { externalId: created.externalId });
+  const created = await createCustomerCommand(rest, { actorId: user.id, source: 'customer-form' });
   revalidatePath(LIST, 'page');
   redirect(`/${locale}/admin/records/customers/${created.id}`);
 }
@@ -75,13 +67,9 @@ export async function createCustomerInline(_prev: InlineCustomerState, fd: FormD
   if (!r.success) return { error: 'invalid' };
   const { externalId, ...rest } = r.data;
   void externalId;
-  const created = await prisma.$transaction(async (tx) => {
-    const externalId = await generateCustomerExternalId(tx);
-    return tx.customer.create({ data: { ...rest, externalId }, select: { externalId: true, nameEn: true, nameAr: true, phone: true } });
-  });
-  await audit(user.id, 'CREATE', 'Customer', { externalId: created.externalId, source: 'order-inline-modal' });
+  const created = await createCustomerCommand(rest, { actorId: user.id, source: 'order-inline-modal' });
   revalidatePath(LIST, 'page');
-  return { ok: true, customer: { externalId: created.externalId!, label: customerLabel(created) } };
+  return { ok: true, customer: { externalId: created.externalId!, label: customerDisplayLabel(created) } };
 }
 
 export async function updateCustomer(
@@ -97,7 +85,10 @@ export async function updateCustomer(
   // externalId is immutable after creation (CR-4) — never update it.
   const { externalId, ...data } = r.data;
   void externalId;
-  await prisma.customer.update({ where: { id }, data });
+  await prisma.customer.update({
+    where: { id },
+    data: { ...data, normalizedPhone: normalizeIraqiPhone(data.phone) },
+  });
   await audit(user.id, 'UPDATE', 'Customer', { id });
   revalidatePath(LIST, 'page');
   redirect(`/${locale}/admin/records/customers/${id}`);

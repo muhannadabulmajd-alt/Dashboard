@@ -4,7 +4,7 @@ Internal Roastery & Commerce Intelligence dashboard for **Laheeb Coffee (قهو�
 
 This repository covers the **MVP**, **Phase 2** analytics, and the reporting / franchise / connector roadmap — ten dashboard pages on a full auth/RBAC/i18n/filter foundation.
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fmuhannadabulmajd-alt%2FDashboard&env=DATABASE_URL,AUTH_SECRET,AUTH_TRUST_HOST,ADMIN_EMAIL,ADMIN_PASSWORD,CRON_SECRET,ENCRYPTION_KEY,NEXT_PUBLIC_USD_PER_IQD&envDescription=Neon%20Postgres%20URL%20%2B%20app%20secrets%20%2B%20first%20admin%20(see%20DEPLOYMENT.md)&envLink=https%3A%2F%2Fgithub.com%2Fmuhannadabulmajd-alt%2FDashboard%2Fblob%2Fmain%2FDEPLOYMENT.md)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fmuhannadabulmajd-alt%2FDashboard&env=DATABASE_URL,AUTH_SECRET,AUTH_TRUST_HOST,ADMIN_EMAIL,ADMIN_PASSWORD,CRON_SECRET,ENCRYPTION_KEY,NEXT_PUBLIC_USD_PER_IQD,OPENAI_API_KEY,AI_ASSISTANT_ENABLED,AI_ASSISTANT_MODEL,AI_ASSISTANT_MAX_REQUESTS_PER_MINUTE,AI_ASSISTANT_HISTORY_RETENTION_DAYS&envDescription=Neon%20Postgres%20URL%20%2B%20app%20and%20AI%20secrets%20(see%20DEPLOYMENT.md)&envLink=https%3A%2F%2Fgithub.com%2Fmuhannadabulmajd-alt%2FDashboard%2Fblob%2Fmain%2FDEPLOYMENT.md)
 
 No terminal needed: migrations run automatically on deploy, and your Owner account is created the first time you sign in with `ADMIN_EMAIL` / `ADMIN_PASSWORD`. Full steps: **[DEPLOYMENT.md](./DEPLOYMENT.md)**.
 
@@ -26,6 +26,7 @@ No terminal needed: migrations run automatically on deploy, and your Owner accou
 - **Branded PDF management deck** (`/api/reports/deck`) + **scheduled owner/finance reports** (`/api/reports/scheduled`, cron‑protected) **emailed via Resend** (no‑op log fallback when no key is set)
 - **Franchise module:** per‑branch economics + a composite readiness score, branch‑scoped accounts, branch management (`/admin/branches`)
 - **System connectors** (`/admin/connectors`): pull external data through the same idempotent ingestion path — a built‑in sample connector and a **credentialed HTTP‑CSV connector with its token encrypted at rest (AES‑256‑GCM)**, plus paused placeholders and a cron sync endpoint
+- **Private Atlas AI Assistant** (`/ai-assistant`): Owner/Admin-only bilingual live-data analysis plus explicit-confirmation creation of customers, orders, expenses, purchases, and order-status changes
 - **Seeded sample data** so every dashboard is populated on first run
 
 ## Architecture
@@ -78,7 +79,7 @@ pnpm dev                      # http://localhost:3000  (redirects to /ar)
 
 ## Configuration
 
-`.env` keys (see `.env.example`): `DATABASE_URL`, `AUTH_SECRET`, `AUTH_TRUST_HOST`, and optional `NEXT_PUBLIC_USD_PER_IQD` (display‑only IQD→USD rate for the P&L page; currencies are never silently merged).
+`.env` keys are documented in `.env.example` and `DEPLOYMENT.md`. The assistant additionally requires `OPENAI_API_KEY`, `AI_ASSISTANT_ENABLED`, `AI_ASSISTANT_MODEL`, `AI_ASSISTANT_MAX_REQUESTS_PER_MINUTE`, and `AI_ASSISTANT_HISTORY_RETENTION_DAYS`; keep all secret values outside Git.
 
 ## Possible future work
 
