@@ -27,6 +27,32 @@ type AssistantRunnerDependencies = {
   executeTool?: typeof executeAssistantTool;
 };
 
+const SDK_ONLY_REPLAY_FIELDS = new Set([
+  'created_by',
+  'output_parsed',
+  'parsed',
+  'parsed_arguments',
+]);
+
+function stripSdkOnlyReplayFields(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripSdkOnlyReplayFields);
+  if (!value || typeof value !== 'object') return value;
+
+  return Object.fromEntries(
+    Object.entries(value).flatMap(([key, nestedValue]) => (
+      SDK_ONLY_REPLAY_FIELDS.has(key)
+        ? []
+        : [[key, stripSdkOnlyReplayFields(nestedValue)]]
+    )),
+  );
+}
+
+function responseOutputForReplay(
+  output: OpenAITypes.Responses.ResponseOutputItem[],
+): ResponseInputItem[] {
+  return output.map((item) => stripSdkOnlyReplayFields(item) as ResponseInputItem);
+}
+
 function instructions(input: {
   locale: 'ar' | 'en';
   user: CurrentUser;
@@ -187,7 +213,7 @@ export async function runAssistant(
 
       responseInput = [
         ...responseInput,
-        ...(response.output as ResponseInputItem[]),
+        ...responseOutputForReplay(response.output),
         ...toolOutputs,
       ];
     }

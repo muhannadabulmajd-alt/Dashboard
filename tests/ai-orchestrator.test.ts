@@ -85,14 +85,37 @@ describe('AI Responses API orchestration', () => {
     const firstResponse = responseStream([], {
       id: 'resp_tool',
       status: 'completed',
-      output: [{
-        type: 'function_call',
-        id: 'fc_1',
-        call_id: 'call_1',
-        name: 'prepare_create_customer',
-        arguments: JSON.stringify({ name: 'Saba Al-Bayati', phone: '07811100140' }),
-        status: 'completed',
-      }],
+      output: [
+        {
+          type: 'reasoning',
+          id: 'reasoning_1',
+          summary: [],
+          encrypted_content: 'encrypted-reasoning-for-replay',
+          created_by: 'sdk-helper-field',
+        },
+        {
+          type: 'message',
+          id: 'message_1',
+          role: 'assistant',
+          status: 'completed',
+          content: [{
+            type: 'output_text',
+            text: 'I will prepare that customer.',
+            annotations: [],
+            logprobs: [],
+            parsed: null,
+          }],
+        },
+        {
+          type: 'function_call',
+          id: 'fc_1',
+          call_id: 'call_1',
+          name: 'prepare_create_customer',
+          arguments: JSON.stringify({ name: 'Saba Al-Bayati', phone: '07811100140' }),
+          parsed_arguments: { name: 'Saba Al-Bayati', phone: '07811100140' },
+          status: 'completed',
+        },
+      ],
       usage: { input_tokens: 40, output_tokens: 10 },
       error: null,
     });
@@ -117,6 +140,16 @@ describe('AI Responses API orchestration', () => {
       expect.objectContaining({ conversationId: 'conversation', sourceMessageId: 'message' }),
     );
     const secondRequest = stream.mock.calls[1][0] as { input: Array<Record<string, unknown>> };
+    expect(secondRequest.input).toContainEqual(expect.objectContaining({
+      type: 'reasoning',
+      encrypted_content: 'encrypted-reasoning-for-replay',
+    }));
+    const replayedReasoning = secondRequest.input.find((item) => item.type === 'reasoning');
+    expect(replayedReasoning).not.toHaveProperty('created_by');
+    const replayedMessage = secondRequest.input.find((item) => item.type === 'message' && item.id === 'message_1');
+    expect((replayedMessage?.content as Array<Record<string, unknown>>)[0]).not.toHaveProperty('parsed');
+    const replayedCall = secondRequest.input.find((item) => item.type === 'function_call');
+    expect(replayedCall).not.toHaveProperty('parsed_arguments');
     expect(secondRequest.input).toContainEqual(expect.objectContaining({
       type: 'function_call_output',
       call_id: 'call_1',
