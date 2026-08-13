@@ -1,20 +1,26 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import type { Prisma } from '@prisma/client';
-import { AiChatRequestSchema, assistantErrorMessage, type AiStreamEvent } from '@/lib/ai-assistant';
+import {
+  AiChatRequestSchema,
+  assistantCreditUnavailableMessage,
+  assistantErrorMessage,
+  type AiStreamEvent,
+} from '@/lib/ai-assistant';
 import { prisma } from '@/server/db/client';
 import { aiDebugId } from '@/server/ai/hash';
 import { getAiAssistantConfig } from '@/server/ai/config';
 import { activePendingActionContext, getOrCreateConversation, recentConversationMessages, saveAiMessage } from '@/server/ai/history';
 import { isHttpResponse, requireAiApiUser } from '@/server/ai/http';
 import { runAssistant } from '@/server/ai/orchestrator';
-import { safeOpenAiError } from '@/server/ai/provider-error';
+import { isOpenAiCreditUnavailable, safeOpenAiError, type SafeOpenAiError } from '@/server/ai/provider-error';
 import { AiRateLimitError, consumeAiRateLimit } from '@/server/ai/rate-limit';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
-function safeErrorCode(error: unknown): string {
+function safeErrorCode(error: unknown, providerError: SafeOpenAiError | null): string {
   if (error instanceof AiRateLimitError) return 'rate_limited';
+  if (isOpenAiCreditUnavailable(providerError)) return 'provider_credit_unavailable';
   if (!(error instanceof Error)) return 'unknown';
   if (error.message === 'ai_key_missing') return 'not_configured';
   if (error.message === 'ai_tool_arguments_invalid') return 'tool_arguments_invalid';
@@ -135,13 +141,16 @@ export async function POST(request: NextRequest) {
           }
           send({ type: 'completion', conversationId: conversation.id, messageId: message.id });
         } catch (error) {
-          const errorCode = safeErrorCode(error);
-          const message = assistantErrorMessage(parsed.data.locale, debugId);
+          const providerError = safeOpenAiError(error);
+          const errorCode = safeErrorCode(error, providerError);
+          const message = errorCode === 'provider_credit_unavailable'
+            ? assistantCreditUnavailableMessage(parsed.data.locale, debugId)
+            : assistantErrorMessage(parsed.data.locale, debugId);
           console.error('AI assistant request failed', {
             debugId,
             errorCode,
             requestLogId: requestLog.id,
-            provider: safeOpenAiError(error),
+            provider: providerError,
           });
           await Promise.allSettled([
             saveAiMessage({
@@ -156,7 +165,12 @@ export async function POST(request: NextRequest) {
               data: { status: 'FAILED', errorCode, latencyMs: Date.now() - requestLog.createdAt.getTime() },
             }),
           ]);
-          send({ type: 'error', message, debugId, retryable: errorCode !== 'tool_arguments_invalid' });
+          send({
+            type: 'error',
+            message,
+            debugId,
+            retryable: !['tool_arguments_invalid', 'provider_credit_unavailable', 'not_configured'].includes(errorCode),
+          });
           send({ type: 'completion', conversationId: conversation.id });
         } finally {
           controller.close();

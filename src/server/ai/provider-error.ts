@@ -7,6 +7,10 @@ export type SafeOpenAiError = {
   requestId: string | null;
 };
 
+export function isOpenAiCreditUnavailable(error: SafeOpenAiError | null): boolean {
+  return error?.code === 'credit_balance_exhausted' || error?.code === 'insufficient_quota';
+}
+
 /** Extract only support-safe provider metadata. Never return messages, headers, bodies, or request content. */
 export function safeOpenAiError(error: unknown): SafeOpenAiError | null {
   if (!(error instanceof OpenAI.APIError)) return null;

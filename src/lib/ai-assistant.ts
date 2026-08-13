@@ -80,3 +80,9 @@ export function assistantErrorMessage(locale: 'ar' | 'en', debugId: string): str
     ? `تعذر إكمال الطلب الآن. لم يتم تغيير أي بيانات. رمز المتابعة: ${debugId}`
     : `I could not complete that request. No data was changed. Debug ID: ${debugId}`;
 }
+
+export function assistantCreditUnavailableMessage(locale: 'ar' | 'en', debugId: string): string {
+  return locale === 'ar'
+    ? `رصيد OpenAI API للمساعد غير متاح حالياً. لم يتم تغيير أي بيانات. اطلب من المالك إضافة رصيد API. رمز المتابعة: ${debugId}`
+    : `The AI Assistant's OpenAI API balance is unavailable. No data was changed. Ask an Owner to add API credit. Debug ID: ${debugId}`;
+}

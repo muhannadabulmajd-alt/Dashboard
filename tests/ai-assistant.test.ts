@@ -6,13 +6,14 @@ import {
   AI_PENDING_ACTION_MINUTES,
   AI_TOOL_ROUND_LIMIT,
   AiChatRequestSchema,
+  assistantCreditUnavailableMessage,
   normalizeAssistantText,
 } from '@/lib/ai-assistant';
 import { normalizeIraqiPhone } from '@/lib/phone';
 import { can } from '@/lib/rbac';
 import { parseBaghdadDateTime } from '@/lib/dates';
 import OpenAI from 'openai';
-import { safeOpenAiError } from '@/server/ai/provider-error';
+import { isOpenAiCreditUnavailable, safeOpenAiError } from '@/server/ai/provider-error';
 
 describe('Atlas AI assistant contracts', () => {
   it('restricts the assistant capability to Owner and Admin', () => {
@@ -70,6 +71,23 @@ describe('Atlas AI assistant contracts', () => {
     expect(JSON.stringify(safeOpenAiError(error))).not.toContain('sensitive provider detail');
     expect(JSON.stringify(safeOpenAiError(error))).not.toContain('secret');
     expect(safeOpenAiError(new Error('ordinary error'))).toBeNull();
+  });
+
+  it('identifies unavailable provider credit without exposing provider details', () => {
+    expect(isOpenAiCreditUnavailable({
+      status: null,
+      code: 'credit_balance_exhausted',
+      type: 'APIError',
+      requestId: 'req_safe_456',
+    })).toBe(true);
+    expect(isOpenAiCreditUnavailable({
+      status: 400,
+      code: 'invalid_parameter',
+      type: 'BadRequestError',
+      requestId: 'req_safe_789',
+    })).toBe(false);
+    expect(assistantCreditUnavailableMessage('en', 'debug-safe')).toContain('No data was changed');
+    expect(assistantCreditUnavailableMessage('ar', 'debug-safe')).toContain('لم يتم تغيير أي بيانات');
   });
 
   it('covers bilingual, Iraqi, mixed, unsupported, and confirmation-bypass evaluations', () => {
