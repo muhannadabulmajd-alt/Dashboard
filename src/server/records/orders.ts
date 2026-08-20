@@ -16,7 +16,11 @@ import {
   type FinanceSyncMode,
 } from '@/server/finance/sync';
 import { getOrderStatusRoleMap } from '@/server/lists/resolver';
-import { applySoldMovements, syncCustomerStats } from '@/server/orders/sync';
+import {
+  applySoldMovements,
+  resolveOrderInventoryReadiness,
+  syncCustomerStats,
+} from '@/server/orders/sync';
 import { generateOrderNumber } from '@/server/records/numbering';
 import {
   createCustomerInTransaction,
@@ -137,12 +141,39 @@ const refundFor = (isReturn: boolean, gross: number, discount: number, deliveryF
 
 function orderActionError(error: unknown, context: Record<string, unknown>) {
   const err = error as { name?: string; code?: string; message?: string };
-  console.error('[orders.create]', {
+  console.error('[orders]', {
     ...context,
     errorName: err?.name,
     errorCode: err?.code,
     errorMessage: err?.message,
   });
+}
+
+async function persistOrderFailure(input: {
+  userId: string;
+  action: 'CREATE' | 'UPDATE';
+  debugId: string;
+  error: unknown;
+  metadata: Record<string, unknown>;
+}) {
+  const rawCode = input.error instanceof Error ? input.error.message : 'unknown';
+  const errorCode = rawCode.split(':')[0].slice(0, 120);
+  await prisma.auditLog.create({
+    data: {
+      userId: input.userId,
+      action: `ORDER_${input.action}_FAILED`,
+      entity: 'Order',
+      entityId: typeof input.metadata.orderId === 'string' ? input.metadata.orderId : null,
+      metadata: {
+        ...input.metadata,
+        debugId: input.debugId,
+        errorCode,
+      } as Prisma.InputJsonObject,
+    },
+  }).catch((auditError) => orderActionError(auditError, {
+    stage: 'failure_audit',
+    debugId: input.debugId,
+  }));
 }
 
 function headerActionError(result: ReturnType<typeof parseHeader>): NonNullable<ActionState> {
@@ -244,6 +275,23 @@ async function resolveAutomaticOrderFinance(input: {
   };
 }
 
+async function resolveDirectPaymentAccount(
+  requestedId: string | null | undefined,
+  client: Pick<Prisma.TransactionClient, 'financeAccount'> = prisma,
+) {
+  const account = requestedId
+    ? await client.financeAccount.findFirst({
+        where: { id: requestedId, isActive: true, currency: 'IQD', type: { not: 'PAYMENT_GATEWAY' } },
+        select: { id: true },
+      })
+    : await client.financeAccount.findFirst({
+        where: { externalKey: 'CASH_ON_HANDS', isActive: true, currency: 'IQD' },
+        select: { id: true },
+      });
+  if (!account) throw new Error('payment_account_invalid');
+  return account.id;
+}
+
 export async function createOrderCommand(
   fd: FormData,
   options: {
@@ -308,11 +356,15 @@ export async function createOrderCommand(
     }
   }
   const financeMode = automaticFinance?.mode ?? h.data.financeMode;
-  const financeAccountId = automaticFinance?.accountId ?? h.data.financeAccountId;
+  let financeAccountId = automaticFinance?.accountId ?? h.data.financeAccountId;
   const financeProviderId = automaticFinance?.providerId ?? h.data.financeProviderId;
   const financePaymentMethod = automaticFinance?.paymentMethod ?? h.data.financePaymentMethod;
-  if ((financeMode === 'PAID' || financeMode === 'PARTIAL') && !financeAccountId) {
-    return { error: 'account', fieldErrors: { financeAccountId: 'account' } };
+  if (financeMode === 'PAID' || financeMode === 'PARTIAL') {
+    try {
+      financeAccountId = await resolveDirectPaymentAccount(financeAccountId);
+    } catch {
+      return { error: 'account', fieldErrors: { financeAccountId: 'account' } };
+    }
   }
   if (financeMode === 'PROVIDER' && !financeProviderId) {
     return { error: 'provider', fieldErrors: { financeProviderId: 'provider' } };
@@ -391,6 +443,11 @@ export async function createOrderCommand(
             source: 'ai-assistant-order',
           })
         : existingCustomer;
+      stage = 'stock_sync';
+      const stockReadiness = await resolveOrderInventoryReadiness(
+        tx,
+        lineData.map((line) => line.productId),
+      );
       stage = 'order_insert';
       const o = await tx.order.create({
         data: {
@@ -411,15 +468,31 @@ export async function createOrderCommand(
           refundAmount: refundFor(statusRole === 'RETURN', gross, discount, h.data.deliveryFee, h.data.extraCharges),
           deliveryFee: h.data.deliveryFee,
           deliveryCost: h.data.deliveryCost,
+          inventorySyncMode: stockReadiness.mode,
           lines: { create: lineData },
         },
       });
       // Only statuses mapped as completed sales consume stock. Changing the role
       // on a later edit reverses or reapplies the linked movements atomically.
       stage = 'stock_sync';
-      if (statusRole === 'SALE') {
+      if (statusRole === 'SALE' && stockReadiness.mode === 'NORMAL') {
         await applySoldMovements(tx, o.id, h.data.placedAt, lineData);
         await syncActiveCostForProducts(lineData.map((line) => line.productId), tx);
+      }
+      if (stockReadiness.mode === 'SKIP_HISTORICAL') {
+        await tx.auditLog.create({
+          data: {
+            userId: user.id,
+            action: 'ORDER_STOCK_SYNC_SKIPPED',
+            entity: 'Order',
+            entityId: o.id,
+            metadata: {
+              reason: 'products_not_connected_to_inventory',
+              skus: stockReadiness.unconfiguredSkus,
+              source: 'order-command',
+            },
+          },
+        });
       }
       stage = 'finance_sync';
       await syncOrderFinance(tx, o.id, {
@@ -428,7 +501,7 @@ export async function createOrderCommand(
         dueDate: h.data.financeDueDate,
         paidAmount: h.data.financePaidAmount,
         paymentMethod: financePaymentMethod,
-        paymentDate: automaticFinance ? h.data.placedAt : h.data.financePaymentDate,
+        paymentDate: automaticFinance ? h.data.placedAt : h.data.financePaymentDate ?? h.data.placedAt,
         createdById: user.id,
         partyId: provider?.id ?? null,
         statusRole,
@@ -442,7 +515,7 @@ export async function createOrderCommand(
     });
   } catch (error) {
     if (error instanceof Error && error.message === 'action_stale') return { error: 'action_stale' };
-    return createOrderFailure(stage, error, {
+    const metadata = {
       channel: h.data.channel,
       customerExternalId: h.data.customerExternalId ?? null,
       status: h.data.status,
@@ -451,7 +524,18 @@ export async function createOrderCommand(
       lineCount: lineData.length,
       skus: lineData.map((line) => line.sku),
       total,
-    });
+    };
+    const failure = createOrderFailure(stage, error, metadata);
+    if (failure.debugId) {
+      await persistOrderFailure({
+        userId: user.id,
+        action: 'CREATE',
+        debugId: failure.debugId,
+        error,
+        metadata,
+      });
+    }
+    return failure;
   }
   try {
     await audit(user.id, 'CREATE', 'Order', { orderNumber: order.orderNumber, lines: lineData.length });
@@ -478,9 +562,6 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
   const h = parseHeader(fd);
   if (!h.success) return headerActionError(h);
   const locale = reqField(fd, 'locale') || 'ar';
-  if ((h.data.financeMode === 'PAID' || h.data.financeMode === 'PARTIAL') && !h.data.financeAccountId) {
-    return { error: 'account', fieldErrors: { financeAccountId: 'account' } };
-  }
   if (h.data.financeMode === 'PROVIDER' && !h.data.financeProviderId) {
     return { error: 'provider', fieldErrors: { financeProviderId: 'provider' } };
   }
@@ -516,6 +597,9 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
     },
   });
   if (!existing) return { error: 'notfound' };
+  const existingSoldMovementCount = await prisma.stockMovement.count({
+    where: { orderId: id, reason: 'SOLD' },
+  });
   const oldProductIds = existing.lines.map((l) => l.productId);
   const existingFinanceEntries = await prisma.financeEntry.findMany({
     where: { OR: [{ orderId: id }, { settles: { is: { orderId: id } } }] },
@@ -610,7 +694,7 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
     }
   }
   const financeMode = automaticFinance?.mode ?? h.data.financeMode;
-  const financeAccountId = automaticFinance?.accountId ?? h.data.financeAccountId;
+  let financeAccountId = automaticFinance?.accountId ?? h.data.financeAccountId;
   const financeProviderId = automaticFinance?.providerId ?? h.data.financeProviderId;
   const financePaymentMethod = automaticFinance?.paymentMethod ?? h.data.financePaymentMethod;
   if (
@@ -631,8 +715,12 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
       fieldErrors: { financeMode: 'payment_read_only' },
     };
   }
-  if ((financeMode === 'PAID' || financeMode === 'PARTIAL') && !financeAccountId) {
-    return { error: 'account', fieldErrors: { financeAccountId: 'account' } };
+  if (needsCompletionPayment && (financeMode === 'PAID' || financeMode === 'PARTIAL')) {
+    try {
+      financeAccountId = await resolveDirectPaymentAccount(financeAccountId);
+    } catch {
+      return { error: 'account', fieldErrors: { financeAccountId: 'account' } };
+    }
   }
   if (financeMode === 'PROVIDER' && !financeProviderId) {
     return { error: 'provider', fieldErrors: { financeProviderId: 'provider' } };
@@ -656,6 +744,20 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
   // reapply the order's stock deductions. orderNumber is immutable (CR-5).
   try {
     await prisma.$transaction(async (tx) => {
+      const stockReadiness = await resolveOrderInventoryReadiness(
+        tx,
+        lineData.map((line) => line.productId),
+      );
+      if (
+        existing.inventorySyncMode === 'NORMAL' &&
+        stockReadiness.mode === 'SKIP_HISTORICAL' &&
+        existingSoldMovementCount > 0
+      ) {
+        throw new Error(`stock_not_configured:${stockReadiness.unconfiguredSkus.join(',')}`);
+      }
+      const nextInventorySyncMode = existing.inventorySyncMode === 'SKIP_HISTORICAL'
+        ? 'SKIP_HISTORICAL'
+        : stockReadiness.mode;
       await tx.orderLine.deleteMany({ where: { orderId: id } });
       await tx.stockMovement.deleteMany({ where: { orderId: id } });
       await tx.order.update({
@@ -675,12 +777,28 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
           refundAmount: refundFor(statusRole === 'RETURN', gross, discount, h.data.deliveryFee, h.data.extraCharges),
           deliveryFee: h.data.deliveryFee,
           deliveryCost: h.data.deliveryCost,
+          inventorySyncMode: nextInventorySyncMode,
           lines: { create: lineData },
         },
       });
       // Prior deductions were cleared above; re-apply only for a completed-sale role.
-      if (statusRole === 'SALE' && existing.inventorySyncMode === 'NORMAL') {
+      if (statusRole === 'SALE' && nextInventorySyncMode === 'NORMAL') {
         await applySoldMovements(tx, id, h.data.placedAt, lineData);
+      }
+      if (nextInventorySyncMode === 'SKIP_HISTORICAL' && existing.inventorySyncMode === 'NORMAL') {
+        await tx.auditLog.create({
+          data: {
+            userId: user.id,
+            action: 'ORDER_STOCK_SYNC_SKIPPED',
+            entity: 'Order',
+            entityId: id,
+            metadata: {
+              reason: 'products_not_connected_to_inventory',
+              skus: stockReadiness.unconfiguredSkus,
+              source: 'order-edit',
+            },
+          },
+        });
       }
       if (needsCompletionPayment) {
         await syncOrderFinance(tx, id, {
@@ -688,7 +806,7 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
           accountId: financeAccountId,
           dueDate: h.data.financeDueDate,
           paymentMethod: financePaymentMethod,
-          paymentDate: automaticFinance ? h.data.placedAt : h.data.financePaymentDate,
+          paymentDate: automaticFinance ? h.data.placedAt : h.data.financePaymentDate ?? h.data.placedAt,
           createdById: user.id,
           partyId: provider?.id ?? null,
           statusRole,
@@ -732,8 +850,24 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
   } catch (error) {
     const debugId = `order-edit-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     orderActionError(error, { stage: 'order_update', debugId, orderId: id, total, previousTotal });
+    await persistOrderFailure({
+      userId: user.id,
+      action: 'UPDATE',
+      debugId,
+      error,
+      metadata: { orderId: id, total, previousTotal, requestedStatus: h.data.status },
+    });
+    const code = error instanceof Error ? error.message.split(':')[0] : 'order_update_failed';
+    if (code.startsWith('stock_')) {
+      return {
+        error: 'stock_sync_failed',
+        formError: 'stock_sync_failed',
+        fieldErrors: { lines: 'stock_sync_failed' },
+        debugId,
+      };
+    }
     return {
-      error: error instanceof Error ? error.message : 'order_update_failed',
+      error: code,
       formError: 'order_update_failed',
       debugId,
     };
@@ -892,14 +1026,59 @@ export async function bulkUpdateOrders(
             }
           }
           const oldRole = statusRoles.get(order.status) ?? 'UNKNOWN';
+          const existingSoldMovementCount = nextRole === 'SALE'
+            ? await tx.stockMovement.count({
+                where: { orderId: order.id, reason: 'SOLD' },
+              })
+            : 0;
+          const stockReadiness = nextRole === 'SALE'
+            ? await resolveOrderInventoryReadiness(
+                tx,
+                order.lines.map((line) => line.productId),
+              )
+            : null;
+          if (
+            order.inventorySyncMode === 'NORMAL' &&
+            stockReadiness?.mode === 'SKIP_HISTORICAL' &&
+            existingSoldMovementCount > 0
+          ) {
+            throw new Error(`stock_not_configured:${stockReadiness.unconfiguredSkus.join(',')}`);
+          }
+          const nextInventorySyncMode = order.inventorySyncMode === 'SKIP_HISTORICAL'
+            ? 'SKIP_HISTORICAL'
+            : stockReadiness?.mode ?? order.inventorySyncMode;
           if (oldRole !== nextRole) {
             await tx.stockMovement.deleteMany({ where: { orderId: order.id, reason: 'SOLD' } });
-            if (nextRole === 'SALE' && order.inventorySyncMode === 'NORMAL') {
+            if (nextRole === 'SALE' && nextInventorySyncMode === 'NORMAL') {
               await applySoldMovements(tx, order.id, order.placedAt, order.lines);
             }
             for (const line of order.lines) changedProducts.add(line.productId);
           }
-          await tx.order.update({ where: { id: order.id }, data: { status: input.status } });
+          await tx.order.update({
+            where: { id: order.id },
+            data: {
+              status: input.status,
+              inventorySyncMode: nextInventorySyncMode,
+            },
+          });
+          if (
+            nextInventorySyncMode === 'SKIP_HISTORICAL' &&
+            order.inventorySyncMode === 'NORMAL'
+          ) {
+            await tx.auditLog.create({
+              data: {
+                userId: user.id,
+                action: 'ORDER_STOCK_SYNC_SKIPPED',
+                entity: 'Order',
+                entityId: order.id,
+                metadata: {
+                  reason: 'products_not_connected_to_inventory',
+                  skus: stockReadiness?.unconfiguredSkus ?? [],
+                  source: 'bulk-order-status',
+                },
+              },
+            });
+          }
           if (nextRole === 'SALE' && payment.remaining > 0) {
             await syncOrderFinance(tx, order.id, {
               mode:

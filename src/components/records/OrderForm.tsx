@@ -654,12 +654,11 @@ export function OrderForm({
             <select
               id="finance-account-field"
               name="financeAccountId"
-              required
               className={cn(input, errorFor('financeAccountId') && inputError)}
               defaultValue={h.financeAccountId ?? ''}
               aria-invalid={Boolean(errorFor('financeAccountId'))}
             >
-              <option value="">—</option>
+              <option value="">{labels.automaticCashAccount ?? 'Automatic: Cash on Hands'}</option>
               {accountOptions.map((o) => (
                 <option key={o.value} value={o.value}>
                   {o.label}

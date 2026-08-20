@@ -506,7 +506,9 @@ export function actionPreconditionIssues(
     const input = ResolvedOrderActionSchema.parse(raw);
     const status = state.status as ManagedListState | undefined;
     const products = (Array.isArray(state.products) ? state.products : []) as Parameters<typeof productIssues>[0];
-    issues.push(...productIssues(products, input.lines, status?.role === 'SALE'));
+    issues.push(...productIssues(products, input.lines, status?.role === 'SALE').filter(
+      (issue) => issue.code !== 'stock_not_configured',
+    ));
     if (!(state.channel as ManagedListState | undefined)?.active) issues.push({ field: 'channel', code: 'channel_invalid' });
     if (!(state.governorate as ManagedListState | undefined)?.active) issues.push({ field: 'governorate', code: 'governorate_invalid' });
     if (!(state.fulfillment as ManagedListState | undefined)?.active) issues.push({ field: 'fulfillmentMethod', code: 'fulfillment_invalid' });
@@ -617,7 +619,9 @@ export function actionPreconditionIssues(
   const current = state.currentStatus as ManagedListState | null;
   if (order && current?.role !== 'SALE' && target?.role === 'SALE' && order.inventorySyncMode === 'NORMAL') {
     const products = (Array.isArray(state.products) ? state.products : []) as Parameters<typeof productIssues>[0];
-    issues.push(...productIssues(products, order.lines ?? [], true));
+    issues.push(...productIssues(products, order.lines ?? [], true).filter(
+      (issue) => issue.code !== 'stock_not_configured',
+    ));
   }
   return issues;
 }

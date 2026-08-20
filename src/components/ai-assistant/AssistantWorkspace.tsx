@@ -62,6 +62,7 @@ type ActionResult = {
   status: string;
   message: string;
   href?: string;
+  invoiceHref?: string;
 };
 
 const QUICK_ACTIONS = [
@@ -109,6 +110,7 @@ function payloadEvents(payload: unknown): AiStreamEvent[] {
       status: value.actionResult.status,
       message: value.actionResult.message,
       href: value.actionResult.href,
+      invoiceHref: value.actionResult.invoiceHref,
     }];
   }
   return [];
@@ -620,7 +622,14 @@ export function AssistantWorkspace({
         id: `action-result-${action.id}-${Date.now()}`,
         role: 'ASSISTANT',
         content: '',
-        events: [{ type: 'action_result', actionId: action.id, status: body.status, message: body.message, href: body.href }],
+        events: [{
+          type: 'action_result',
+          actionId: action.id,
+          status: body.status,
+          message: body.message,
+          href: body.href,
+          invoiceHref: body.invoiceHref,
+        }],
         createdAt: new Date().toISOString(),
       }]);
       void refreshHistory();
@@ -734,7 +743,16 @@ export function AssistantWorkspace({
                         >
                           {event.status === 'EXECUTED' ? <Check className="size-4" /> : <X className="size-4" />}
                           <span className="flex-1">{event.message}</span>
-                          {event.href ? <Link href={event.href} className="text-roast underline underline-offset-4">{t('open')}</Link> : null}
+                          {event.href ? (
+                            <Link href={event.href} className="text-roast underline underline-offset-4">
+                              {event.invoiceHref ? t('openOrder') : t('open')}
+                            </Link>
+                          ) : null}
+                          {event.invoiceHref ? (
+                            <Link href={event.invoiceHref} className="text-roast underline underline-offset-4">
+                              {t('openInvoice')}
+                            </Link>
+                          ) : null}
                         </div>
                       );
                       if (event.type === 'error') return (

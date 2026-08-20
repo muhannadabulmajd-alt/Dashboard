@@ -1,8 +1,52 @@
 import 'server-only';
-import type { Prisma } from '@prisma/client';
+import type { InventorySyncMode, Prisma } from '@prisma/client';
 import { decimalNumber } from '@/lib/decimal';
 
 type Tx = Prisma.TransactionClient;
+
+export type OrderInventoryReadiness = {
+  mode: InventorySyncMode;
+  unconfiguredSkus: string[];
+};
+
+/** Decide whether an order can participate in live stock accounting. */
+export async function resolveOrderInventoryReadiness(
+  tx: Tx,
+  productIds: string[],
+): Promise<OrderInventoryReadiness> {
+  const ids = [...new Set(productIds)].sort();
+  const products = await tx.product.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, sku: true, trackInventory: true, isActive: true },
+  });
+  if (products.length !== ids.length || products.some((product) => !product.isActive)) {
+    throw new Error('product_inactive');
+  }
+
+  const items = await tx.inventoryItem.findMany({
+    where: { productId: { in: ids }, isActive: true },
+    select: { id: true, productId: true },
+    orderBy: { id: 'asc' },
+  });
+  const itemsByProduct = new Map<string, string[]>();
+  for (const item of items) {
+    if (!item.productId) continue;
+    itemsByProduct.set(item.productId, [...(itemsByProduct.get(item.productId) ?? []), item.id]);
+  }
+
+  const unconfiguredSkus: string[] = [];
+  for (const product of products) {
+    if (!product.trackInventory) continue;
+    const linked = itemsByProduct.get(product.id) ?? [];
+    if (linked.length > 1) throw new Error(`stock_configuration_ambiguous:${product.sku}`);
+    if (linked.length === 0) unconfiguredSkus.push(product.sku);
+  }
+
+  return {
+    mode: unconfiguredSkus.length ? 'SKIP_HISTORICAL' : 'NORMAL',
+    unconfiguredSkus,
+  };
+}
 
 /** Lock, validate, and apply finished-goods deductions atomically. */
 export async function applySoldMovements(

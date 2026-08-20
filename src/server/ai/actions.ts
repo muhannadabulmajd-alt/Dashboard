@@ -31,6 +31,7 @@ export type ActionExecutionResult = {
   status: string;
   message: string;
   href?: string;
+  invoiceHref?: string;
   recordId?: string;
   replayed?: boolean;
 };
@@ -39,6 +40,7 @@ type ExecutionRecord = {
   recordType: string;
   recordId: string;
   href: string;
+  invoiceHref?: string;
   message: string;
 };
 
@@ -63,6 +65,7 @@ function executionResult(input: {
     status: 'EXECUTED',
     message: input.record.message,
     href: input.record.href,
+    invoiceHref: input.record.invoiceHref,
     recordId: input.record.recordId,
   };
 }
@@ -192,6 +195,7 @@ async function executeOrder(
         recordType: 'Order',
         recordId: commandResult.recordId,
         href: `/admin/records/orders/${commandResult.recordId}`,
+        invoiceHref: `/invoice/${commandResult.recordId}`,
         message: localized(locale, `Order ${commandResult.recordNumber} was created.`, `تم إنشاء الطلب ${commandResult.recordNumber}.`),
       };
       await onCommitted(tx, record);
@@ -202,6 +206,7 @@ async function executeOrder(
     recordType: 'Order',
     recordId: result.recordId,
     href: `/admin/records/orders/${result.recordId}`,
+    invoiceHref: `/invoice/${result.recordId}`,
     message: localized(locale, `Order ${result.recordNumber} was created.`, `تم إنشاء الطلب ${result.recordNumber}.`),
   };
 }
@@ -421,6 +426,7 @@ export async function confirmPendingAction(input: {
       status: action.status,
       message: String(result?.message ?? localized(input.locale, 'This action was already completed.', 'تم تنفيذ هذا الإجراء مسبقاً.')),
       href: typeof result?.href === 'string' ? result.href : undefined,
+      invoiceHref: typeof result?.invoiceHref === 'string' ? result.invoiceHref : undefined,
       recordId: action.recordId ?? undefined,
       replayed: true,
     };
@@ -541,6 +547,7 @@ export async function confirmPendingAction(input: {
         status: latest.status,
         message: String(stored.message ?? localized(input.locale, 'The action was completed.', 'تم تنفيذ الإجراء.')),
         href: typeof stored.href === 'string' ? stored.href : undefined,
+        invoiceHref: typeof stored.invoiceHref === 'string' ? stored.invoiceHref : undefined,
         recordId: latest.recordId ?? undefined,
         replayed: true,
       };
@@ -578,7 +585,7 @@ export async function confirmPendingAction(input: {
   }
 }
 
-export async function cancelPendingAction(input: { actionId: string; user: CurrentUser; locale: AppLocale }) {
+export async function cancelPendingAction(input: { actionId: string; user: CurrentUser; locale: AppLocale }): Promise<ActionExecutionResult> {
   if (!can(input.user.role, 'use:ai-assistant')) throw new Error('forbidden');
   const result = {
     actionId: input.actionId,
