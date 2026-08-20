@@ -99,6 +99,7 @@ export default async function NewOrderPage({
     financeNone: t('f.financeNone'),
     financePaidAmount: t('f.financePaidAmount'),
     paymentAccount: t('f.paymentAccount'),
+    automaticCashAccount: t('orderForm.automaticCashAccount'),
     paymentMethod: t('f.paymentMethod'),
     paymentDate: t('f.paymentDate'),
     paymentDueDate: t('f.paymentDueDate'),

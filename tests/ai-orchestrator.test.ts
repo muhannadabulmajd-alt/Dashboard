@@ -175,6 +175,24 @@ describe('AI Responses API orchestration', () => {
     })).rejects.toThrow('ai_model_incomplete');
   });
 
+  it('buffers and replaces false success text while an Atlas action is pending', async () => {
+    const onEvent = vi.fn();
+    const result = await runAssistant({
+      ...runnerInput(onEvent),
+      hasPendingAction: true,
+    }, {
+      client: {
+        responses: { stream: vi.fn(() => textStream('Order LHB-ORD-TEST was created.')) },
+      } as unknown as OpenAI,
+      executeTool: vi.fn(),
+    });
+
+    expect(result.content).toContain('No data has changed yet');
+    expect(result.content).not.toContain('was created');
+    expect(onEvent).toHaveBeenCalledTimes(1);
+    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'text_delta' }));
+  });
+
   it('streams a model refusal as visible assistant text', async () => {
     const stream = vi.fn(() => responseStream(
       [{ type: 'response.refusal.delta', delta: 'I cannot help with that request.' }],

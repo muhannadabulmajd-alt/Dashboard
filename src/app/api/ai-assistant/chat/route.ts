@@ -2,11 +2,13 @@ import { NextResponse, type NextRequest } from 'next/server';
 import type { Prisma } from '@prisma/client';
 import {
   AiChatRequestSchema,
+  assistantActionCommand,
   assistantCreditUnavailableMessage,
   assistantErrorMessage,
   type AiStreamEvent,
 } from '@/lib/ai-assistant';
 import { prisma } from '@/server/db/client';
+import { cancelPendingAction, confirmPendingAction } from '@/server/ai/actions';
 import { aiDebugId } from '@/server/ai/hash';
 import { getAiAssistantConfig } from '@/server/ai/config';
 import { activePendingActionContext, getOrCreateConversation, recentConversationMessages, saveAiMessage } from '@/server/ai/history';
@@ -70,6 +72,79 @@ export async function POST(request: NextRequest) {
     role: 'USER',
     content: parsed.data.message,
   });
+  const actionCommand = assistantActionCommand(parsed.data.message);
+  if (actionCommand) {
+    const pendingAction = await prisma.aiPendingAction.findFirst({
+      where: {
+        conversationId: conversation.id,
+        userId: userOrResponse.id,
+        status: { in: ['PENDING', 'EXECUTING'] },
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
+    });
+    if (pendingAction) {
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          const send = (event: AiStreamEvent) => {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+          };
+          void (async () => {
+            const debugId = aiDebugId('ai-action');
+            try {
+              send({ type: 'conversation', conversationId: conversation.id });
+              const result = actionCommand === 'confirm'
+                ? await confirmPendingAction({
+                    actionId: pendingAction.id,
+                    user: userOrResponse,
+                    locale: parsed.data.locale,
+                  })
+                : await cancelPendingAction({
+                    actionId: pendingAction.id,
+                    user: userOrResponse,
+                    locale: parsed.data.locale,
+                  });
+              send({
+                type: 'action_result',
+                actionId: result.actionId,
+                status: result.status,
+                message: result.message,
+                href: result.href,
+                invoiceHref: 'invoiceHref' in result ? result.invoiceHref : undefined,
+              });
+              send({ type: 'completion', conversationId: conversation.id });
+            } catch (error) {
+              const errorCode = error instanceof Error ? error.message.split(':')[0] : 'action_failed';
+              const message = errorCode === 'action_stale'
+                ? parsed.data.locale === 'ar'
+                  ? 'تغيرت بيانات أطلس بعد المعاينة. حضّر الطلب مجدداً لمراجعة القيم الحديثة.'
+                  : 'Atlas data changed after the preview. Prepare the action again to review current values.'
+                : assistantErrorMessage(parsed.data.locale, debugId);
+              console.error('AI direct action command failed', {
+                debugId,
+                actionId: pendingAction.id,
+                actionCommand,
+                errorCode,
+              });
+              send({ type: 'error', message, debugId, retryable: errorCode !== 'action_stale' });
+              send({ type: 'completion', conversationId: conversation.id });
+            } finally {
+              controller.close();
+            }
+          })();
+        },
+      });
+      return new NextResponse(stream, {
+        headers: {
+          'Content-Type': 'text/event-stream; charset=utf-8',
+          'Cache-Control': 'no-cache, no-transform',
+          Connection: 'keep-alive',
+          'X-Accel-Buffering': 'no',
+        },
+      });
+    }
+  }
   const [recentMessages, pendingContext] = await Promise.all([
     recentConversationMessages(conversation.id),
     activePendingActionContext(conversation.id),
@@ -102,6 +177,7 @@ export async function POST(request: NextRequest) {
             user: userOrResponse,
             locale: parsed.data.locale,
             signal: request.signal,
+            hasPendingAction: Boolean(pendingContext),
             onEvent: send,
           });
           const payload = result.events.length

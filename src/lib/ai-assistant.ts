@@ -58,7 +58,7 @@ export type AiStreamEvent =
   | { type: 'clarification'; clarification: AiClarification }
   | { type: 'result_card'; card: AiResultCard }
   | { type: 'action_preview'; action: AiActionPreview }
-  | { type: 'action_result'; actionId: string; status: string; message: string; href?: string }
+  | { type: 'action_result'; actionId: string; status: string; message: string; href?: string; invoiceHref?: string }
   | { type: 'error'; message: string; debugId: string; retryable: boolean }
   | { type: 'completion'; conversationId: string; messageId?: string };
 
@@ -79,6 +79,59 @@ export function normalizeAssistantText(value: string): string {
     .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim()
     .replace(/\s+/g, ' ');
+}
+
+export type AssistantActionCommand = 'confirm' | 'cancel';
+
+/** Recognize a deliberate confirmation/cancellation without another model call. */
+export function assistantActionCommand(value: string): AssistantActionCommand | null {
+  const normalized = normalizeAssistantText(value);
+  const confirmations = new Set([
+    'confirm',
+    'confirm and execute',
+    'execute',
+    'yes confirm',
+    'yes execute',
+    'تاكيد',
+    'اكد',
+    'اكد ونفذ',
+    'نفذ',
+    'نعم اكد',
+    'صحيح',
+  ]);
+  if (confirmations.has(normalized)) return 'confirm';
+  const cancellations = new Set([
+    'cancel',
+    'cancel action',
+    'do not execute',
+    'الغاء',
+    'الغي',
+    'لا تنفذ',
+  ]);
+  return cancellations.has(normalized) ? 'cancel' : null;
+}
+
+export function safeAssistantNarrative(
+  content: string,
+  input: { pendingWrite: boolean; locale: 'ar' | 'en' },
+): string {
+  if (!input.pendingWrite) return content.trim();
+  const normalized = normalizeAssistantText(content);
+  const claimsMutation = [
+    'was created',
+    'was updated',
+    'was recorded',
+    'has been created',
+    'has been updated',
+    'تم انشاء',
+    'تم تحديث',
+    'تم تسجيل',
+    'تم تنفيذ',
+  ].some((phrase) => normalized.includes(normalizeAssistantText(phrase)));
+  if (!claimsMutation) return content.trim();
+  return input.locale === 'ar'
+    ? 'الإجراء جاهز للمراجعة، ولم يتم تغيير أي بيانات بعد. استخدم زر التأكيد لتنفيذه.'
+    : 'The action is ready for review. No data has changed yet; use Confirm to execute it.';
 }
 
 export function assistantErrorMessage(locale: 'ar' | 'en', debugId: string): string {

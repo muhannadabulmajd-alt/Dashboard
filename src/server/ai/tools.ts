@@ -660,6 +660,18 @@ async function prepareOrder(raw: unknown, context: ToolContext): Promise<ToolExe
     if (match.kind === 'ambiguous') return ambiguousMatch(context.locale, 'financeAccountQuery', match.candidates, (row) => `${String(row.name)} · ${String(row.currency)}`, (row) => String(row.id));
     financeAccountId = match.value.id;
   }
+  if ((input.financeMode === 'PAID' || input.financeMode === 'PARTIAL') && !financeAccountId) {
+    financeAccountId = (
+      await prisma.financeAccount.findFirst({
+        where: {
+          externalKey: 'CASH_ON_HANDS',
+          isActive: true,
+          currency: 'IQD',
+        },
+        select: { id: true },
+      })
+    )?.id ?? null;
+  }
   let financeProviderId: string | null = null;
   if (input.financeMode === 'PROVIDER' && input.financeProviderQuery) {
     const match = await matchParty(input.financeProviderQuery);
@@ -679,16 +691,13 @@ async function prepareOrder(raw: unknown, context: ToolContext): Promise<ToolExe
   if (input.financeMode === 'PROVIDER' && !financeProviderId) {
     return missingResult(context.locale, [localized(context.locale, 'payment provider', 'مزود الدفع')]);
   }
-  if ((input.financeMode === 'PAID' || input.financeMode === 'PARTIAL') && !dateValue(input.financePaymentDate)) {
-    return missingResult(context.locale, [localized(context.locale, 'payment date', 'تاريخ الدفع')]);
-  }
-  if ((input.financeMode === 'CREDIT' || input.financeMode === 'PARTIAL') && !dateValue(input.financeDueDate)) {
-    return missingResult(context.locale, [localized(context.locale, 'due date', 'تاريخ الاستحقاق')]);
-  }
-
   const placedAt = dateValue(input.placedAt) as Date;
-  const paymentDate = dateValue(input.financePaymentDate);
-  const dueDate = dateValue(input.financeDueDate);
+  const paymentDate = dateValue(input.financePaymentDate) ?? (
+    input.financeMode === 'PAID' || input.financeMode === 'PARTIAL' ? placedAt : null
+  );
+  const dueDate = dateValue(input.financeDueDate) ?? (
+    input.financeMode === 'CREDIT' || input.financeMode === 'PARTIAL' ? placedAt : null
+  );
   const validated = ResolvedOrderActionSchema.parse({
     customerExternalId,
     newCustomer,

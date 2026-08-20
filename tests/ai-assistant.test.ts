@@ -6,8 +6,10 @@ import {
   AI_PENDING_ACTION_MINUTES,
   AI_TOOL_ROUND_LIMIT,
   AiChatRequestSchema,
+  assistantActionCommand,
   assistantCreditUnavailableMessage,
   normalizeAssistantText,
+  safeAssistantNarrative,
 } from '@/lib/ai-assistant';
 import { normalizeIraqiPhone } from '@/lib/phone';
 import { can } from '@/lib/rbac';
@@ -35,6 +37,23 @@ describe('Atlas AI assistant contracts', () => {
     expect(normalizeAssistantText('  Hi-Express  ')).toBe('hi express');
     expect(normalizeAssistantText('قُوجي ٢٥٠ غرام')).toBe('قوجي 250 غرام');
     expect(normalizeAssistantText('كیف ۲۲۵')).toBe('كيف 225');
+  });
+
+  it('routes deliberate confirmation and cancellation commands without another model call', () => {
+    expect(assistantActionCommand('confirm')).toBe('confirm');
+    expect(assistantActionCommand('تأكيد')).toBe('confirm');
+    expect(assistantActionCommand('صحيح')).toBe('confirm');
+    expect(assistantActionCommand('إلغاء')).toBe('cancel');
+    expect(assistantActionCommand('yes, but change the quantity')).toBeNull();
+  });
+
+  it('does not allow model prose to claim an unconfirmed write succeeded', () => {
+    expect(safeAssistantNarrative('Order LHB-1 was created.', { pendingWrite: true, locale: 'en' }))
+      .toContain('No data has changed yet');
+    expect(safeAssistantNarrative('تم إنشاء الطلب.', { pendingWrite: true, locale: 'ar' }))
+      .toContain('لم يتم تغيير أي بيانات');
+    expect(safeAssistantNarrative('Sales are IQD 20,000.', { pendingWrite: false, locale: 'en' }))
+      .toBe('Sales are IQD 20,000.');
   });
 
   it('interprets naive operational dates in Baghdad time', () => {

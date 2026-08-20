@@ -3,7 +3,7 @@ import type OpenAI from 'openai';
 import type { OpenAI as OpenAITypes } from 'openai';
 import type { CurrentUser } from '@/server/auth/session';
 import type { AiStreamEvent } from '@/lib/ai-assistant';
-import { AI_TOOL_ROUND_LIMIT } from '@/lib/ai-assistant';
+import { AI_TOOL_ROUND_LIMIT, safeAssistantNarrative } from '@/lib/ai-assistant';
 import { aiSafetyIdentifier, getAiAssistantConfig, getOpenAiClient } from './config';
 import { AI_ASSISTANT_TOOLS } from './tool-definitions';
 import { executeAssistantTool, type ToolExecution } from './tools';
@@ -102,6 +102,7 @@ export async function runAssistant(
     locale: 'ar' | 'en';
     now?: Date;
     signal?: AbortSignal;
+    hasPendingAction?: boolean;
     onEvent: (event: AiStreamEvent) => void | Promise<void>;
   },
   dependencies: AssistantRunnerDependencies = {},
@@ -117,7 +118,6 @@ export async function runAssistant(
     content: message.content,
   }));
   const emittedEvents: AiStreamEvent[] = [];
-  const textParts: string[] = [];
   let requestId: string | null = null;
   let inputTokens = 0;
   let outputTokens = 0;
@@ -129,6 +129,7 @@ export async function runAssistant(
 
   try {
     for (let round = 0; round < AI_TOOL_ROUND_LIMIT; round += 1) {
+      const roundTextParts: string[] = [];
       const remainingTokens = Math.max(64, 2_000 - outputTokens);
       const stream = client.responses.stream({
         model: config.model,
@@ -152,9 +153,7 @@ export async function runAssistant(
             ? event.delta
             : '';
         if (!delta) continue;
-        textParts.push(delta);
-        const clientEvent: AiStreamEvent = { type: 'text_delta', delta };
-        await input.onEvent(clientEvent);
+        roundTextParts.push(delta);
       }
 
       const response = await stream.finalResponse();
@@ -166,8 +165,13 @@ export async function runAssistant(
 
       const calls = functionCalls(response.output);
       if (!calls.length) {
-        const content = textParts.join('').trim();
+        const pendingWrite = Boolean(input.hasPendingAction) || emittedEvents.some((event) => event.type === 'action_preview');
+        const content = safeAssistantNarrative(roundTextParts.join(''), {
+          pendingWrite,
+          locale: input.locale,
+        });
         if (!content && emittedEvents.length === 0) throw new Error('ai_empty_response');
+        if (content) await input.onEvent({ type: 'text_delta', delta: content });
         return {
           content,
           events: emittedEvents,
@@ -200,8 +204,12 @@ export async function runAssistant(
       }
 
       if (outputTokens >= 2_000) {
+        const content = emittedEvents.some((event) => event.type === 'action_preview')
+          ? safeAssistantNarrative('', { pendingWrite: true, locale: input.locale })
+          : '';
+        if (content) await input.onEvent({ type: 'text_delta', delta: content });
         return {
-          content: textParts.join('').trim(),
+          content,
           events: emittedEvents,
           model: config.model,
           requestId,
