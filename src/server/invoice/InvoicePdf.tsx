@@ -10,12 +10,21 @@ registerLaheebPdfFonts();
 
 const styles = StyleSheet.create({
   page: { padding: 32, fontFamily: 'Amiri', fontSize: 9, color: '#2f211b' },
+  rtl: { textAlign: 'right' },
   header: { flexDirection: 'row', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: '#e7ded2', paddingBottom: 14 },
   brand: { fontSize: 15, fontWeight: 'bold', color: '#532d1f' },
   title: { fontSize: 20, fontWeight: 'bold', color: '#9b3a22', textAlign: 'right' },
   muted: { color: '#73695f' },
   section: { marginTop: 14 },
   sectionTitle: { fontSize: 10, fontWeight: 'bold', marginBottom: 6, color: '#532d1f' },
+  detailsGrid: { flexDirection: 'row', gap: 10, marginTop: 14 },
+  detailCard: { flex: 1, borderWidth: 1, borderColor: '#e7ded2', borderRadius: 4, padding: 9 },
+  detailRow: { flexDirection: 'row', alignItems: 'flex-start', marginTop: 3 },
+  detailRowRtl: { flexDirection: 'row-reverse' },
+  detailLabel: { width: 76, color: '#73695f', paddingRight: 5 },
+  detailLabelRtl: { paddingRight: 0, paddingLeft: 5 },
+  detailValue: { flex: 1, lineHeight: 1.35 },
+  notes: { marginTop: 12, padding: 8, backgroundColor: '#f7f3ec', borderRadius: 4, lineHeight: 1.4 },
   row: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#eee7df', paddingVertical: 4 },
   th: { fontSize: 7.5, fontWeight: 'bold', color: '#73695f' },
   cell: { fontSize: 8.5 },
@@ -29,6 +38,7 @@ type Labels = Record<string, string>;
 
 export function InvoicePdf({ data, labels, locale }: { data: InvoiceData; labels: Labels; locale: AppLocale }) {
   const { order, financeEntries, payment } = data;
+  const isRtl = locale === 'ar';
   const m = (amount: number) => formatMoney(amount, order.currency, locale);
   const customerName =
     (locale === 'ar' ? order.customer?.nameAr : order.customer?.nameEn) ||
@@ -36,6 +46,14 @@ export function InvoicePdf({ data, labels, locale }: { data: InvoiceData; labels
     order.customer?.nameAr ||
     order.customer?.externalId ||
     labels.walkIn;
+  const branchName = order.branch ? (locale === 'ar' ? order.branch.nameAr : order.branch.nameEn) : '—';
+  const branchAddress = [
+    order.branch?.governorate ? enumLabel(order.branch.governorate, locale) : '',
+    order.branch?.address,
+    order.branch?.street,
+  ].filter(Boolean).join(' · ');
+  const deliveryGovernorate = enumLabel(order.governorate || order.customer?.governorate, locale);
+  const creator = order.createdBy?.name ?? order.createdBy?.email ?? labels.system;
   const paymentRows = financeEntries.filter((entry) => {
     if (!activeInvoiceFinanceEntry(entry)) return false;
     if (payment.providerReceivableIds.includes(entry.id)) return true;
@@ -54,12 +72,14 @@ export function InvoicePdf({ data, labels, locale }: { data: InvoiceData; labels
 
   return (
     <Document title={`${labels.title} ${order.orderNumber}`}>
-      <Page size="A4" style={styles.page}>
+      <Page size="A4" style={isRtl ? [styles.page, styles.rtl] : styles.page}>
         <View style={styles.header}>
           <View>
             <Text style={styles.brand}>{labels.brand}</Text>
             <Text style={styles.muted}>{labels.tagline}</Text>
-            <Text style={styles.muted}>{order.branch ? (locale === 'ar' ? order.branch.nameAr : order.branch.nameEn) : ''}</Text>
+            <Text style={styles.muted}>{branchName}</Text>
+            {branchAddress ? <Text style={styles.muted}>{branchAddress}</Text> : null}
+            {order.branch?.phone ? <Text style={styles.muted}>{labels.phone}: {order.branch.phone}</Text> : null}
           </View>
           <View>
             <Text style={styles.title}>{labels.title}</Text>
@@ -69,11 +89,26 @@ export function InvoicePdf({ data, labels, locale }: { data: InvoiceData; labels
           </View>
         </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>{labels.customerDetails}</Text>
-          <Text>{customerName}</Text>
-          {order.customer?.externalId ? <Text style={styles.muted}>{labels.customerId}: {order.customer.externalId}</Text> : null}
-          {order.customer?.phone ? <Text style={styles.muted}>{labels.phone}: {order.customer.phone}</Text> : null}
+        <View style={styles.detailsGrid}>
+          <View style={styles.detailCard}>
+            <Text style={styles.sectionTitle}>{labels.customerDetails}</Text>
+            <DetailRow label={labels.billTo} value={customerName} rtl={isRtl} strong />
+            <DetailRow label={labels.customerId} value={order.customer?.externalId} rtl={isRtl} />
+            <DetailRow label={labels.phone} value={order.customer?.phone} rtl={isRtl} />
+            <DetailRow label={labels.email} value={order.customer?.email} rtl={isRtl} />
+            <DetailRow label={labels.governorate} value={deliveryGovernorate} rtl={isRtl} />
+            <DetailRow label={labels.address} value={order.customer?.address1} rtl={isRtl} />
+            <DetailRow label={labels.street} value={order.customer?.street} rtl={isRtl} />
+          </View>
+          <View style={styles.detailCard}>
+            <Text style={styles.sectionTitle}>{labels.deliveryDetails}</Text>
+            <DetailRow label={labels.branch} value={branchName} rtl={isRtl} />
+            <DetailRow label={labels.channel} value={enumLabel(order.channel, locale)} rtl={isRtl} />
+            <DetailRow label={labels.fulfillment} value={enumLabel(order.fulfillmentMethod, locale)} rtl={isRtl} />
+            <DetailRow label={labels.orderStatus} value={enumLabel(order.status, locale)} rtl={isRtl} />
+            <DetailRow label={labels.paymentStatusLabel} value={labels[`paymentStatus.${payment.status}`]} rtl={isRtl} strong />
+            <DetailRow label={labels.createdBy} value={creator} rtl={isRtl} />
+          </View>
         </View>
 
         <View style={styles.section}>
@@ -121,6 +156,12 @@ export function InvoicePdf({ data, labels, locale }: { data: InvoiceData; labels
           ) : null}
         </View>
 
+        {order.notes ? (
+          <View style={styles.notes} wrap={false}>
+            <Text><Text style={{ fontWeight: 'bold' }}>{labels.notes}: </Text>{order.notes}</Text>
+          </View>
+        ) : null}
+
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>{labels.paymentHistory}</Text>
           {paymentRows.length ? paymentRows.map((entry) => (
@@ -131,6 +172,25 @@ export function InvoicePdf({ data, labels, locale }: { data: InvoiceData; labels
         </View>
       </Page>
     </Document>
+  );
+}
+
+function DetailRow({
+  label,
+  value,
+  rtl,
+  strong = false,
+}: {
+  label: string;
+  value: string | null | undefined;
+  rtl: boolean;
+  strong?: boolean;
+}) {
+  return (
+    <View style={rtl ? [styles.detailRow, styles.detailRowRtl] : styles.detailRow}>
+      <Text style={rtl ? [styles.detailLabel, styles.detailLabelRtl] : styles.detailLabel}>{label}</Text>
+      <Text style={strong ? [styles.detailValue, { fontWeight: 'bold' }] : styles.detailValue}>{value || '—'}</Text>
+    </View>
   );
 }
 
