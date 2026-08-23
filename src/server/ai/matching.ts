@@ -70,10 +70,11 @@ export async function matchProduct(query: string) {
   return rankProductCandidates(rows, query);
 }
 
-export async function matchOrder(query: string) {
+export async function matchOrder(query: string, scope: { branchId?: string } = {}) {
   const normalized = normalizeAssistantText(query);
   const rows = await prisma.order.findMany({
     where: {
+      ...(scope.branchId ? { branchId: scope.branchId } : {}),
       OR: [
         { id: query },
         { orderNumber: { contains: query, mode: 'insensitive' } },

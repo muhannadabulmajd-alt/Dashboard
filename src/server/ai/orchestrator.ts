@@ -5,7 +5,7 @@ import type { CurrentUser } from '@/server/auth/session';
 import type { AiStreamEvent } from '@/lib/ai-assistant';
 import { AI_TOOL_ROUND_LIMIT, safeAssistantNarrative } from '@/lib/ai-assistant';
 import { aiSafetyIdentifier, getAiAssistantConfig, getOpenAiClient } from './config';
-import { AI_ASSISTANT_TOOLS } from './tool-definitions';
+import { assistantToolsForRole } from './access';
 import { executeAssistantTool, type ToolExecution } from './tools';
 
 type ResponseInput = OpenAITypes.Responses.ResponseInput;
@@ -112,6 +112,8 @@ export async function runAssistant(
   const config = getAiAssistantConfig();
   const client = dependencies.client ?? getOpenAiClient();
   const executeTool = dependencies.executeTool ?? executeAssistantTool;
+  const tools = assistantToolsForRole(input.user.role);
+  if (!tools.length) throw new Error('ai_no_allowed_tools');
   let responseInput: ResponseInput = input.messages.map((message) => ({
     type: 'message',
     role: message.role,
@@ -135,7 +137,7 @@ export async function runAssistant(
         model: config.model,
         instructions: instructions({ locale: input.locale, user: input.user, now }),
         input: responseInput,
-        tools: AI_ASSISTANT_TOOLS,
+        tools,
         tool_choice: 'auto',
         parallel_tool_calls: false,
         max_output_tokens: remainingTokens,

@@ -43,6 +43,7 @@ import {
   ResolvedOrderStatusActionSchema,
   ResolvedPurchaseActionSchema,
 } from './action-data';
+import { assertAssistantToolAllowed } from './access';
 
 export type ToolContext = {
   conversationId: string;
@@ -313,8 +314,10 @@ async function salesSummary(raw: unknown, context: ToolContext): Promise<ToolExe
 async function searchOrders(raw: unknown, context: ToolContext): Promise<ToolExecution> {
   const input = SearchSchema.parse(raw);
   const normalizedPhone = input.query.replace(/\D/g, '');
+  const scope = buildBranchScope(context.user);
   const rows = await prisma.order.findMany({
     where: {
+      ...(scope.branchId ? { branchId: scope.branchId } : {}),
       OR: [
         { orderNumber: { contains: input.query, mode: 'insensitive' } },
         { customer: { externalId: { contains: input.query, mode: 'insensitive' } } },
@@ -358,7 +361,7 @@ async function searchOrders(raw: unknown, context: ToolContext): Promise<ToolExe
 
 async function orderDetails(raw: unknown, context: ToolContext): Promise<ToolExecution> {
   const input = z.object({ query: z.string().trim().min(1) }).strict().parse(raw);
-  const matched = await matchOrder(input.query);
+  const matched = await matchOrder(input.query, buildBranchScope(context.user));
   if (matched.kind === 'none') return noMatch(context.locale, 'orderQuery', localized(context.locale, 'order', 'طلب'));
   if (matched.kind === 'ambiguous') {
     return ambiguousMatch(
@@ -947,7 +950,7 @@ async function prepareOrderStatus(raw: unknown, context: ToolContext): Promise<T
   if (!input.status) missing.push(localized(context.locale, 'new order status', 'حالة الطلب الجديدة'));
   if (!input.completionMode) missing.push(localized(context.locale, 'payment route for completion', 'طريقة تحصيل الدفع عند الإكمال'));
   if (missing.length) return missingResult(context.locale, missing);
-  const matched = await matchOrder(input.orderQuery as string);
+  const matched = await matchOrder(input.orderQuery as string, buildBranchScope(context.user));
   if (matched.kind === 'none') return noMatch(context.locale, 'orderQuery', localized(context.locale, 'order', 'طلب'));
   if (matched.kind === 'ambiguous') return ambiguousMatch(context.locale, 'orderQuery', matched.candidates, (row) => `${String(row.orderNumber)} · ${String(row.status)}`, (row) => String(row.orderNumber));
   const statuses = (await getListEntries('orderStatus')).filter((row) => row.isActive);
@@ -1027,6 +1030,7 @@ const TOOL_HANDLERS: Record<string, (raw: unknown, context: ToolContext) => Prom
 };
 
 export async function executeAssistantTool(name: string, raw: unknown, context: ToolContext): Promise<ToolExecution> {
+  assertAssistantToolAllowed(context.user.role, name);
   const handler = TOOL_HANDLERS[name];
   if (!handler) throw new Error('ai_tool_not_allowed');
   return handler(raw, context);

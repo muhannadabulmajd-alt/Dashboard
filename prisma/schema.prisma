@@ -212,6 +212,11 @@ enum AiConversationStatus {
   ARCHIVED
 }
 
+enum AiConversationChannel {
+  WEB
+  TELEGRAM
+}
+
 enum AiMessageRole {
   USER
   ASSISTANT
@@ -255,6 +260,21 @@ enum AiRequestStatus {
   FAILED
 }
 
+enum TelegramIdentityStatus {
+  PENDING
+  ACTIVE
+  REVOKED
+}
+
+enum TelegramUpdateStatus {
+  RECEIVED
+  QUEUED
+  PROCESSING
+  SUCCEEDED
+  FAILED
+  IGNORED
+}
+
 // ---------------------------------------------------------------------------
 // Identity & access
 // ---------------------------------------------------------------------------
@@ -285,6 +305,8 @@ model User {
   aiPendingActions    AiPendingAction[]
   aiRequestLogs       AiRequestLog[]
   aiRateLimitBuckets  AiRateLimitBucket[]
+  telegramIdentity    TelegramIdentity?    @relation("TelegramIdentityUser")
+  linkedTelegramUsers TelegramIdentity[]   @relation("TelegramIdentityLinkedBy")
 
   @@index([role])
   @@index([branchId])
@@ -926,15 +948,17 @@ model AuditLog {
 }
 
 model AiConversation {
-  id            String               @id @default(cuid())
-  userId        String
-  locale        String               @default("en")
-  title         String?
-  status        AiConversationStatus @default(ACTIVE)
-  lastMessageAt DateTime             @default(now())
-  expiresAt     DateTime
-  createdAt     DateTime             @default(now())
-  updatedAt     DateTime             @updatedAt
+  id               String                @id @default(cuid())
+  userId           String
+  locale           String                @default("en")
+  title            String?
+  channel          AiConversationChannel @default(WEB)
+  externalThreadId String?
+  status           AiConversationStatus  @default(ACTIVE)
+  lastMessageAt    DateTime              @default(now())
+  expiresAt        DateTime
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
 
   user           User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   messages       AiMessage[]
@@ -943,6 +967,8 @@ model AiConversation {
 
   @@unique([id, userId])
   @@index([userId, lastMessageAt])
+  @@index([userId, channel, lastMessageAt])
+  @@index([channel, externalThreadId, status, lastMessageAt])
   @@index([expiresAt])
 }
 
@@ -1031,6 +1057,62 @@ model AiRateLimitBucket {
 
   @@id([userId, bucketStart])
   @@index([bucketStart])
+}
+
+model TelegramIdentity {
+  id             String                 @id @default(cuid())
+  telegramUserId String                 @unique
+  privateChatId  String?                @unique
+  userId         String?                @unique
+  username       String?
+  firstName      String?
+  lastName       String?
+  languageCode   String?
+  status         TelegramIdentityStatus @default(PENDING)
+  linkedById     String?
+  linkedAt       DateTime?
+  revokedAt      DateTime?
+  lastSeenAt     DateTime?
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+
+  user     User?            @relation("TelegramIdentityUser", fields: [userId], references: [id], onDelete: SetNull)
+  linkedBy User?            @relation("TelegramIdentityLinkedBy", fields: [linkedById], references: [id], onDelete: SetNull)
+  updates  TelegramUpdate[]
+
+  @@index([status, createdAt])
+  @@index([linkedById])
+}
+
+model TelegramUpdate {
+  id             String               @id @default(cuid())
+  updateId       String               @unique
+  identityId     String?
+  telegramUserId String
+  privateChatId  String?
+  updateType     String
+  status         TelegramUpdateStatus @default(RECEIVED)
+  payload        Json
+  origin         String
+  replyMessageId String?
+  conversationId String?
+  aiMessageId    String?
+  attempts       Int                  @default(0)
+  errorCode      String?
+  debugId        String?
+  queuedAt       DateTime?
+  lastAttemptAt  DateTime?
+  processedAt    DateTime?
+  expiresAt      DateTime
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  identity TelegramIdentity? @relation(fields: [identityId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([identityId, createdAt])
+  @@index([conversationId])
+  @@index([expiresAt])
 }
 
 // ---------------------------------------------------------------------------

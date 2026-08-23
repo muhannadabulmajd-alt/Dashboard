@@ -1,6 +1,18 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "prisma migrate deploy && pnpm check:reconciliation && next build",
+  "functions": {
+    "src/app/api/queues/telegram-updates/route.ts": {
+      "experimentalTriggers": [
+        {
+          "type": "queue/v2beta",
+          "topic": "telegram-ai-updates",
+          "retryAfterSeconds": 60,
+          "initialDelaySeconds": 0
+        }
+      ]
+    }
+  },
   "crons": [
     { "path": "/api/reports/scheduled?kind=weekly", "schedule": "0 6 * * 1" },
     { "path": "/api/reports/scheduled?kind=monthly", "schedule": "0 6 1 * *" },

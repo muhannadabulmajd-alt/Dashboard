@@ -17,6 +17,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       id: true,
       title: true,
       locale: true,
+      channel: true,
       createdAt: true,
       lastMessageAt: true,
       messages: {
