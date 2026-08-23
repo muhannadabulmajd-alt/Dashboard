@@ -1,11 +1,7 @@
-import { createElement } from 'react';
 import { NextResponse, type NextRequest } from 'next/server';
-import { renderToBuffer } from '@react-pdf/renderer';
 import { getCurrentUser } from '@/server/auth/session';
 import { can } from '@/lib/rbac';
-import { getInvoiceData } from '@/server/invoice/data';
-import { getInvoiceLabels } from '@/server/invoice/labels';
-import { InvoicePdf } from '@/server/invoice/InvoicePdf';
+import { renderInvoicePdf } from '@/server/invoice/pdf';
 import { prisma } from '@/server/db/client';
 import type { AppLocale } from '@/lib/money';
 
@@ -21,21 +17,17 @@ export async function GET(
 
   const { id } = await params;
   const locale = (req.nextUrl.searchParams.get('locale') ?? 'en') as AppLocale;
-  const data = await getInvoiceData(id);
-  if (!data) return new NextResponse('Not found', { status: 404 });
-
-  const labels = await getInvoiceLabels(locale);
-  const element = createElement(InvoicePdf, { data, labels, locale }) as Parameters<typeof renderToBuffer>[0];
-  const buffer = await renderToBuffer(element);
+  const pdf = await renderInvoicePdf(id, locale);
+  if (!pdf) return new NextResponse('Not found', { status: 404 });
 
   await prisma.auditLog.create({
-    data: { userId: user.id, action: 'EXPORT', entity: 'invoice_pdf', entityId: id, metadata: { orderNumber: data.order.orderNumber } },
+    data: { userId: user.id, action: 'EXPORT', entity: 'invoice_pdf', entityId: id, metadata: { orderNumber: pdf.orderNumber } },
   });
 
-  return new NextResponse(new Uint8Array(buffer), {
+  return new NextResponse(pdf.bytes, {
     headers: {
       'Content-Type': 'application/pdf',
-      'Content-Disposition': `attachment; filename="laheeb-invoice-${data.order.orderNumber}.pdf"`,
+      'Content-Disposition': `attachment; filename="${pdf.filename}"`,
     },
   });
 }

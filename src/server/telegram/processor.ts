@@ -8,9 +8,11 @@ import { cancelPendingAction, confirmPendingAction } from '@/server/ai/actions';
 import { getAiAssistantConfig } from '@/server/ai/config';
 import { aiDebugId } from '@/server/ai/hash';
 import { processAssistantMessage } from '@/server/ai/service';
+import { renderInvoicePdf } from '@/server/invoice/pdf';
 import {
   answerTelegramCallback,
   editTelegramMessage,
+  sendTelegramDocument,
   sendTelegramMessage,
   sendTelegramTyping,
 } from './api';
@@ -125,6 +127,49 @@ async function deliverReply(input: {
       keyboard: index === chunks.length - 1 ? input.rendered.keyboard : undefined,
     });
   }
+}
+
+async function deliverCreatedOrderInvoice(input: {
+  chatId: string;
+  orderId: string;
+  userId: string;
+  locale: 'ar' | 'en';
+}): Promise<void> {
+  const delivered = await prisma.auditLog.findFirst({
+    where: {
+      action: 'TELEGRAM_INVOICE_PDF_SENT',
+      entity: 'Order',
+      entityId: input.orderId,
+    },
+    select: { id: true },
+  });
+  if (delivered) return;
+
+  const pdf = await renderInvoicePdf(input.orderId, input.locale);
+  if (!pdf) throw new Error('invoice_pdf_not_found');
+
+  const sent = await sendTelegramDocument({
+    chatId: input.chatId,
+    document: pdf.bytes,
+    filename: pdf.filename,
+    caption: input.locale === 'ar'
+      ? `تم إنشاء الطلب بنجاح. فاتورة ${pdf.orderNumber}`
+      : `Order recorded successfully. Invoice ${pdf.orderNumber}`,
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      userId: input.userId,
+      action: 'TELEGRAM_INVOICE_PDF_SENT',
+      entity: 'Order',
+      entityId: input.orderId,
+      metadata: {
+        orderNumber: pdf.orderNumber,
+        telegramChatId: input.chatId,
+        telegramMessageId: sent.message_id,
+      },
+    },
+  });
 }
 
 function storedEvents(message: { content: string | null; payload: Prisma.JsonValue | null }): AiStreamEvent[] {
@@ -297,6 +342,36 @@ export async function processTelegramUpdate(telegramUpdateId: string): Promise<v
         locale,
         rendered: renderAssistantEvents(events, { locale, origin: receipt.origin }),
       });
+      if (callback.command === 'confirm' && result.status === 'EXECUTED' && result.invoiceHref && result.recordId) {
+        await deliverCreatedOrderInvoice({
+          chatId: telegram.chatId,
+          orderId: result.recordId,
+          userId: user.id,
+          locale,
+        }).catch(async (error) => {
+          const errorCode = error instanceof Error ? error.message.slice(0, 120) : 'invoice_pdf_delivery_failed';
+          console.error('Telegram invoice PDF delivery failed', {
+            actionId: result.actionId,
+            orderId: result.recordId,
+            errorCode,
+          });
+          await prisma.auditLog.create({
+            data: {
+              userId: user.id,
+              action: 'TELEGRAM_INVOICE_PDF_FAILED',
+              entity: 'Order',
+              entityId: result.recordId,
+              metadata: { pendingActionId: result.actionId, errorCode },
+            },
+          }).catch(() => undefined);
+          await sendTelegramMessage({
+            chatId: telegram.chatId,
+            text: locale === 'ar'
+              ? 'تم حفظ الطلب، لكن تعذر إرسال ملف الفاتورة الآن. اضغط تأكيد مرة أخرى لإعادة المحاولة.'
+              : 'The order was saved, but the invoice PDF could not be sent. Press Confirm again to retry.',
+          }).catch(() => undefined);
+        });
+      }
       await markComplete(receipt.id, 'SUCCEEDED');
       return;
     }
