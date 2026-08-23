@@ -15,6 +15,7 @@ import {
   type TrustedCommandContext,
 } from '@/server/commands/actor-context';
 import { can } from '@/lib/rbac';
+import { shouldRetryTelegramProcessing } from '@/lib/telegram-errors';
 
 const adminUser: CurrentUser = {
   id: 'admin-1',
@@ -120,5 +121,12 @@ describe('Telegram Atlas AI transport contracts', () => {
   it('does not accept a forged serialized actor context', () => {
     const forged = { actor: adminUser } as TrustedCommandContext;
     expect(getTrustedCommandActor(forged)).toBeNull();
+  });
+
+  it('does not retry terminal action or stale callback failures', () => {
+    expect(shouldRetryTelegramProcessing(new Error('action_failed:debug-id'))).toBe(false);
+    expect(shouldRetryTelegramProcessing(Object.assign(new Error('telegram_api_400'), { retryable: false }))).toBe(false);
+    expect(shouldRetryTelegramProcessing(Object.assign(new Error('telegram_api_500'), { retryable: true }))).toBe(true);
+    expect(shouldRetryTelegramProcessing(new Error('temporary_network_failure'))).toBe(true);
   });
 });

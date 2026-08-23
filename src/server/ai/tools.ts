@@ -7,7 +7,7 @@ import { formatMoney, formatNumber, formatPercent, formatQuantity, toMinor, type
 import { parseBaghdadDateTime, resolveRange } from '@/lib/dates';
 import { DashboardFiltersSchema } from '@/lib/filters';
 import { salesByDimension, stockRow, topProducts } from '@/lib/metrics';
-import { inferCustomerCandidate } from '@/lib/customer-candidate';
+import { inferCustomerCandidate, recoverCustomerCandidate } from '@/lib/customer-candidate';
 import { getInventoryItems } from '@/server/db/repositories/inventory.repo';
 import { prisma } from '@/server/db/client';
 import { buildBranchScope } from '@/server/filters/where-builder';
@@ -49,6 +49,7 @@ import { assertAssistantToolAllowed } from './access';
 export type ToolContext = {
   conversationId: string;
   sourceMessageId: string;
+  recentUserMessages: string[];
   user: CurrentUser;
   locale: AppLocale;
   now: Date;
@@ -578,7 +579,10 @@ async function prepareOrder(raw: unknown, context: ToolContext): Promise<ToolExe
   if (input.customerQuery) {
     const match = await matchCustomer(input.customerQuery);
     if (match.kind === 'none') {
-      const inferred = inferCustomerCandidate(input.customerQuery);
+      const inferred = recoverCustomerCandidate(
+        inferCustomerCandidate(input.customerQuery),
+        context.recentUserMessages,
+      );
       if (!input.newCustomer && !inferred) {
         return noMatch(context.locale, 'customerQuery', localized(context.locale, 'customer', 'عميل'));
       }
@@ -605,7 +609,24 @@ async function prepareOrder(raw: unknown, context: ToolContext): Promise<ToolExe
   }
 
   let newCustomer: z.infer<typeof ResolvedCustomerActionSchema> | null = null;
-  const newCustomerInput = customerExternalId ? null : input.newCustomer ?? inferredNewCustomer;
+  const recoveredExplicitCustomer = input.newCustomer
+    ? recoverCustomerCandidate({
+          nameEn: input.newCustomer.nameEn ?? undefined,
+          nameAr: input.newCustomer.nameAr ?? undefined,
+          phone: input.newCustomer.phone ?? undefined,
+          address1: input.newCustomer.address1 ?? undefined,
+        }, context.recentUserMessages)
+    : null;
+  const explicitNewCustomer = input.newCustomer
+    ? {
+        ...input.newCustomer,
+        nameEn: input.newCustomer.nameEn ?? recoveredExplicitCustomer?.nameEn,
+        nameAr: input.newCustomer.nameAr ?? recoveredExplicitCustomer?.nameAr,
+        phone: input.newCustomer.phone ?? recoveredExplicitCustomer?.phone,
+        address1: input.newCustomer.address1 ?? recoveredExplicitCustomer?.address1,
+      }
+    : null;
+  const newCustomerInput = customerExternalId ? null : explicitNewCustomer ?? inferredNewCustomer;
   if (newCustomerInput) {
     const parsed = ResolvedCustomerActionSchema.safeParse(Object.fromEntries(
       Object.entries({ ...newCustomerInput, segment: newCustomerInput.segment ?? 'NEW' }).map(([key, value]) => [key, value ?? undefined]),
@@ -755,7 +776,16 @@ async function prepareOrder(raw: unknown, context: ToolContext): Promise<ToolExe
       ...(newCustomer ? [{
         label: localized(context.locale, 'Customer setup', 'إعداد العميل'),
         value: localized(context.locale, 'Create new customer with this order', 'إنشاء عميل جديد مع هذا الطلب'),
-      }] : []),
+      }, {
+        label: localized(context.locale, 'Customer name', 'اسم العميل'),
+        value: newCustomer.nameAr || newCustomer.nameEn || '—',
+      }, {
+        label: localized(context.locale, 'Customer phone', 'هاتف العميل'),
+        value: newCustomer.phone || '—',
+      }, ...(newCustomer.address1 ? [{
+        label: localized(context.locale, 'Customer address', 'عنوان العميل'),
+        value: newCustomer.address1,
+      }] : [])] : []),
       { label: localized(context.locale, 'Items', 'المواد'), value: previewLines.join(', ') },
       { label: localized(context.locale, 'Date', 'التاريخ'), value: input.placedAt },
       { label: localized(context.locale, 'Channel', 'القناة'), value: channelLabel },

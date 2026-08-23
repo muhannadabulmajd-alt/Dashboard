@@ -89,6 +89,7 @@ export async function POST(request: NextRequest) {
     }, {
       conversationId: conversation.id,
       sourceMessageId: userMessage.id,
+      recentUserMessages: [userContent],
       user: userOrResponse,
       locale: draft.locale,
       now: new Date(),

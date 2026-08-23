@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { inferCustomerCandidate } from '@/lib/customer-candidate';
+import { inferCustomerCandidate, recoverCustomerCandidate } from '@/lib/customer-candidate';
 
 describe('AI order customer inference', () => {
   it('prepares an unmatched Arabic name as a new customer', () => {
@@ -30,5 +30,38 @@ describe('AI order customer inference', () => {
       segment: 'NEW',
     });
     expect(inferCustomerCandidate('LHB-CUS-260619-0039')).toBeNull();
+  });
+
+  it('recovers a submitted customer name after a product clarification round', () => {
+    expect(recoverCustomerCandidate(
+      { phone: '+9647707130864' },
+      [
+        '- العميل: نور عبداللطيف\n- المنتج: 2 x قهوة تركية\nاضف رقم العميل\n0770 713 0864',
+        'lines.0.productQuery: LHB-TRK-CRD-225-TG-MD',
+      ],
+    )).toEqual({
+      nameAr: 'نور عبداللطيف',
+      phone: '+9647707130864',
+      segment: 'NEW',
+    });
+  });
+
+  it('preserves an unlabelled name, phone, and address from the same request', () => {
+    expect(recoverCustomerCandidate(
+      { phone: '0770 713 0864' },
+      ['نور عبداللطيف\nبغداد مجمع بوابة العراق\n0770 713 0864\n\nقهوة تركية وسط بالهيل عدد اثنين'],
+    )).toEqual({
+      nameAr: 'نور عبداللطيف',
+      phone: '+9647707130864',
+      address1: 'بغداد مجمع بوابة العراق',
+      segment: 'NEW',
+    });
+  });
+
+  it('does not merge an unrelated customer from an older message', () => {
+    expect(recoverCustomerCandidate(
+      { phone: '0770 713 0864' },
+      ['العميل: سلوى دحام\n0781 110 0140'],
+    )).toEqual({ phone: '+9647707130864', segment: 'NEW' });
   });
 });

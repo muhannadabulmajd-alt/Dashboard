@@ -4,8 +4,11 @@ export type InferredCustomerCandidate = {
   nameEn?: string;
   nameAr?: string;
   phone?: string;
+  address1?: string;
   segment: 'NEW';
 };
+
+type CustomerCandidateSeed = Partial<Omit<InferredCustomerCandidate, 'segment'>>;
 
 function asciiDigits(value: string): string {
   return value
@@ -28,6 +31,79 @@ function extractIraqiMobile(value: string): { phone: string; start: number; leng
   if (!/^7\d{9}$/.test(local)) return null;
 
   return { phone: `+964${local}`, start: match.index, length: match[0].length };
+}
+
+function cleanMessageLine(value: string): string {
+  return asciiDigits(value)
+    .replace(/\*\*/g, '')
+    .replace(/^[\s\-•]+/, '')
+    .trim();
+}
+
+function labeledValue(lines: string[], labels: string): string | undefined {
+  const pattern = new RegExp(`^(?:${labels})\\s*[:：]\\s*(.+)$`, 'i');
+  for (const line of lines) {
+    const match = pattern.exec(line);
+    if (match?.[1]) return match[1].trim();
+  }
+  return undefined;
+}
+
+function plausibleUnlabelledName(value: string): boolean {
+  if (!value || value.length > 70 || /[:：\d]/.test(value) || !/\p{L}/u.test(value)) return false;
+  if (value.trim().split(/\s+/).length > 6) return false;
+  const operationalTerms = /(?:طلب|منتج|قهوة|عدد|توصيل|كلفة|اجور|أجور|اجمالي|إجمالي|الدفع|القناة|الحالة|التجهيز|المحافظة|العنوان|شارع|مجمع|بغداد|اربيل|أربيل|البصرة|customer|order|product|delivery|total|address)/i;
+  return !operationalTerms.test(value);
+}
+
+function candidateFromMessage(message: string): InferredCustomerCandidate | null {
+  const value = asciiDigits(message);
+  const lines = value.split(/\r?\n/).map(cleanMessageLine).filter(Boolean);
+  const mobile = extractIraqiMobile(value);
+  let name = labeledValue(lines, 'اسم العميل|اسم الزبون|العميل|الزبون|customer(?:\\s+name)?|name');
+  let address1 = labeledValue(lines, 'عنوان العميل|عنوان الزبون|العنوان|customer\\s+address|address');
+
+  if (!name && mobile) {
+    const phoneLineIndex = lines.findIndex((line) => extractIraqiMobile(line)?.phone === mobile.phone);
+    if (phoneLineIndex > 0) {
+      name = lines.slice(0, phoneLineIndex).find(plausibleUnlabelledName);
+      const lineBeforePhone = lines[phoneLineIndex - 1];
+      if (lineBeforePhone && lineBeforePhone !== name && /\p{L}/u.test(lineBeforePhone)) {
+        address1 = lineBeforePhone;
+      }
+    }
+  }
+
+  const normalizedName = name
+    ?.replace(/[\s,;|/()[\]{}]+/g, ' ')
+    .trim();
+  if (!normalizedName && !mobile) return null;
+
+  return {
+    ...(normalizedName
+      ? /[\u0600-\u06ff]/.test(normalizedName)
+        ? { nameAr: normalizedName }
+        : { nameEn: normalizedName }
+      : {}),
+    ...(mobile ? { phone: mobile.phone } : {}),
+    ...(address1 ? { address1 } : {}),
+    segment: 'NEW',
+  };
+}
+
+function candidateName(candidate: CustomerCandidateSeed): string | undefined {
+  return candidate.nameAr || candidate.nameEn;
+}
+
+function sameCandidate(left: CustomerCandidateSeed, right: CustomerCandidateSeed): boolean {
+  if (left.phone && right.phone && left.phone === right.phone) return true;
+  const leftName = candidateName(left);
+  const rightName = candidateName(right);
+  return Boolean(
+    leftName
+    && rightName
+    && normalizeAssistantText(leftName) === normalizeAssistantText(rightName),
+  );
 }
 
 function resemblesAtlasCustomerId(value: string): boolean {
@@ -58,4 +134,33 @@ export function inferCustomerCandidate(query: string): InferredCustomerCandidate
     ...(mobile ? { phone: mobile.phone } : {}),
     segment: 'NEW',
   };
+}
+
+/** Recover fields lost during a clarification round, anchored to the same name or phone. */
+export function recoverCustomerCandidate(
+  seed: CustomerCandidateSeed | null,
+  recentUserMessages: string[],
+): InferredCustomerCandidate | null {
+  if (!seed) return null;
+  let recovered: InferredCustomerCandidate = {
+    ...seed,
+    ...(seed.phone ? { phone: extractIraqiMobile(asciiDigits(seed.phone))?.phone ?? seed.phone } : {}),
+    segment: 'NEW',
+  };
+
+  for (const message of [...recentUserMessages].reverse()) {
+    const candidate = candidateFromMessage(message);
+    if (!candidate || !sameCandidate(recovered, candidate)) continue;
+    recovered = {
+      ...candidate,
+      ...recovered,
+      phone: recovered.phone || candidate.phone,
+      nameAr: recovered.nameAr || candidate.nameAr,
+      nameEn: recovered.nameEn || candidate.nameEn,
+      address1: recovered.address1 || candidate.address1,
+      segment: 'NEW',
+    };
+  }
+
+  return recovered;
 }
