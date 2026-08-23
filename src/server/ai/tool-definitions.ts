@@ -104,7 +104,7 @@ export const AI_ASSISTANT_TOOLS: FunctionTool[] = [
   ),
   tool(
     'prepare_create_order',
-    'Prepare an order for explicit confirmation. Preserve the user\'s complete product wording, including name, size, grind, and flavor. Atlas supplies safe operational defaults for omitted date, channel, governorate, fulfillment, status, payment route, and zero-value adjustments.',
+    'Prepare an order for explicit confirmation. Preserve the user\'s complete product wording, including name, size, grind, and flavor. If customerQuery does not match an existing customer, Atlas prepares a new customer in the same confirmed transaction; use newCustomer for any additional supplied customer details. Atlas supplies safe operational defaults for omitted date, channel, governorate, fulfillment, status, payment route, and zero-value adjustments.',
     object({
       customerQuery: nullableString,
       newCustomer: { anyOf: [customer, { type: 'null' }] },

@@ -7,6 +7,7 @@ import { formatMoney, formatNumber, formatPercent, formatQuantity, toMinor, type
 import { parseBaghdadDateTime, resolveRange } from '@/lib/dates';
 import { DashboardFiltersSchema } from '@/lib/filters';
 import { salesByDimension, stockRow, topProducts } from '@/lib/metrics';
+import { inferCustomerCandidate } from '@/lib/customer-candidate';
 import { getInventoryItems } from '@/server/db/repositories/inventory.repo';
 import { prisma } from '@/server/db/client';
 import { buildBranchScope } from '@/server/filters/where-builder';
@@ -573,9 +574,18 @@ async function prepareOrder(raw: unknown, context: ToolContext): Promise<ToolExe
 
   let customerExternalId: string | null = null;
   let customerLabel = localized(context.locale, 'Walk-in / no customer', 'بيع مباشر / بدون عميل');
+  let inferredNewCustomer: z.infer<typeof ResolvedCustomerActionSchema> | null = null;
   if (input.customerQuery) {
     const match = await matchCustomer(input.customerQuery);
-    if (match.kind === 'none') return noMatch(context.locale, 'customerQuery', localized(context.locale, 'customer', 'عميل'));
+    if (match.kind === 'none') {
+      const inferred = inferCustomerCandidate(input.customerQuery);
+      if (!input.newCustomer && !inferred) {
+        return noMatch(context.locale, 'customerQuery', localized(context.locale, 'customer', 'عميل'));
+      }
+      inferredNewCustomer = inferred
+        ? ResolvedCustomerActionSchema.parse({ ...inferred, governorate: governorate.code })
+        : null;
+    }
     if (match.kind === 'ambiguous') {
       return ambiguousMatch(
         context.locale,
@@ -585,17 +595,20 @@ async function prepareOrder(raw: unknown, context: ToolContext): Promise<ToolExe
         (row) => String(row.externalId ?? row.id),
       );
     }
-    customerExternalId = match.value.externalId;
-    customerLabel = context.locale === 'ar'
-      ? match.value.nameAr || match.value.nameEn || match.value.externalId || customerLabel
-      : match.value.nameEn || match.value.nameAr || match.value.externalId || customerLabel;
-    if (!customerExternalId) return noMatch(context.locale, 'customerQuery', localized(context.locale, 'customer ID', 'رقم العميل'));
+    if (match.kind === 'exact') {
+      customerExternalId = match.value.externalId;
+      customerLabel = context.locale === 'ar'
+        ? match.value.nameAr || match.value.nameEn || match.value.externalId || customerLabel
+        : match.value.nameEn || match.value.nameAr || match.value.externalId || customerLabel;
+      if (!customerExternalId) return noMatch(context.locale, 'customerQuery', localized(context.locale, 'customer ID', 'رقم العميل'));
+    }
   }
 
   let newCustomer: z.infer<typeof ResolvedCustomerActionSchema> | null = null;
-  if (input.newCustomer) {
+  const newCustomerInput = customerExternalId ? null : input.newCustomer ?? inferredNewCustomer;
+  if (newCustomerInput) {
     const parsed = ResolvedCustomerActionSchema.safeParse(Object.fromEntries(
-      Object.entries({ ...input.newCustomer, segment: input.newCustomer.segment ?? 'NEW' }).map(([key, value]) => [key, value ?? undefined]),
+      Object.entries({ ...newCustomerInput, segment: newCustomerInput.segment ?? 'NEW' }).map(([key, value]) => [key, value ?? undefined]),
     ));
     if (!parsed.success || (!parsed.data.nameEn && !parsed.data.nameAr && !parsed.data.phone)) {
       return missingResult(context.locale, [localized(context.locale, 'new customer name or phone', 'اسم العميل الجديد أو الهاتف')]);
@@ -607,15 +620,14 @@ async function prepareOrder(raw: unknown, context: ToolContext): Promise<ToolExe
     if (newCustomer.phone) {
       const existing = await matchCustomer(newCustomer.phone);
       if (existing.kind === 'exact') {
-        return clarificationResult({
-          field: 'newCustomer.phone',
-          message: localized(context.locale, 'That phone already belongs to an Atlas customer. Use the existing customer instead?', 'رقم الهاتف مرتبط بعميل موجود في أطلس. هل تريد استخدام العميل الموجود؟'),
-          choices: [{
-            id: existing.value.id,
-            value: existing.value.externalId ?? existing.value.id,
-            label: existing.value.nameEn || existing.value.nameAr || existing.value.externalId || 'Customer',
-          }],
-        });
+        if (!existing.value.externalId) {
+          return noMatch(context.locale, 'newCustomer.phone', localized(context.locale, 'customer ID', 'رقم العميل'));
+        }
+        customerExternalId = existing.value.externalId;
+        customerLabel = context.locale === 'ar'
+          ? existing.value.nameAr || existing.value.nameEn || existing.value.externalId
+          : existing.value.nameEn || existing.value.nameAr || existing.value.externalId;
+        newCustomer = null;
       }
       if (existing.kind === 'ambiguous') {
         return ambiguousMatch(
@@ -740,6 +752,10 @@ async function prepareOrder(raw: unknown, context: ToolContext): Promise<ToolExe
     summary: localized(context.locale, `Create an order for ${formatMoney(total, 'IQD', context.locale)}.`, `إنشاء طلب بقيمة ${formatMoney(total, 'IQD', context.locale)}.`),
     fields: [
       { label: localized(context.locale, 'Customer', 'العميل'), value: customerLabel },
+      ...(newCustomer ? [{
+        label: localized(context.locale, 'Customer setup', 'إعداد العميل'),
+        value: localized(context.locale, 'Create new customer with this order', 'إنشاء عميل جديد مع هذا الطلب'),
+      }] : []),
       { label: localized(context.locale, 'Items', 'المواد'), value: previewLines.join(', ') },
       { label: localized(context.locale, 'Date', 'التاريخ'), value: input.placedAt },
       { label: localized(context.locale, 'Channel', 'القناة'), value: channelLabel },
