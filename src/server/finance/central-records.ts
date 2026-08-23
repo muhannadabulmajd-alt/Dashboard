@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache';
 import { prisma } from '@/server/db/client';
 import { getCurrentUser } from '@/server/auth/session';
 import { getUsdToIqd } from '@/server/settings';
+import type { TrustedCommandContext } from '@/server/commands/actor-context';
 import {
   audit,
   optField,
@@ -12,7 +13,6 @@ import {
   type ActionState,
   type CommandCommitHook,
   type CommandPreconditionHook,
-  type TrustedCommandContext,
   resolveCommandActor,
 } from '@/server/records/shared';
 import { can } from '@/lib/rbac';

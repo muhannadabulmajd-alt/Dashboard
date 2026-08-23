@@ -27,6 +27,7 @@ import {
   CustomerCommandSchema,
   type CustomerCommandInput,
 } from '@/server/commands/customers';
+import type { TrustedCommandContext } from '@/server/commands/actor-context';
 import {
   requireCap,
   resolveCommandActor,
@@ -36,7 +37,6 @@ import {
   type ActionState,
   type CommandCommitHook,
   type CommandPreconditionHook,
-  type TrustedCommandContext,
 } from './shared';
 
 const LIST = '/[locale]/(dashboard)/admin/records/orders';

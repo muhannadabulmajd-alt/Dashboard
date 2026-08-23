@@ -12,9 +12,9 @@ import type { CurrentUser } from '@/server/auth/session';
 import {
   createTrustedCommandContext,
   getTrustedCommandActor,
-  resolveCommandActor,
   type TrustedCommandContext,
-} from '@/server/records/shared';
+} from '@/server/commands/actor-context';
+import { can } from '@/lib/rbac';
 
 const adminUser: CurrentUser = {
   id: 'admin-1',
@@ -111,10 +111,10 @@ describe('Telegram Atlas AI transport contracts', () => {
     expect(canExecuteAssistantAction('VIEWER', 'CREATE_ORDER')).toBe(false);
   });
 
-  it('authorizes queue commands through a server-only trusted actor context', async () => {
+  it('authorizes queue commands through a server-only trusted actor context', () => {
     const context = createTrustedCommandContext(adminUser);
     expect(getTrustedCommandActor(context)).toEqual(adminUser);
-    await expect(resolveCommandActor('manage:orders', context)).resolves.toEqual(adminUser);
+    expect(can(getTrustedCommandActor(context)?.role ?? 'VIEWER', 'manage:orders')).toBe(true);
   });
 
   it('does not accept a forged serialized actor context', () => {

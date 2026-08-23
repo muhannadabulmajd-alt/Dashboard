@@ -1,7 +1,7 @@
 import 'server-only';
 import type { AiPendingActionType, Prisma } from '@prisma/client';
 import type { CurrentUser } from '@/server/auth/session';
-import { createTrustedCommandContext } from '@/server/records/shared';
+import { createTrustedCommandContext } from '@/server/commands/actor-context';
 import { can } from '@/lib/rbac';
 import type { AppLocale } from '@/lib/money';
 import { prisma } from '@/server/db/client';
