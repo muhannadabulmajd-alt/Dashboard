@@ -1,6 +1,7 @@
 import 'server-only';
 import type { AiPendingActionType, Prisma } from '@prisma/client';
 import type { CurrentUser } from '@/server/auth/session';
+import { createTrustedCommandContext } from '@/server/records/shared';
 import { can } from '@/lib/rbac';
 import type { AppLocale } from '@/lib/money';
 import { prisma } from '@/server/db/client';
@@ -179,6 +180,7 @@ async function executeCustomer(
 
 async function executeOrder(
   raw: unknown,
+  user: CurrentUser,
   locale: AppLocale,
   beforeExecute: (tx: Prisma.TransactionClient) => Promise<void>,
   onCommitted: (tx: Prisma.TransactionClient, record: ExecutionRecord) => Promise<void>,
@@ -209,6 +211,7 @@ async function executeOrder(
   });
   let record: ExecutionRecord | null = null;
   const result = await createOrderCommand(fd, {
+    actorContext: createTrustedCommandContext(user),
     beforeExecute,
     onCommitted: async (tx, commandResult) => {
       record = {
@@ -233,6 +236,7 @@ async function executeOrder(
 
 async function executeExpense(
   raw: unknown,
+  user: CurrentUser,
   locale: AppLocale,
   beforeExecute: (tx: Prisma.TransactionClient) => Promise<void>,
   onCommitted: (tx: Prisma.TransactionClient, record: ExecutionRecord) => Promise<void>,
@@ -254,6 +258,7 @@ async function executeExpense(
   });
   let record: ExecutionRecord | null = null;
   const result = await createCentralRecordCommand(fd, {
+    actorContext: createTrustedCommandContext(user),
     beforeExecute,
     onCommitted: async (tx, commandResult) => {
       record = {
@@ -276,6 +281,7 @@ async function executeExpense(
 
 async function executePurchase(
   raw: unknown,
+  user: CurrentUser,
   locale: AppLocale,
   beforeExecute: (tx: Prisma.TransactionClient) => Promise<void>,
   onCommitted: (tx: Prisma.TransactionClient, record: ExecutionRecord) => Promise<void>,
@@ -311,6 +317,7 @@ async function executePurchase(
   });
   let record: ExecutionRecord | null = null;
   const result = await createCentralRecordCommand(fd, {
+    actorContext: createTrustedCommandContext(user),
     beforeExecute,
     onCommitted: async (tx, commandResult) => {
       record = {
@@ -333,6 +340,7 @@ async function executePurchase(
 
 async function executeOrderStatus(
   raw: unknown,
+  user: CurrentUser,
   locale: AppLocale,
   beforeExecute: (tx: Prisma.TransactionClient) => Promise<void>,
   onCommitted: (tx: Prisma.TransactionClient, record: ExecutionRecord) => Promise<void>,
@@ -355,6 +363,7 @@ async function executeOrderStatus(
     message: localized(locale, `Order ${input.orderNumber} is now ${input.status}.`, `أصبحت حالة الطلب ${input.orderNumber}: ${input.status}.`),
   };
   const result = await bulkUpdateOrders(undefined, fd, {
+    actorContext: createTrustedCommandContext(user),
     beforeExecute,
     onCommitted: (tx) => onCommitted(tx, record),
   });
@@ -375,13 +384,13 @@ async function executeByType(
     case 'CREATE_CUSTOMER':
       return executeCustomer(raw, user, locale, beforeExecute, onCommitted);
     case 'CREATE_ORDER':
-      return executeOrder(raw, locale, beforeExecute, onCommitted);
+      return executeOrder(raw, user, locale, beforeExecute, onCommitted);
     case 'CREATE_EXPENSE':
-      return executeExpense(raw, locale, beforeExecute, onCommitted);
+      return executeExpense(raw, user, locale, beforeExecute, onCommitted);
     case 'CREATE_PURCHASE':
-      return executePurchase(raw, locale, beforeExecute, onCommitted);
+      return executePurchase(raw, user, locale, beforeExecute, onCommitted);
     case 'UPDATE_ORDER_STATUS':
-      return executeOrderStatus(raw, locale, beforeExecute, onCommitted);
+      return executeOrderStatus(raw, user, locale, beforeExecute, onCommitted);
   }
 }
 

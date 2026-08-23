@@ -8,6 +8,21 @@ import {
   splitTelegramText,
 } from '@/server/telegram/render';
 import { supportedTelegramUpdate, telegramLocale, TelegramUpdateSchema } from '@/server/telegram/schemas';
+import type { CurrentUser } from '@/server/auth/session';
+import {
+  createTrustedCommandContext,
+  getTrustedCommandActor,
+  resolveCommandActor,
+  type TrustedCommandContext,
+} from '@/server/records/shared';
+
+const adminUser: CurrentUser = {
+  id: 'admin-1',
+  email: 'admin@example.com',
+  name: 'Admin',
+  role: 'ADMIN',
+  branchId: null,
+};
 
 describe('Telegram Atlas AI transport contracts', () => {
   it('parses only numeric bootstrap IDs and compares webhook secrets exactly', () => {
@@ -94,5 +109,16 @@ describe('Telegram Atlas AI transport contracts', () => {
     expect(canExecuteAssistantAction('SALES_CRM', 'CREATE_ORDER')).toBe(true);
     expect(canExecuteAssistantAction('SALES_CRM', 'CREATE_EXPENSE')).toBe(false);
     expect(canExecuteAssistantAction('VIEWER', 'CREATE_ORDER')).toBe(false);
+  });
+
+  it('authorizes queue commands through a server-only trusted actor context', async () => {
+    const context = createTrustedCommandContext(adminUser);
+    expect(getTrustedCommandActor(context)).toEqual(adminUser);
+    await expect(resolveCommandActor('manage:orders', context)).resolves.toEqual(adminUser);
+  });
+
+  it('does not accept a forged serialized actor context', () => {
+    const forged = { actor: adminUser } as TrustedCommandContext;
+    expect(getTrustedCommandActor(forged)).toBeNull();
   });
 });
