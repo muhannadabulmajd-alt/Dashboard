@@ -27,8 +27,10 @@ import {
   CustomerCommandSchema,
   type CustomerCommandInput,
 } from '@/server/commands/customers';
+import type { TrustedCommandContext } from '@/server/commands/actor-context';
 import {
   requireCap,
+  resolveCommandActor,
   audit,
   reqField,
   optField,
@@ -295,11 +297,12 @@ async function resolveDirectPaymentAccount(
 export async function createOrderCommand(
   fd: FormData,
   options: {
+    actorContext?: TrustedCommandContext;
     beforeExecute?: CommandPreconditionHook;
     onCommitted?: CommandCommitHook<{ recordId: string; recordNumber: string }>;
   } = {},
 ): Promise<ActionState> {
-  const user = await requireCap(CAP);
+  const user = await resolveCommandActor(CAP, options.actorContext);
   if (!user) return { error: 'forbidden' };
   const h = parseHeader(fd);
   if (!h.success) return headerActionError(h);
@@ -911,11 +914,12 @@ export async function bulkUpdateOrders(
   _prev: ActionState,
   fd: FormData,
   options: {
+    actorContext?: TrustedCommandContext;
     beforeExecute?: CommandPreconditionHook;
     onCommitted?: CommandCommitHook<{ count: number; amountApplied: number }>;
   } = {},
 ): Promise<ActionState> {
-  const user = await requireCap(CAP);
+  const user = await resolveCommandActor(CAP, options.actorContext);
   if (!user) return { error: 'forbidden' };
   let ids: unknown;
   try {

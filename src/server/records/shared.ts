@@ -1,8 +1,13 @@
 import 'server-only';
 import { getCurrentUser } from '@/server/auth/session';
+import type { CurrentUser } from '@/server/auth/session';
 import { can, type Capability } from '@/lib/rbac';
 import { prisma } from '@/server/db/client';
 import type { Prisma } from '@prisma/client';
+import {
+  getTrustedCommandActor,
+  type TrustedCommandContext,
+} from '@/server/commands/actor-context';
 
 /** Result returned by create/update record actions (drives useActionState UIs). */
 export type ActionState = {
@@ -32,6 +37,20 @@ export async function requireCap(capability: Capability) {
   const user = await getCurrentUser();
   if (!user || !can(user.role, capability)) return null;
   return user;
+}
+
+/**
+ * Resolve a command actor from a trusted server adapter or the web session.
+ * Queue/webhook callers have no browser session, so they must pass the Atlas
+ * user that was authenticated before invoking the shared command.
+ */
+export async function resolveCommandActor(
+  capability: Capability,
+  context?: TrustedCommandContext,
+): Promise<CurrentUser | null> {
+  const actor = getTrustedCommandActor(context);
+  if (actor) return can(actor.role, capability) ? actor : null;
+  return requireCap(capability);
 }
 
 export async function audit(

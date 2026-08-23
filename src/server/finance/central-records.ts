@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache';
 import { prisma } from '@/server/db/client';
 import { getCurrentUser } from '@/server/auth/session';
 import { getUsdToIqd } from '@/server/settings';
+import type { TrustedCommandContext } from '@/server/commands/actor-context';
 import {
   audit,
   optField,
@@ -12,6 +13,7 @@ import {
   type ActionState,
   type CommandCommitHook,
   type CommandPreconditionHook,
+  resolveCommandActor,
 } from '@/server/records/shared';
 import { can } from '@/lib/rbac';
 import { toMinor, convertToIqd } from '@/lib/money';
@@ -530,11 +532,12 @@ export async function quickCreateCustomer(fd: FormData): Promise<QuickCreateResu
 export async function createCentralRecordCommand(
   fd: FormData,
   options: {
+    actorContext?: TrustedCommandContext;
     beforeExecute?: CommandPreconditionHook;
     onCommitted?: CommandCommitHook<{ recordId: string }>;
   } = {},
 ): Promise<ActionState> {
-  const user = await requireFinanceUser();
+  const user = await resolveCommandActor('manage:finance', options.actorContext);
   if (!user) return { error: 'forbidden' };
   const kind = oneOf(reqField(fd, 'recordKind'), RECORD_KINDS);
   const date = parseDate(reqField(fd, 'date'));
