@@ -323,6 +323,7 @@ export async function processTelegramUpdate(telegramUpdateId: string): Promise<v
 
     const callback = parseTelegramCallback(telegram.callbackData);
     if (callback?.type === 'action') {
+      const chatId = telegram.chatId;
       const result = callback.command === 'confirm'
         ? await confirmPendingAction({ actionId: callback.actionId, user, locale })
         : await cancelPendingAction({ actionId: callback.actionId, user, locale });
@@ -336,7 +337,7 @@ export async function processTelegramUpdate(telegramUpdateId: string): Promise<v
       }];
       await deliverReply({
         updateRecordId: receipt.id,
-        chatId: telegram.chatId,
+        chatId,
         replyMessageId: telegram.messageId,
         existingReplyMessageId: receipt.replyMessageId,
         locale,
@@ -344,7 +345,7 @@ export async function processTelegramUpdate(telegramUpdateId: string): Promise<v
       });
       if (callback.command === 'confirm' && result.status === 'EXECUTED' && result.invoiceHref && result.recordId) {
         await deliverCreatedOrderInvoice({
-          chatId: telegram.chatId,
+          chatId,
           orderId: result.recordId,
           userId: user.id,
           locale,
@@ -365,7 +366,7 @@ export async function processTelegramUpdate(telegramUpdateId: string): Promise<v
             },
           }).catch(() => undefined);
           await sendTelegramMessage({
-            chatId: telegram.chatId,
+            chatId,
             text: locale === 'ar'
               ? 'تم حفظ الطلب، لكن تعذر إرسال ملف الفاتورة الآن. اضغط تأكيد مرة أخرى لإعادة المحاولة.'
               : 'The order was saved, but the invoice PDF could not be sent. Press Confirm again to retry.',
