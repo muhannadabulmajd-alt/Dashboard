@@ -58,8 +58,7 @@ export default async function InvoicePage({
     o.customer?.nameAr ||
     o.customer?.externalId ||
     t('walkIn');
-  const customerCity = o.customer?.governorate ? enumLabel(o.customer.governorate, loc) : '';
-  const customerAddress = [customerCity, o.customer?.address1, o.customer?.street].filter(Boolean).join(' · ');
+  const deliveryGovernorate = enumLabel(o.governorate || o.customer?.governorate, loc);
   const m = (n: number) => formatMoney(n, o.currency, loc);
   const lineDiscount = Math.max(0, o.discountAmount - o.orderDiscount);
   const receivable = financeEntries.find((entry) => payment.receivableIds.includes(entry.id));
@@ -128,9 +127,14 @@ export default async function InvoicePage({
           <section className="rounded-lg border p-4">
             <div className="text-xs font-semibold uppercase text-muted-foreground">{t('customerDetails')}</div>
             <div className="mt-1 text-sm font-semibold text-foreground">{customerName}</div>
-            {o.customer?.externalId ? <div className="font-mono text-xs text-muted-foreground">{t('customerId')}: {o.customer.externalId}</div> : null}
-            {o.customer?.phone ? <div className="text-sm text-muted-foreground">{t('phone')}: {o.customer.phone}</div> : null}
-            {customerAddress ? <div className="text-sm text-muted-foreground">{customerAddress}</div> : null}
+            <div className="mt-2 grid grid-cols-[minmax(7rem,auto)_1fr] gap-x-3 gap-y-1 text-sm">
+              <span className="text-muted-foreground">{t('customerId')}</span><span className="break-words font-mono">{o.customer?.externalId || '—'}</span>
+              <span className="text-muted-foreground">{t('phone')}</span><span className="break-words">{o.customer?.phone || '—'}</span>
+              <span className="text-muted-foreground">{t('email')}</span><span className="break-all">{o.customer?.email || '—'}</span>
+              <span className="text-muted-foreground">{t('governorate')}</span><span className="break-words">{deliveryGovernorate}</span>
+              <span className="text-muted-foreground">{t('address')}</span><span className="break-words">{o.customer?.address1 || '—'}</span>
+              <span className="text-muted-foreground">{t('street')}</span><span className="break-words">{o.customer?.street || '—'}</span>
+            </div>
             {o.customer?.campaignSource ? <div className="text-sm text-muted-foreground">{t('source')}: {sourceLabel}</div> : null}
           </section>
           <section className="rounded-lg border p-4">
@@ -138,6 +142,8 @@ export default async function InvoicePage({
             <div className="mt-1 grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
               <span className="text-muted-foreground">{t('branch')}</span><span className="text-end font-medium">{branchName}</span>
               <span className="text-muted-foreground">{t('channel')}</span><span className="text-end font-medium">{channelLabel}</span>
+              <span className="text-muted-foreground">{t('fulfillment')}</span><span className="text-end font-medium">{enumLabel(o.fulfillmentMethod, loc)}</span>
+              <span className="text-muted-foreground">{t('governorate')}</span><span className="text-end font-medium">{deliveryGovernorate}</span>
               <span className="text-muted-foreground">{t('orderStatus')}</span><span className="text-end font-medium">{enumLabel(o.status, loc)}</span>
               <span className="text-muted-foreground">{t('paymentStatusLabel')}</span><span className="text-end font-bold">{t(`paymentStatus.${payment.status}`)}</span>
             </div>
