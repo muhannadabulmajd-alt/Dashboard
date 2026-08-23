@@ -62,7 +62,8 @@ export async function GET(request: NextRequest) {
     const conversations = await tx.aiConversation.deleteMany({ where: { expiresAt: { lte: now } } });
     const requestLogs = await tx.aiRequestLog.deleteMany({ where: { createdAt: { lt: retentionCutoff } } });
     const buckets = await tx.aiRateLimitBucket.deleteMany({ where: { bucketStart: { lt: bucketCutoff } } });
-    return { expiredActions, interruptedRequests, conversations, requestLogs, buckets };
+    const telegramUpdates = await tx.telegramUpdate.deleteMany({ where: { expiresAt: { lte: now } } });
+    return { expiredActions, interruptedRequests, conversations, requestLogs, buckets, telegramUpdates };
   });
 
   return NextResponse.json({
@@ -72,5 +73,6 @@ export async function GET(request: NextRequest) {
     conversationsDeleted: result.conversations.count,
     requestLogsDeleted: result.requestLogs.count,
     rateLimitBucketsDeleted: result.buckets.count,
+    telegramUpdatesDeleted: result.telegramUpdates.count,
   });
 }

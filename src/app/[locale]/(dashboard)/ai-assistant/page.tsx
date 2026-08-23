@@ -26,6 +26,7 @@ export default async function AiAssistantPage({
       id: true,
       title: true,
       locale: true,
+      channel: true,
       lastMessageAt: true,
       _count: { select: { messages: true } },
     },
@@ -78,6 +79,7 @@ export default async function AiAssistantPage({
             id: row.id,
             title: row.title,
             locale: row.locale,
+            channel: row.channel,
             lastMessageAt: row.lastMessageAt.toISOString(),
             messageCount: row._count.messages,
           }))}

@@ -7,6 +7,8 @@ import { syncConnector } from '@/server/connectors/actions';
 import { Badge, PageHeader } from '@/components/ui/primitives';
 import { DataTable } from '@/components/data-table/DataTable';
 import { ConnectorConfigForm } from './ConnectorConfigForm';
+import { TelegramConnectorPanel } from './TelegramConnectorPanel';
+import { getTelegramConfig } from '@/server/telegram/config';
 
 const RUN_VARIANT: Record<string, 'success' | 'warning' | 'danger'> = {
   SUCCESS: 'success',
@@ -23,13 +25,32 @@ export default async function ConnectorsPage({
 }) {
   const { locale } = await getPageContext(params, searchParams, 'manage:connectors');
   const t = await getTranslations('connectors');
+  const telegramConfig = getTelegramConfig();
 
-  const [connectors, runs] = await Promise.all([
+  const [connectors, runs, telegramIdentities, atlasUsers] = await Promise.all([
     prisma.connector.findMany({ orderBy: { createdAt: 'asc' } }),
     prisma.syncRun.findMany({
       orderBy: { startedAt: 'desc' },
       take: 10,
       include: { connector: { select: { name: true } } },
+    }),
+    prisma.telegramIdentity.findMany({
+      orderBy: [{ status: 'asc' }, { lastSeenAt: 'desc' }, { createdAt: 'desc' }],
+      take: 100,
+      select: {
+        telegramUserId: true,
+        username: true,
+        firstName: true,
+        lastName: true,
+        status: true,
+        lastSeenAt: true,
+        user: { select: { id: true, name: true, email: true, role: true } },
+      },
+    }),
+    prisma.user.findMany({
+      where: { isActive: true },
+      orderBy: [{ name: 'asc' }, { email: 'asc' }],
+      select: { id: true, name: true, email: true, role: true },
     }),
   ]);
 
@@ -84,6 +105,17 @@ export default async function ConnectorsPage({
   return (
     <>
       <PageHeader title={t('title')} subtitle={t('subtitle')} />
+      <TelegramConnectorPanel
+        configured={telegramConfig.configured}
+        enabled={telegramConfig.enabled}
+        environment={process.env.VERCEL_ENV ?? 'development'}
+        allowedUserIds={[...telegramConfig.allowedUserIds]}
+        users={atlasUsers}
+        identities={telegramIdentities.map((identity) => ({
+          ...identity,
+          lastSeenAt: identity.lastSeenAt?.toISOString() ?? null,
+        }))}
+      />
       <section className="space-y-2">
         <DataTable columns={connectorCols} rows={connectorRows} emptyLabel="—" />
       </section>

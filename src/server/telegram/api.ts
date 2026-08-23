@@ -1,0 +1,112 @@
+import 'server-only';
+import { requireTelegramConfig } from './config';
+
+type TelegramResponse<T> = {
+  ok: boolean;
+  result?: T;
+  description?: string;
+  error_code?: number;
+};
+
+export type TelegramBot = {
+  id: number;
+  is_bot: boolean;
+  first_name: string;
+  username?: string;
+};
+
+export type TelegramWebhookInfo = {
+  url: string;
+  has_custom_certificate: boolean;
+  pending_update_count: number;
+  last_error_date?: number;
+  last_error_message?: string;
+  max_connections?: number;
+  allowed_updates?: string[];
+};
+
+export type InlineKeyboard = Array<Array<{ text: string; callback_data?: string; url?: string }>>;
+
+async function telegramRequest<T>(method: string, payload?: Record<string, unknown>): Promise<T> {
+  const { token } = requireTelegramConfig();
+  const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload ?? {}),
+    cache: 'no-store',
+    signal: AbortSignal.timeout(15_000),
+  });
+  const body = await response.json().catch(() => null) as TelegramResponse<T> | null;
+  if (!response.ok || !body?.ok || body.result === undefined) {
+    const error = new Error(`telegram_api_${body?.error_code ?? response.status}`);
+    Object.assign(error, { retryable: response.status === 429 || response.status >= 500, description: body?.description });
+    throw error;
+  }
+  return body.result;
+}
+
+export function getTelegramBot(): Promise<TelegramBot> {
+  return telegramRequest<TelegramBot>('getMe');
+}
+
+export function getTelegramWebhookInfo(): Promise<TelegramWebhookInfo> {
+  return telegramRequest<TelegramWebhookInfo>('getWebhookInfo');
+}
+
+export async function registerTelegramWebhook(url: string): Promise<void> {
+  const { webhookSecret } = requireTelegramConfig();
+  await telegramRequest<boolean>('setWebhook', {
+    url,
+    secret_token: webhookSecret,
+    allowed_updates: ['message', 'callback_query'],
+    drop_pending_updates: false,
+  });
+  await telegramRequest<boolean>('setMyCommands', {
+    commands: [
+      { command: 'start', description: 'Start Atlas AI' },
+      { command: 'help', description: 'Show available actions' },
+      { command: 'new', description: 'Start a new conversation' },
+      { command: 'status', description: 'Check Atlas bot access' },
+    ],
+  });
+}
+
+export function sendTelegramMessage(input: {
+  chatId: string;
+  text: string;
+  keyboard?: InlineKeyboard;
+}): Promise<{ message_id: number }> {
+  return telegramRequest('sendMessage', {
+    chat_id: input.chatId,
+    text: input.text,
+    disable_web_page_preview: true,
+    reply_markup: input.keyboard?.length ? { inline_keyboard: input.keyboard } : undefined,
+  });
+}
+
+export function editTelegramMessage(input: {
+  chatId: string;
+  messageId: number;
+  text: string;
+  keyboard?: InlineKeyboard;
+}): Promise<unknown> {
+  return telegramRequest('editMessageText', {
+    chat_id: input.chatId,
+    message_id: input.messageId,
+    text: input.text,
+    disable_web_page_preview: true,
+    reply_markup: input.keyboard?.length ? { inline_keyboard: input.keyboard } : undefined,
+  });
+}
+
+export async function answerTelegramCallback(callbackId: string, text?: string): Promise<void> {
+  await telegramRequest<boolean>('answerCallbackQuery', {
+    callback_query_id: callbackId,
+    text,
+    show_alert: false,
+  });
+}
+
+export async function sendTelegramTyping(chatId: string): Promise<void> {
+  await telegramRequest<boolean>('sendChatAction', { chat_id: chatId, action: 'typing' });
+}

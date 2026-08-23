@@ -8,6 +8,7 @@ import { createCustomerCommand } from '@/server/commands/customers';
 import { createCentralRecordCommand } from '@/server/finance/central-records';
 import { bulkUpdateOrders, createOrderCommand } from '@/server/records/orders';
 import { aiDebugId, preconditionHash } from './hash';
+import { canExecuteAssistantAction } from './access';
 import { actionPreconditionIssues, loadActionPreconditions } from './preconditions';
 import {
   ACTION_DATA_SCHEMAS,
@@ -46,6 +47,25 @@ type ExecutionRecord = {
 
 function localized(locale: AppLocale, en: string, ar: string): string {
   return locale === 'ar' ? ar : en;
+}
+
+async function assertAssistantChannelAccess(input: {
+  user: CurrentUser;
+  channel: 'WEB' | 'TELEGRAM';
+  actionType?: AiPendingActionType;
+}): Promise<void> {
+  if (input.channel === 'WEB') {
+    if (!can(input.user.role, 'use:ai-assistant')) throw new Error('forbidden');
+  } else {
+    const linked = await prisma.telegramIdentity.findFirst({
+      where: { userId: input.user.id, status: 'ACTIVE' },
+      select: { id: true },
+    });
+    if (!linked) throw new Error('forbidden');
+  }
+  if (input.actionType && !canExecuteAssistantAction(input.user.role, input.actionType)) {
+    throw new Error('forbidden');
+  }
 }
 
 function formData(values: Record<string, string | number | null | undefined>): FormData {
@@ -414,11 +434,16 @@ export async function confirmPendingAction(input: {
   user: CurrentUser;
   locale: AppLocale;
 }): Promise<ActionExecutionResult> {
-  if (!can(input.user.role, 'use:ai-assistant')) throw new Error('forbidden');
   const action = await prisma.aiPendingAction.findFirst({
     where: { id: input.actionId, userId: input.user.id },
+    include: { conversation: { select: { channel: true } } },
   });
   if (!action) throw new Error('notfound');
+  await assertAssistantChannelAccess({
+    user: input.user,
+    channel: action.conversation.channel,
+    actionType: action.type,
+  });
   if (action.status === 'EXECUTED') {
     const result = action.result as Record<string, unknown> | null;
     return {
@@ -586,7 +611,12 @@ export async function confirmPendingAction(input: {
 }
 
 export async function cancelPendingAction(input: { actionId: string; user: CurrentUser; locale: AppLocale }): Promise<ActionExecutionResult> {
-  if (!can(input.user.role, 'use:ai-assistant')) throw new Error('forbidden');
+  const access = await prisma.aiPendingAction.findFirst({
+    where: { id: input.actionId, userId: input.user.id },
+    select: { conversation: { select: { channel: true } } },
+  });
+  if (!access) throw new Error('notfound');
+  await assertAssistantChannelAccess({ user: input.user, channel: access.conversation.channel });
   const result = {
     actionId: input.actionId,
     status: 'CANCELLED',

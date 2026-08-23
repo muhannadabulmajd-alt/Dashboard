@@ -36,6 +36,7 @@ type ConversationSummary = {
   id: string;
   title: string | null;
   locale: string;
+  channel: 'WEB' | 'TELEGRAM';
   lastMessageAt: string;
   messageCount: number;
 };
@@ -356,6 +357,11 @@ function ConversationHistory({
               activeId === conversation.id && 'bg-linen/65',
             )}
           >
+            {conversation.channel === 'TELEGRAM' ? (
+              <span className="mb-1 inline-flex rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary">
+                {t('telegramChannel')}
+              </span>
+            ) : null}
             <span className="line-clamp-2 text-sm font-semibold leading-5 text-roast">{conversation.title || t('newChat')}</span>
             <span className="mt-1 block text-[11px] text-muted-foreground">{dateLabel(conversation.lastMessageAt, locale)}</span>
           </button>

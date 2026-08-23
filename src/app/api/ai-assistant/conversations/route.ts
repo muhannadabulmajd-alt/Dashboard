@@ -15,6 +15,7 @@ export async function GET() {
       id: true,
       title: true,
       locale: true,
+      channel: true,
       lastMessageAt: true,
       createdAt: true,
       _count: { select: { messages: true } },

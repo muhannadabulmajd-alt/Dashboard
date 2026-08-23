@@ -29,6 +29,7 @@
     "@auth/prisma-adapter": "^2.11.2",
     "@prisma/client": "^6.19.3",
     "@react-pdf/renderer": "^4.5.1",
+    "@vercel/queue": "^0.1.7",
     "bcryptjs": "^3.0.3",
     "clsx": "^2.1.1",
     "date-fns": "^4.4.0",

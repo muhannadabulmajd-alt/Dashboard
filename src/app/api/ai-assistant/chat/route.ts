@@ -1,35 +1,11 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import type { Prisma } from '@prisma/client';
-import {
-  AiChatRequestSchema,
-  assistantActionCommand,
-  assistantCreditUnavailableMessage,
-  assistantErrorMessage,
-  type AiStreamEvent,
-} from '@/lib/ai-assistant';
-import { prisma } from '@/server/db/client';
-import { cancelPendingAction, confirmPendingAction } from '@/server/ai/actions';
-import { aiDebugId } from '@/server/ai/hash';
-import { getAiAssistantConfig } from '@/server/ai/config';
-import { activePendingActionContext, getOrCreateConversation, recentConversationMessages, saveAiMessage } from '@/server/ai/history';
+import { AiChatRequestSchema, type AiStreamEvent } from '@/lib/ai-assistant';
 import { isHttpResponse, requireAiApiUser } from '@/server/ai/http';
-import { runAssistant } from '@/server/ai/orchestrator';
-import { isOpenAiCreditUnavailable, safeOpenAiError, type SafeOpenAiError } from '@/server/ai/provider-error';
-import { AiRateLimitError, consumeAiRateLimit } from '@/server/ai/rate-limit';
+import { AiRateLimitError } from '@/server/ai/rate-limit';
+import { processAssistantMessage } from '@/server/ai/service';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
-
-function safeErrorCode(error: unknown, providerError: SafeOpenAiError | null): string {
-  if (error instanceof AiRateLimitError) return 'rate_limited';
-  if (isOpenAiCreditUnavailable(providerError)) return 'provider_credit_unavailable';
-  if (!(error instanceof Error)) return 'unknown';
-  if (error.message === 'ai_key_missing') return 'not_configured';
-  if (error.message === 'ai_tool_arguments_invalid') return 'tool_arguments_invalid';
-  if (error.message === 'ai_tool_round_limit') return 'tool_round_limit';
-  if (error.message === 'conversation_not_found') return 'conversation_not_found';
-  return 'model_or_tool_failed';
-}
 
 export async function POST(request: NextRequest) {
   const userOrResponse = await requireAiApiUser();
@@ -40,214 +16,45 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'invalid_request', fieldErrors: parsed.error.flatten().fieldErrors }, { status: 400 });
   }
 
-  try {
-    await consumeAiRateLimit(userOrResponse.id);
-  } catch (error) {
-    if (error instanceof AiRateLimitError) {
-      return NextResponse.json(
-        { error: 'rate_limited', retryAfterSeconds: error.retryAfterSeconds },
-        { status: 429, headers: { 'Retry-After': String(error.retryAfterSeconds) } },
-      );
-    }
-    throw error;
-  }
-
-  let conversation;
-  try {
-    conversation = await getOrCreateConversation({
-      conversationId: parsed.data.conversationId,
-      userId: userOrResponse.id,
-      locale: parsed.data.locale,
-      firstMessage: parsed.data.message,
-    });
-  } catch (error) {
-    if (error instanceof Error && error.message === 'conversation_not_found') {
-      return NextResponse.json({ error: 'conversation_not_found' }, { status: 404 });
-    }
-    throw error;
-  }
-
-  const userMessage = await saveAiMessage({
-    conversationId: conversation.id,
-    role: 'USER',
-    content: parsed.data.message,
-  });
-  const actionCommand = assistantActionCommand(parsed.data.message);
-  if (actionCommand) {
-    const pendingAction = await prisma.aiPendingAction.findFirst({
-      where: {
-        conversationId: conversation.id,
-        userId: userOrResponse.id,
-        status: { in: ['PENDING', 'EXECUTING'] },
-      },
-      orderBy: { createdAt: 'desc' },
-      select: { id: true },
-    });
-    if (pendingAction) {
-      const encoder = new TextEncoder();
-      const stream = new ReadableStream<Uint8Array>({
-        start(controller) {
-          const send = (event: AiStreamEvent) => {
-            controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
-          };
-          void (async () => {
-            const debugId = aiDebugId('ai-action');
-            try {
-              send({ type: 'conversation', conversationId: conversation.id });
-              const result = actionCommand === 'confirm'
-                ? await confirmPendingAction({
-                    actionId: pendingAction.id,
-                    user: userOrResponse,
-                    locale: parsed.data.locale,
-                  })
-                : await cancelPendingAction({
-                    actionId: pendingAction.id,
-                    user: userOrResponse,
-                    locale: parsed.data.locale,
-                  });
-              send({
-                type: 'action_result',
-                actionId: result.actionId,
-                status: result.status,
-                message: result.message,
-                href: result.href,
-                invoiceHref: 'invoiceHref' in result ? result.invoiceHref : undefined,
-              });
-              send({ type: 'completion', conversationId: conversation.id });
-            } catch (error) {
-              const errorCode = error instanceof Error ? error.message.split(':')[0] : 'action_failed';
-              const message = errorCode === 'action_stale'
-                ? parsed.data.locale === 'ar'
-                  ? 'تغيرت بيانات أطلس بعد المعاينة. حضّر الطلب مجدداً لمراجعة القيم الحديثة.'
-                  : 'Atlas data changed after the preview. Prepare the action again to review current values.'
-                : assistantErrorMessage(parsed.data.locale, debugId);
-              console.error('AI direct action command failed', {
-                debugId,
-                actionId: pendingAction.id,
-                actionCommand,
-                errorCode,
-              });
-              send({ type: 'error', message, debugId, retryable: errorCode !== 'action_stale' });
-              send({ type: 'completion', conversationId: conversation.id });
-            } finally {
-              controller.close();
-            }
-          })();
-        },
-      });
-      return new NextResponse(stream, {
-        headers: {
-          'Content-Type': 'text/event-stream; charset=utf-8',
-          'Cache-Control': 'no-cache, no-transform',
-          Connection: 'keep-alive',
-          'X-Accel-Buffering': 'no',
-        },
-      });
-    }
-  }
-  const [recentMessages, pendingContext] = await Promise.all([
-    recentConversationMessages(conversation.id),
-    activePendingActionContext(conversation.id),
-  ]);
-  const messages = pendingContext ? [pendingContext, ...recentMessages] : recentMessages;
-  const config = getAiAssistantConfig();
-  const requestLog = await prisma.aiRequestLog.create({
-    data: {
-      userId: userOrResponse.id,
-      conversationId: conversation.id,
-      model: config.model,
-    },
-  });
-
   const encoder = new TextEncoder();
+  let started = false;
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
-      const send = (event: AiStreamEvent) => {
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
-      };
-
       void (async () => {
-        const debugId = aiDebugId('ai-chat');
+        const send = (event: AiStreamEvent) => {
+          started = true;
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+        };
         try {
-          send({ type: 'conversation', conversationId: conversation.id });
-          const result = await runAssistant({
-            conversationId: conversation.id,
-            sourceMessageId: userMessage.id,
-            messages,
+          await processAssistantMessage({
             user: userOrResponse,
             locale: parsed.data.locale,
+            message: parsed.data.message,
+            conversationId: parsed.data.conversationId,
+            channel: 'WEB',
             signal: request.signal,
-            hasPendingAction: Boolean(pendingContext),
             onEvent: send,
           });
-          const payload = result.events.length
-            ? ({ events: result.events } as unknown as Prisma.InputJsonValue)
-            : undefined;
-          const kind = result.events.some((event) => event.type === 'action_preview')
-            ? 'ACTION_PREVIEW'
-            : result.events.some((event) => event.type === 'clarification')
-              ? 'CLARIFICATION'
-              : result.events.some((event) => event.type === 'result_card')
-                ? 'RESULT'
-                : 'TEXT';
-          const message = await saveAiMessage({
-            conversationId: conversation.id,
-            role: 'ASSISTANT',
-            kind,
-            content: result.content || null,
-            payload,
-            model: result.model,
-            inputTokens: result.inputTokens,
-            outputTokens: result.outputTokens,
-            requestId: result.requestId ?? undefined,
-          });
-          try {
-            await prisma.aiRequestLog.update({
-              where: { id: requestLog.id },
-              data: {
-                requestId: result.requestId,
-                status: 'SUCCEEDED',
-                inputTokens: result.inputTokens,
-                outputTokens: result.outputTokens,
-                latencyMs: result.latencyMs,
-              },
-            });
-          } catch (telemetryError) {
-            console.error('AI assistant telemetry update failed', { requestLogId: requestLog.id, telemetryError });
-          }
-          send({ type: 'completion', conversationId: conversation.id, messageId: message.id });
         } catch (error) {
-          const providerError = safeOpenAiError(error);
-          const errorCode = safeErrorCode(error, providerError);
-          const message = errorCode === 'provider_credit_unavailable'
-            ? assistantCreditUnavailableMessage(parsed.data.locale, debugId)
-            : assistantErrorMessage(parsed.data.locale, debugId);
-          console.error('AI assistant request failed', {
-            debugId,
-            errorCode,
-            requestLogId: requestLog.id,
-            provider: providerError,
-          });
-          await Promise.allSettled([
-            saveAiMessage({
-              conversationId: conversation.id,
-              role: 'ASSISTANT',
-              kind: 'ERROR',
-              content: message,
-              payload: { errorCode, debugId },
-            }),
-            prisma.aiRequestLog.update({
-              where: { id: requestLog.id },
-              data: { status: 'FAILED', errorCode, latencyMs: Date.now() - requestLog.createdAt.getTime() },
-            }),
-          ]);
-          send({
-            type: 'error',
-            message,
-            debugId,
-            retryable: !['tool_arguments_invalid', 'provider_credit_unavailable', 'not_configured'].includes(errorCode),
-          });
-          send({ type: 'completion', conversationId: conversation.id });
+          if (error instanceof AiRateLimitError && !started) {
+            send({
+              type: 'error',
+              message: parsed.data.locale === 'ar'
+                ? `تم إرسال طلبات كثيرة. حاول مجدداً بعد ${error.retryAfterSeconds} ثانية.`
+                : `Too many requests. Try again in ${error.retryAfterSeconds} seconds.`,
+              debugId: 'rate-limited',
+              retryable: true,
+            });
+          } else if (!started) {
+            send({
+              type: 'error',
+              message: parsed.data.locale === 'ar'
+                ? 'تعذر بدء المحادثة الآن. حاول مجدداً.'
+                : 'The conversation could not be started. Try again.',
+              debugId: 'conversation-start-failed',
+              retryable: true,
+            });
+          }
         } finally {
           controller.close();
         }

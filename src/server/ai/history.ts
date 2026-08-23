@@ -1,5 +1,5 @@
 import 'server-only';
-import type { AiMessageKind, AiMessageRole, Prisma } from '@prisma/client';
+import type { AiConversationChannel, AiMessageKind, AiMessageRole, Prisma } from '@prisma/client';
 import { AI_CONTEXT_MESSAGE_LIMIT, safeAssistantNarrative } from '@/lib/ai-assistant';
 import { prisma } from '@/server/db/client';
 import { getAiAssistantConfig } from './config';
@@ -15,6 +15,8 @@ export async function getOrCreateConversation(input: {
   userId: string;
   locale: 'ar' | 'en';
   firstMessage: string;
+  channel?: AiConversationChannel;
+  externalThreadId?: string;
 }) {
   if (input.conversationId) {
     const conversation = await prisma.aiConversation.findFirst({
@@ -34,11 +36,31 @@ export async function getOrCreateConversation(input: {
       },
     });
   }
+  if (input.channel === 'TELEGRAM' && input.externalThreadId) {
+    const existing = await prisma.aiConversation.findFirst({
+      where: {
+        userId: input.userId,
+        channel: 'TELEGRAM',
+        externalThreadId: input.externalThreadId,
+        status: 'ACTIVE',
+        expiresAt: { gt: new Date() },
+      },
+      orderBy: { lastMessageAt: 'desc' },
+    });
+    if (existing) {
+      return prisma.aiConversation.update({
+        where: { id: existing.id },
+        data: { locale: input.locale, lastMessageAt: new Date() },
+      });
+    }
+  }
   return prisma.aiConversation.create({
     data: {
       userId: input.userId,
       locale: input.locale,
       title: input.firstMessage.slice(0, 80),
+      channel: input.channel ?? 'WEB',
+      externalThreadId: input.externalThreadId,
       expiresAt: conversationExpiry(),
     },
   });
