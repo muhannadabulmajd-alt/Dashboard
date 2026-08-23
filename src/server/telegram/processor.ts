@@ -12,7 +12,6 @@ import {
   editTelegramMessage,
   sendTelegramMessage,
   sendTelegramTyping,
-  type InlineKeyboard,
 } from './api';
 import { getTelegramConfig } from './config';
 import {

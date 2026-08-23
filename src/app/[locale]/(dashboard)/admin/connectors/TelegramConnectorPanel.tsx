@@ -57,7 +57,7 @@ export function TelegramConnectorPanel({
       body: JSON.stringify({ action }),
     });
     const body = await response.json().catch(() => null) as BotStatus | { error?: string } | null;
-    if (!response.ok || !body || 'error' in body) {
+    if (!response.ok || !body || !('enabled' in body)) {
       setMessage({ ok: false, text: t('requestFailed') });
       return;
     }
