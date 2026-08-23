@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AiStreamEvent } from '@/lib/ai-assistant';
 import { assistantToolsForRole, canExecuteAssistantAction } from '@/server/ai/access';
 import { parseTelegramUserIds, telegramSecretMatches } from '@/server/telegram/config';
@@ -16,6 +16,7 @@ import {
 } from '@/server/commands/actor-context';
 import { can } from '@/lib/rbac';
 import { shouldRetryTelegramProcessing } from '@/lib/telegram-errors';
+import { sendTelegramDocument } from '@/server/telegram/api';
 
 const adminUser: CurrentUser = {
   id: 'admin-1',
@@ -24,6 +25,11 @@ const adminUser: CurrentUser = {
   role: 'ADMIN',
   branchId: null,
 };
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+});
 
 describe('Telegram Atlas AI transport contracts', () => {
   it('parses only numeric bootstrap IDs and compares webhook secrets exactly', () => {
@@ -128,5 +134,35 @@ describe('Telegram Atlas AI transport contracts', () => {
     expect(shouldRetryTelegramProcessing(Object.assign(new Error('telegram_api_400'), { retryable: false }))).toBe(false);
     expect(shouldRetryTelegramProcessing(Object.assign(new Error('telegram_api_500'), { retryable: true }))).toBe(true);
     expect(shouldRetryTelegramProcessing(new Error('temporary_network_failure'))).toBe(true);
+  });
+
+  it('uploads invoice PDFs to Telegram as multipart documents', async () => {
+    vi.stubEnv('TELEGRAM_BOT_ENABLED', 'true');
+    vi.stubEnv('TELEGRAM_BOT_TOKEN', 'test-token');
+    vi.stubEnv('TELEGRAM_WEBHOOK_SECRET', 'test-secret');
+    const request = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      ok: true,
+      result: { message_id: 42 },
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    const result = await sendTelegramDocument({
+      chatId: '7739683566',
+      document: new TextEncoder().encode('%PDF-1.7'),
+      filename: 'laheeb-invoice-LHB-ORD-260823-WA-0001.pdf',
+      caption: 'Order recorded successfully.',
+    });
+
+    expect(result.message_id).toBe(42);
+    expect(request).toHaveBeenCalledOnce();
+    const [url, init] = request.mock.calls[0];
+    expect(url).toBe('https://api.telegram.org/bottest-token/sendDocument');
+    expect(init?.method).toBe('POST');
+    const payload = init?.body as FormData;
+    expect(payload.get('chat_id')).toBe('7739683566');
+    expect(payload.get('caption')).toBe('Order recorded successfully.');
+    const document = payload.get('document') as File;
+    expect(document.name).toBe('laheeb-invoice-LHB-ORD-260823-WA-0001.pdf');
+    expect(document.type).toBe('application/pdf');
+    expect(await document.text()).toBe('%PDF-1.7');
   });
 });

@@ -45,6 +45,23 @@ async function telegramRequest<T>(method: string, payload?: Record<string, unkno
   return body.result;
 }
 
+async function telegramMultipartRequest<T>(method: string, payload: FormData): Promise<T> {
+  const { token } = requireTelegramConfig();
+  const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+    method: 'POST',
+    body: payload,
+    cache: 'no-store',
+    signal: AbortSignal.timeout(30_000),
+  });
+  const body = await response.json().catch(() => null) as TelegramResponse<T> | null;
+  if (!response.ok || !body?.ok || body.result === undefined) {
+    const error = new Error(`telegram_api_${body?.error_code ?? response.status}`);
+    Object.assign(error, { retryable: response.status === 429 || response.status >= 500, description: body?.description });
+    throw error;
+  }
+  return body.result;
+}
+
 export function getTelegramBot(): Promise<TelegramBot> {
   return telegramRequest<TelegramBot>('getMe');
 }
@@ -82,6 +99,23 @@ export function sendTelegramMessage(input: {
     disable_web_page_preview: true,
     reply_markup: input.keyboard?.length ? { inline_keyboard: input.keyboard } : undefined,
   });
+}
+
+export function sendTelegramDocument(input: {
+  chatId: string;
+  document: Uint8Array;
+  filename: string;
+  caption?: string;
+  keyboard?: InlineKeyboard;
+}): Promise<{ message_id: number }> {
+  const payload = new FormData();
+  const document = new Uint8Array(input.document.byteLength);
+  document.set(input.document);
+  payload.set('chat_id', input.chatId);
+  payload.set('document', new Blob([document.buffer], { type: 'application/pdf' }), input.filename);
+  if (input.caption) payload.set('caption', input.caption);
+  if (input.keyboard?.length) payload.set('reply_markup', JSON.stringify({ inline_keyboard: input.keyboard }));
+  return telegramMultipartRequest('sendDocument', payload);
 }
 
 export function editTelegramMessage(input: {
