@@ -190,6 +190,10 @@ export async function runAssistant(
         const execution: ToolExecution = await executeTool(call.name, parseArguments(call), {
           conversationId: input.conversationId,
           sourceMessageId: input.sourceMessageId,
+          recentUserMessages: input.messages
+            .filter((message) => message.role === 'user')
+            .slice(-8)
+            .map((message) => message.content),
           user: input.user,
           locale: input.locale,
           now,

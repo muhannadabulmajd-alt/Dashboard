@@ -1,6 +1,7 @@
 import 'server-only';
 import type { Prisma } from '@prisma/client';
 import type { AiStreamEvent } from '@/lib/ai-assistant';
+import { shouldRetryTelegramProcessing } from '@/lib/telegram-errors';
 import type { CurrentUser } from '@/server/auth/session';
 import { prisma } from '@/server/db/client';
 import { cancelPendingAction, confirmPendingAction } from '@/server/ai/actions';
@@ -221,7 +222,12 @@ export async function processTelegramUpdate(telegramUpdateId: string): Promise<v
     });
 
     if (telegram.type === 'callback_query' && telegram.callbackId) {
-      await answerTelegramCallback(telegram.callbackId);
+      await answerTelegramCallback(telegram.callbackId).catch((error) => {
+        console.warn('Telegram callback acknowledgement failed', {
+          updateId: receipt.updateId,
+          errorCode: error instanceof Error ? error.message : 'telegram_callback_failed',
+        });
+      });
     }
 
     const config = getTelegramConfig();
@@ -368,12 +374,18 @@ export async function processTelegramUpdate(telegramUpdateId: string): Promise<v
     await markComplete(receipt.id, 'SUCCEEDED');
   } catch (error) {
     const errorCode = error instanceof Error ? error.message.split(':')[0].slice(0, 120) : 'telegram_processing_failed';
+    const retryable = shouldRetryTelegramProcessing(error);
     console.error('Telegram AI update failed', { telegramUpdateId, debugId, errorCode, error });
     await prisma.telegramUpdate.update({
       where: { id: telegramUpdateId },
-      data: { status: 'FAILED', errorCode, debugId, processedAt: null },
+      data: {
+        status: retryable ? 'FAILED' : 'IGNORED',
+        errorCode,
+        debugId,
+        processedAt: retryable ? null : new Date(),
+      },
     }).catch(() => undefined);
-    if (telegram?.privateChat) {
+    if (!retryable && receipt.attempts <= 1 && telegram?.privateChat) {
       const text = locale === 'ar'
         ? `تعذر إكمال الطلب الآن. لم تتغير أي بيانات. رمز المتابعة: ${debugId}`
         : `The request could not be completed. No data was changed. Debug ID: ${debugId}`;
@@ -384,6 +396,6 @@ export async function processTelegramUpdate(telegramUpdateId: string): Promise<v
         await sendTelegramMessage({ chatId: telegram.chatId, text }).catch(() => undefined);
       }
     }
-    throw error;
+    if (retryable) throw error;
   }
 }

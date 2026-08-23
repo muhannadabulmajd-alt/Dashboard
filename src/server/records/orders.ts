@@ -515,6 +515,9 @@ export async function createOrderCommand(
       stage = 'commit_hook';
       await options.onCommitted?.(tx, commandResult);
       return { id: o.id, orderNumber: o.orderNumber };
+    }, {
+      maxWait: 10_000,
+      timeout: 60_000,
     });
   } catch (error) {
     if (error instanceof Error && error.message === 'action_stale') return { error: 'action_stale' };

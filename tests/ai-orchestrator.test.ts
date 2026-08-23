@@ -137,7 +137,11 @@ describe('AI Responses API orchestration', () => {
     expect(executeTool).toHaveBeenCalledWith(
       'prepare_create_customer',
       { name: 'Saba Al-Bayati', phone: '07811100140' },
-      expect.objectContaining({ conversationId: 'conversation', sourceMessageId: 'message' }),
+      expect.objectContaining({
+        conversationId: 'conversation',
+        sourceMessageId: 'message',
+        recentUserMessages: ['How are sales?'],
+      }),
     );
     const secondRequest = stream.mock.calls[1][0] as { input: Array<Record<string, unknown>> };
     expect(secondRequest.input).toContainEqual(expect.objectContaining({
