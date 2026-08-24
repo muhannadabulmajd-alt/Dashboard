@@ -5,6 +5,7 @@ import { AI_ASSISTANT_TOOLS } from './tool-definitions';
 
 const TOOL_CAPABILITIES: Record<string, Capability> = {
   sales_summary: 'view:sales',
+  product_buyers: 'view:customers',
   search_orders: 'view:sales',
   order_details: 'view:sales',
   inventory_summary: 'view:inventory',

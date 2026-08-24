@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PrepareOrderSchema, PreparePurchaseSchema } from '@/server/ai/schemas';
+import { PrepareOrderSchema, PreparePurchaseSchema, ProductBuyersSchema } from '@/server/ai/schemas';
 import { ResolvedOrderActionSchema } from '@/server/ai/action-data';
 import { AI_ASSISTANT_TOOLS } from '@/server/ai/tool-definitions';
 import { actionPreconditionIssues } from '@/server/ai/preconditions';
@@ -81,7 +81,7 @@ describe('AI write tool validation', () => {
   });
 
   it('publishes only strict allowlisted function schemas', () => {
-    expect(AI_ASSISTANT_TOOLS).toHaveLength(11);
+    expect(AI_ASSISTANT_TOOLS).toHaveLength(12);
     expect(new Set(AI_ASSISTANT_TOOLS.map((tool) => tool.name)).size).toBe(AI_ASSISTANT_TOOLS.length);
     for (const tool of AI_ASSISTANT_TOOLS) {
       expect(tool.strict).toBe(true);
@@ -89,6 +89,18 @@ describe('AI write tool validation', () => {
     }
     expect(AI_ASSISTANT_TOOLS.some((tool) => tool.name.includes('delete'))).toBe(false);
     expect(AI_ASSISTANT_TOOLS.some((tool) => tool.name.includes('sql'))).toBe(false);
+    expect(AI_ASSISTANT_TOOLS.some((tool) => tool.name === 'product_buyers')).toBe(true);
+  });
+
+  it('requires a bounded product-buyer query and rejects raw query fields', () => {
+    const input = {
+      productQuery: 'LHB-DRP-BOX10-15G-DB-M',
+      range: { preset: 'all' as const, from: null, to: null },
+      limit: 25,
+    };
+    expect(ProductBuyersSchema.parse(input)).toEqual(input);
+    expect(() => ProductBuyersSchema.parse({ ...input, sql: 'select * from orders' })).toThrow();
+    expect(() => ProductBuyersSchema.parse({ ...input, limit: 100 })).toThrow();
   });
 
   it('blocks inactive records and insufficient stock before order confirmation', () => {
