@@ -42,6 +42,9 @@ export default async function EditProductPage({
     origin: p.origin ?? '',
     aliases: p.aliases.join(', '),
     imageUrl: p.imageUrl ?? '',
+    storefrontSlug: p.storefrontSlug ?? '',
+    storefrontPublished: p.storefrontPublished,
+    allowBackorder: p.allowBackorder,
     sellingPrice: p.sellingPrice,
     cogsPerUnit: p.cogsPerUnit,
   };

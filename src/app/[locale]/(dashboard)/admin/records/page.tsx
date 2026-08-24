@@ -1,5 +1,5 @@
 import { getTranslations } from 'next-intl/server';
-import { Package, Users, ShoppingBag, Boxes, Flame, ChevronRight, ListChecks, Building2 } from 'lucide-react';
+import { Package, Users, ShoppingBag, Boxes, Flame, ChevronRight, ListChecks, Building2, Store } from 'lucide-react';
 import { getPageContext } from '@/server/page-context';
 import { can, type Capability } from '@/lib/rbac';
 import { Link } from '@/i18n/navigation';
@@ -15,6 +15,7 @@ const ENTITIES: { key: string; href: string; cap: Capability; Icon: typeof Packa
   { key: 'inventory', href: '/admin/records/inventory', cap: 'manage:inventory', Icon: Boxes },
   { key: 'batches', href: '/admin/records/batches', cap: 'manage:batches', Icon: Flame },
   { key: 'branches', href: '/admin/branches', cap: 'manage:branches', Icon: Building2 },
+  { key: 'storefront', href: '/admin/records/storefront', cap: 'manage:products', Icon: Store },
   { key: 'systemLists', href: '/admin/records/system-lists', cap: 'view:records', Icon: ListChecks },
 ];
 

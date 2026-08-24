@@ -8,6 +8,7 @@ import { PRODUCT_LINES } from '@/lib/enums';
 import { decimalNumber, roundMoney } from '@/lib/decimal';
 import { requireCap, audit, reqField, optField, type ActionState } from './shared';
 import { generateProductBarcode, generateRetailBarcode } from './numbering';
+import { normalizeStorefrontSlug } from '@/server/storefront/slug';
 
 const LIST = '/[locale]/(dashboard)/admin/records/products';
 const CAP = 'manage:products' as const;
@@ -24,6 +25,9 @@ const schema = z.object({
   roastLevel: z.string().optional(),
   origin: z.string().optional(),
   imageUrl: z.string().url().optional().or(z.literal('')),
+  storefrontSlug: z.string().max(80).optional(),
+  storefrontPublished: z.boolean(),
+  allowBackorder: z.boolean(),
   groupId: z.string().optional(), // parent product group (variations module)
   sellingPrice: z.coerce.number().int().nonnegative(),
   cogsPerUnit: z.coerce.number().int().nonnegative(),
@@ -43,6 +47,9 @@ function parse(fd: FormData) {
     roastLevel: optField(fd, 'roastLevel'),
     origin: optField(fd, 'origin'),
     imageUrl: optField(fd, 'imageUrl'),
+    storefrontSlug: optField(fd, 'storefrontSlug'),
+    storefrontPublished: fd.get('storefrontPublished') != null,
+    allowBackorder: fd.get('allowBackorder') != null,
     groupId: optField(fd, 'groupId'),
     sellingPrice: reqField(fd, 'sellingPrice'),
     cogsPerUnit: reqField(fd, 'cogsPerUnit'),
@@ -76,7 +83,14 @@ export async function createProduct(_prev: ActionState, fd: FormData): Promise<A
   const p = await prisma.$transaction(async (tx) => {
     const barcodeValue = await generateProductBarcode(tx);
     const retailBarcode = await generateRetailBarcode(tx);
-    return tx.product.create({ data: { ...withGroup(r.data), barcodeValue, retailBarcode } });
+    return tx.product.create({
+      data: {
+        ...withGroup(r.data),
+        storefrontSlug: normalizeStorefrontSlug(r.data.storefrontSlug, r.data.sku),
+        barcodeValue,
+        retailBarcode,
+      },
+    });
   });
   await audit(user.id, 'CREATE', 'Product', { sku: r.data.sku });
   revalidatePath(LIST, 'page');
@@ -98,7 +112,13 @@ export async function updateProduct(
   // Record cost/price changes for the cost-history view (CR-3). Past orders keep
   // their own COGS snapshot, so this only affects future transactions.
   const before = await prisma.product.findUnique({ where: { id }, select: { cogsPerUnit: true, sellingPrice: true } });
-  await prisma.product.update({ where: { id }, data: withGroup(data) });
+  await prisma.product.update({
+    where: { id },
+    data: {
+      ...withGroup(data),
+      storefrontSlug: normalizeStorefrontSlug(data.storefrontSlug, sku),
+    },
+  });
   await audit(user.id, 'UPDATE', 'Product', { id });
   if (before && (before.cogsPerUnit !== data.cogsPerUnit || before.sellingPrice !== data.sellingPrice)) {
     await audit(user.id, 'COST_CHANGE', 'Product', {

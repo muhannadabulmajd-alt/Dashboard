@@ -22,6 +22,7 @@ import { ConfirmButton } from '@/components/records/RecordActions';
 import { archiveProduct, deleteProduct } from '@/server/records/products';
 import { deleteProductPrice } from '@/server/records/product-prices';
 import { Link } from '@/i18n/navigation';
+import { StorefrontMediaUpload } from '@/components/records/StorefrontMediaUpload';
 
 type Tab = 'overview' | 'pricing' | 'cost' | 'inventory' | 'usage' | 'activity';
 const MARGIN_BADGE: Record<MarginStatus, 'success' | 'warning' | 'danger'> = { ok: 'success', lowMargin: 'warning', belowCost: 'danger' };
@@ -101,10 +102,13 @@ export default async function ProductDetailPage({
 
       {tab === 'overview' ? (
         <div className="flex flex-col gap-4 sm:flex-row">
-          {p.imageUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={p.imageUrl} alt={name} className="h-32 w-32 shrink-0 rounded-[var(--radius)] border object-cover" />
-          ) : null}
+          <div className="shrink-0 space-y-3">
+            {p.imageUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={p.imageUrl} alt={name} className="h-32 w-32 rounded-[var(--radius)] border object-cover" />
+            ) : null}
+            <StorefrontMediaUpload target="product" targetId={p.id} locale={locale} />
+          </div>
           <DetailGrid
             className="flex-1"
             items={

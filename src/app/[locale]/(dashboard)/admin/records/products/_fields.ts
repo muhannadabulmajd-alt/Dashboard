@@ -31,6 +31,9 @@ export function productFields(
     { name: 'origin', label: t('f.origin'), type: 'text' },
     { name: 'aliases', label: t('f.aliases'), type: 'text', placeholder: t('f.aliasesHint'), hint: t('h.aliases') },
     { name: 'imageUrl', label: t('f.imageUrl'), type: 'text', placeholder: 'https://…' },
+    { name: 'storefrontSlug', label: t('f.storefrontSlug'), type: 'text', placeholder: 'turkish-coffee-cardamom-225g', hint: t('h.storefrontSlug') },
+    { name: 'storefrontPublished', label: t('f.storefrontPublished'), type: 'checkbox', hint: t('h.storefrontPublished') },
+    { name: 'allowBackorder', label: t('f.allowBackorder'), type: 'checkbox', hint: t('h.allowBackorder') },
     { name: 'sellingPrice', label: t('f.price'), type: 'number', required: true, hint: t('h.sellingPrice') },
     { name: 'cogsPerUnit', label: t('f.cost'), type: 'number', required: true, hint: t('f.costHint') },
   ];

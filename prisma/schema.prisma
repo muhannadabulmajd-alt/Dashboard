@@ -275,6 +275,30 @@ enum TelegramUpdateStatus {
   IGNORED
 }
 
+enum StorefrontPaymentMode {
+  WAYL
+  COD
+}
+
+enum StorefrontCheckoutStatus {
+  CREATED
+  PAYMENT_PENDING
+  PAID
+  COD_PENDING
+  FAILED
+  EXPIRED
+  CANCELLED
+  REVIEW
+}
+
+enum WaylWebhookEventStatus {
+  RECEIVED
+  PROCESSING
+  SUCCEEDED
+  FAILED
+  IGNORED
+}
+
 // ---------------------------------------------------------------------------
 // Identity & access
 // ---------------------------------------------------------------------------
@@ -405,35 +429,38 @@ model Branch {
 // ---------------------------------------------------------------------------
 
 model Product {
-  id                 String      @id @default(cuid())
-  sku                String      @unique
-  barcodeValue       String      @unique
-  retailBarcode      String      @unique
-  aliases            String[]    @default([])
-  nameEn             String
-  nameAr             String
-  productLine        ProductLine
-  groupId            String? // CR/BRD: parent product group (variations module)
-  sizeGrams          Int?
-  sizeLabel          String
-  grind              String      @default("NONE") // list-managed code
-  roastLevel         String? // list-managed code
-  origin             String?
-  isBlend            Boolean     @default(false)
-  variationType      String? // what makes this variation differ: size / grind / roast / packaging / flavor
-  imageUrl           String?
-  sellingPrice       Int // minor units of sellingCurrency (current base price)
-  sellingCurrency    Currency    @default(IQD)
-  sellUnit           String      @default("unit")
-  minSellingPrice    Int? // optional floor for manual price overrides
-  cogsPerUnit        Int // minor units of sellingCurrency
-  invoiceName        String? // display name on the invoice (defaults to name)
-  allowDiscount      Boolean     @default(true) // order usage (§6)
-  allowPriceOverride Boolean     @default(true)
-  trackInventory     Boolean     @default(true) // deduct finished stock on sale
-  isActive           Boolean     @default(true)
-  createdAt          DateTime    @default(now())
-  updatedAt          DateTime    @updatedAt
+  id                  String      @id @default(cuid())
+  sku                 String      @unique
+  barcodeValue        String      @unique
+  retailBarcode       String      @unique
+  aliases             String[]    @default([])
+  nameEn              String
+  nameAr              String
+  productLine         ProductLine
+  groupId             String? // CR/BRD: parent product group (variations module)
+  sizeGrams           Int?
+  sizeLabel           String
+  grind               String      @default("NONE") // list-managed code
+  roastLevel          String? // list-managed code
+  origin              String?
+  isBlend             Boolean     @default(false)
+  variationType       String? // what makes this variation differ: size / grind / roast / packaging / flavor
+  imageUrl            String?
+  storefrontSlug      String?     @unique
+  storefrontPublished Boolean     @default(false)
+  allowBackorder      Boolean     @default(false)
+  sellingPrice        Int // minor units of sellingCurrency (current base price)
+  sellingCurrency     Currency    @default(IQD)
+  sellUnit            String      @default("unit")
+  minSellingPrice     Int? // optional floor for manual price overrides
+  cogsPerUnit         Int // minor units of sellingCurrency
+  invoiceName         String? // display name on the invoice (defaults to name)
+  allowDiscount       Boolean     @default(true) // order usage (§6)
+  allowPriceOverride  Boolean     @default(true)
+  trackInventory      Boolean     @default(true) // deduct finished stock on sale
+  isActive            Boolean     @default(true)
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
 
   orderLines     OrderLine[]
   batchLinks     BatchSkuLink[]
@@ -446,6 +473,7 @@ model Product {
   @@index([grind])
   @@index([isActive])
   @@index([groupId])
+  @@index([storefrontPublished, isActive])
 }
 
 /// Price entries for a variation (§6): base, wholesale or channel-specific,
@@ -491,21 +519,24 @@ model ProductComponent {
 // (variations) such as "Espresso Spring" → its 200g/500g/1kg, ground/whole-bean
 // SKUs. The variation = Product; the variation ID = the product's immutable SKU.
 model ProductGroup {
-  id          String      @id @default(cuid())
-  code        String      @unique // auto-generated, immutable: PG-000001
-  nameEn      String
-  nameAr      String
-  productLine ProductLine
-  productType String? // free-text kind, e.g. "Coffee", "Gift", "Merch"
-  description String?
-  imageUrl    String? // optional image (URL)
-  isActive    Boolean     @default(true)
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  id                  String      @id @default(cuid())
+  code                String      @unique // auto-generated, immutable: PG-000001
+  nameEn              String
+  nameAr              String
+  productLine         ProductLine
+  productType         String? // free-text kind, e.g. "Coffee", "Gift", "Merch"
+  description         String?
+  imageUrl            String? // optional image (URL)
+  storefrontSlug      String?     @unique
+  storefrontPublished Boolean     @default(false)
+  isActive            Boolean     @default(true)
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
 
   products Product[]
 
   @@index([isActive])
+  @@index([storefrontPublished, isActive])
 }
 
 // ---------------------------------------------------------------------------
@@ -532,7 +563,10 @@ model Customer {
   isActive        Boolean         @default(true)
   createdAt       DateTime        @default(now())
 
-  orders Order[]
+  orders                      Order[]
+  storefrontPasskeys          StorefrontPasskeyCredential[]
+  storefrontPasskeyChallenges StorefrontPasskeyChallenge[]
+  storefrontSessions          StorefrontCustomerSession[]
 
   @@index([segment])
   @@index([governorate])
@@ -577,6 +611,7 @@ model Order {
   shipment                   Shipment?
   stockMovements             StockMovement[]
   paymentReconciliationItems PaymentReconciliationItem[]
+  storefrontCheckout         StorefrontCheckout?
 
   @@index([placedAt])
   @@index([channel])
@@ -586,6 +621,126 @@ model Order {
   @@index([customerId])
   @@index([offerId])
   @@index([createdById])
+}
+
+model StorefrontDeliveryZone {
+  id             String   @id @default(cuid())
+  code           String   @unique
+  nameEn         String
+  nameAr         String
+  governorate    String?
+  deliveryFee    Int
+  minimumOrder   Int      @default(0)
+  freeDeliveryAt Int?
+  isActive       Boolean  @default(true)
+  sortOrder      Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  checkouts StorefrontCheckout[]
+
+  @@index([isActive, sortOrder])
+  @@index([governorate])
+}
+
+model StorefrontCheckout {
+  id              String                   @id @default(cuid())
+  orderId         String                   @unique
+  deliveryZoneId  String?
+  idempotencyKey  String                   @unique
+  publicTokenHash String                   @unique
+  paymentMode     StorefrontPaymentMode
+  status          StorefrontCheckoutStatus @default(CREATED)
+  subtotal        Int
+  discountAmount  Int                      @default(0)
+  deliveryFee     Int
+  total           Int
+  currency        Currency                 @default(IQD)
+  quoteHash       String
+  waylReferenceId String?                  @unique
+  waylLinkId      String?                  @unique
+  waylCode        String?
+  waylUrl         String?
+  waylStatus      String?
+  expiresAt       DateTime?
+  paidAt          DateTime?
+  closedAt        DateTime?
+  reviewReason    String?
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+
+  order         Order                   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  deliveryZone  StorefrontDeliveryZone? @relation(fields: [deliveryZoneId], references: [id], onDelete: SetNull)
+  webhookEvents WaylWebhookEvent[]
+
+  @@index([status, createdAt])
+  @@index([paymentMode, status])
+}
+
+model WaylWebhookEvent {
+  id            String                 @id @default(cuid())
+  eventKey      String                 @unique
+  checkoutId    String?
+  referenceId   String
+  eventType     String?
+  signatureHash String?
+  payload       Json
+  status        WaylWebhookEventStatus @default(RECEIVED)
+  errorCode     String?
+  receivedAt    DateTime               @default(now())
+  processedAt   DateTime?
+
+  checkout StorefrontCheckout? @relation(fields: [checkoutId], references: [id], onDelete: SetNull)
+
+  @@index([referenceId, receivedAt])
+  @@index([status, receivedAt])
+}
+
+model StorefrontPasskeyCredential {
+  id           String    @id @default(cuid())
+  customerId   String
+  credentialId String    @unique
+  publicKey    Bytes
+  counter      BigInt    @default(0)
+  transports   String[]  @default([])
+  deviceType   String?
+  backedUp     Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+  lastUsedAt   DateTime?
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+}
+
+model StorefrontPasskeyChallenge {
+  id         String    @id @default(cuid())
+  customerId String?
+  challenge  String    @unique
+  purpose    String
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime  @default(now())
+
+  customer Customer? @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId, purpose, expiresAt])
+  @@index([expiresAt, usedAt])
+}
+
+model StorefrontCustomerSession {
+  id         String    @id @default(cuid())
+  customerId String
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime  @default(now())
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId, expiresAt])
+  @@index([expiresAt, revokedAt])
 }
 
 model OrderLine {
