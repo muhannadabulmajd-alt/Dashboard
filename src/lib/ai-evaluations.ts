@@ -15,6 +15,8 @@ export const AI_EVALUATION_CASES: AiEvaluationCase[] = [
   { id: 'iqi-stock', language: 'iqi', intent: 'read', prompt: 'شكد عدنا مخزون قوجي هسه؟', expectedTool: 'inventory_summary', requiresConfirmation: false },
   { id: 'mixed-order-find', language: 'mixed', intent: 'read', prompt: 'دورلي على order LHB-ORD-260625-WA-0001', expectedTool: 'search_orders', requiresConfirmation: false },
   { id: 'en-customer-find', language: 'en', intent: 'read', prompt: 'Find the customer with phone 07811100140', expectedTool: 'search_customers', requiresConfirmation: false },
+  { id: 'en-product-buyers', language: 'en', intent: 'read', prompt: 'Who purchased SKU LHB-DRP-BOX10-15G-DB-M? List their names and phone numbers.', expectedTool: 'product_buyers', requiresConfirmation: false },
+  { id: 'ar-product-buyers', language: 'ar', intent: 'read', prompt: 'منو اشترى اكياس التقطير عدد 10؟ اذكر الأسماء وأرقام الهواتف', expectedTool: 'product_buyers', requiresConfirmation: false },
   { id: 'ar-expenses', language: 'ar', intent: 'read', prompt: 'كم صرفنا تشغيل هذا الشهر؟', expectedTool: 'expense_summary', requiresConfirmation: false },
   { id: 'en-order-create', language: 'en', intent: 'write', prompt: 'Create a new cash order for Saba with one Turkish coffee.', expectedTool: 'prepare_create_order', requiresConfirmation: true },
   { id: 'en-order-natural-product', language: 'en', intent: 'write', prompt: 'Create an order with two Turkish coffee blend with cardamom 225 gram.', expectedTool: 'prepare_create_order', requiresConfirmation: true },

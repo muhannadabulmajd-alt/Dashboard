@@ -16,6 +16,7 @@ import { getSpendRows, getSpendTotals } from '@/server/finance/spend';
 import { getInvoiceData } from '@/server/invoice/data';
 import { getListEntries, getListLabel } from '@/server/lists/resolver';
 import { getOrderOperationalDefaults } from '@/server/records/order-defaults';
+import { findProductBuyers } from '@/server/customers/product-buyers';
 import { createPendingAction } from './pending';
 import { actionPreconditionIssues, loadActionPreconditions } from './preconditions';
 import {
@@ -34,6 +35,7 @@ import {
   PrepareOrderSchema,
   PrepareOrderStatusSchema,
   PreparePurchaseSchema,
+  ProductBuyersSchema,
   SalesSummarySchema,
   SearchSchema,
 } from './schemas';
@@ -313,6 +315,80 @@ async function salesSummary(raw: unknown, context: ToolContext): Promise<ToolExe
   });
 }
 
+async function productBuyers(raw: unknown, context: ToolContext): Promise<ToolExecution> {
+  const input = ProductBuyersSchema.parse(raw);
+  const range = rangeFrom(input.range);
+  const filters = DashboardFiltersSchema.parse({
+    range: input.range.preset,
+    from: input.range.from ?? undefined,
+    to: input.range.to ?? undefined,
+  });
+  const result = await findProductBuyers({
+    productQuery: input.productQuery,
+    filters,
+    scope: buildBranchScope(context.user),
+    range,
+  });
+  if (result.kind === 'none') {
+    return noMatch(context.locale, 'productQuery', localized(context.locale, 'product', 'منتج'));
+  }
+  if (result.kind === 'ambiguous') {
+    return ambiguousMatch(
+      context.locale,
+      'productQuery',
+      result.candidates,
+      (row) => `${String(context.locale === 'ar' ? row.nameAr || row.nameEn : row.nameEn || row.nameAr)} · ${String(row.sizeLabel)} · ${String(row.sku)}`,
+      (row) => String(row.sku),
+    );
+  }
+
+  const productName = context.locale === 'ar'
+    ? result.product.nameAr || result.product.nameEn
+    : result.product.nameEn || result.product.nameAr;
+  const params = new URLSearchParams({
+    product: result.product.sku,
+    range: input.range.preset,
+  });
+  if (input.range.from) params.set('from', input.range.from);
+  if (input.range.to) params.set('to', input.range.to);
+  const guestHint = result.guestOrderCount
+    ? localized(
+        context.locale,
+        ` ${formatNumber(result.guestOrderCount, context.locale)} additional matching order(s) have no linked customer.`,
+        ` ويوجد ${formatNumber(result.guestOrderCount, context.locale)} طلب مطابق إضافي بلا عميل مرتبط.`,
+      )
+    : '';
+
+  return cardResult({
+    title: localized(context.locale, `Customers who bought ${productName}`, `العملاء الذين اشتروا ${productName}`),
+    answer: localized(
+      context.locale,
+      `${formatNumber(result.buyers.length, context.locale)} linked customers bought this item in ${formatNumber(result.orderCount, context.locale)} completed sale orders.${guestHint}`,
+      `اشترى هذا المنتج ${formatNumber(result.buyers.length, context.locale)} عميل مرتبط ضمن ${formatNumber(result.orderCount, context.locale)} طلب بيع مكتمل.${guestHint}`,
+    ),
+    period: periodLabel(range.start, range.end, context.locale),
+    generatedAt: generatedAt(context.now),
+    metrics: [
+      { label: localized(context.locale, 'Unique buyers', 'العملاء المشترون'), value: formatNumber(result.buyers.length, context.locale) },
+      { label: localized(context.locale, 'Orders', 'الطلبات'), value: formatNumber(result.orderCount, context.locale) },
+      { label: localized(context.locale, 'Units', 'الوحدات'), value: formatNumber(result.units, context.locale) },
+      { label: localized(context.locale, 'Product sales', 'مبيعات المنتج'), value: formatMoney(result.itemSales, 'IQD', context.locale) },
+    ],
+    rows: result.buyers.slice(0, input.limit).map((buyer) => ({
+      id: buyer.customerId,
+      title: (context.locale === 'ar' ? buyer.nameAr : buyer.nameEn) || buyer.nameEn || buyer.nameAr || buyer.externalId || localized(context.locale, 'Unnamed customer', 'عميل بلا اسم'),
+      subtitle: [
+        buyer.phone,
+        buyer.externalId,
+        localized(context.locale, `${buyer.orders} order(s) · ${buyer.units} unit(s)`, `${formatNumber(buyer.orders, 'ar')} طلب · ${formatNumber(buyer.units, 'ar')} وحدة`),
+      ].filter(Boolean).join(' · '),
+      value: formatMoney(buyer.itemSales, 'IQD', context.locale),
+      href: `/admin/records/customers/${buyer.customerId}`,
+    })),
+    href: `/customers/product-buyers?${params.toString()}`,
+  });
+}
+
 async function searchOrders(raw: unknown, context: ToolContext): Promise<ToolExecution> {
   const input = SearchSchema.parse(raw);
   const normalizedPhone = input.query.replace(/\D/g, '');
@@ -325,6 +401,22 @@ async function searchOrders(raw: unknown, context: ToolContext): Promise<ToolExe
         { customer: { externalId: { contains: input.query, mode: 'insensitive' } } },
         { customer: { nameEn: { contains: input.query, mode: 'insensitive' } } },
         { customer: { nameAr: { contains: input.query, mode: 'insensitive' } } },
+        {
+          lines: {
+            some: {
+              OR: [
+                { sku: { contains: input.query, mode: 'insensitive' } },
+                { product: { sku: { contains: input.query, mode: 'insensitive' } } },
+                { product: { barcodeValue: { contains: input.query, mode: 'insensitive' } } },
+                { product: { retailBarcode: { contains: input.query, mode: 'insensitive' } } },
+                { product: { nameEn: { contains: input.query, mode: 'insensitive' } } },
+                { product: { nameAr: { contains: input.query, mode: 'insensitive' } } },
+                { product: { group: { nameEn: { contains: input.query, mode: 'insensitive' } } } },
+                { product: { group: { nameAr: { contains: input.query, mode: 'insensitive' } } } },
+              ],
+            },
+          },
+        },
         ...(normalizedPhone.length >= 7
           ? [{ customer: { phone: { contains: normalizedPhone.slice(-7), mode: 'insensitive' as const } } }]
           : []),
@@ -1063,6 +1155,7 @@ async function prepareOrderStatus(raw: unknown, context: ToolContext): Promise<T
 
 const TOOL_HANDLERS: Record<string, (raw: unknown, context: ToolContext) => Promise<ToolExecution>> = {
   sales_summary: salesSummary,
+  product_buyers: productBuyers,
   search_orders: searchOrders,
   order_details: orderDetails,
   inventory_summary: inventorySummary,

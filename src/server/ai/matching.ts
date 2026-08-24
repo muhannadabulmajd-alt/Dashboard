@@ -1,9 +1,8 @@
 import 'server-only';
 import { normalizeAssistantText } from '@/lib/ai-assistant';
 import { normalizeIraqiPhone } from '@/lib/phone';
-import { effectivePrice } from '@/lib/metrics/pricing';
-import { rankProductCandidates } from '@/lib/product-matching';
 import { prisma } from '@/server/db/client';
+import { matchActiveProduct } from '@/server/products/matching';
 
 export type MatchResult<T> =
   | { kind: 'exact'; value: T }
@@ -37,37 +36,7 @@ export async function matchCustomer(query: string) {
 }
 
 export async function matchProduct(query: string) {
-  const now = new Date();
-  const productRows = await prisma.product.findMany({
-    where: { isActive: true },
-    select: {
-      id: true,
-      sku: true,
-      barcodeValue: true,
-      retailBarcode: true,
-      nameEn: true,
-      nameAr: true,
-      aliases: true,
-      sizeGrams: true,
-      sizeLabel: true,
-      grind: true,
-      roastLevel: true,
-      origin: true,
-      productLine: true,
-      variationType: true,
-      sellUnit: true,
-      sellingPrice: true,
-      cogsPerUnit: true,
-      prices: { where: { kind: 'BASE' }, select: { kind: true, price: true, effectiveFrom: true } },
-      group: { select: { code: true, nameEn: true, nameAr: true } },
-    },
-    orderBy: { sku: 'asc' },
-  });
-  const rows = productRows.map(({ prices, ...row }) => ({
-    ...row,
-    sellingPrice: effectivePrice(prices, row.sellingPrice, now),
-  }));
-  return rankProductCandidates(rows, query);
+  return matchActiveProduct(query);
 }
 
 export async function matchOrder(query: string, scope: { branchId?: string } = {}) {
