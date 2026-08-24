@@ -43,11 +43,13 @@ export type StorefrontConfig = {
   origin?: string;
   wayl?: {
     token: string;
-    baseUrl: 'https://api.thewayl-staging.com' | 'https://api.thewayl.com';
+    baseUrl: 'https://api.thewayl.com';
     environment: 'test' | 'live';
     webhookSecret: string;
   };
 };
+
+const WAYL_API_BASE_URL = 'https://api.thewayl.com' as const;
 
 export function readStorefrontConfig(env: Environment = process.env): StorefrontConfig {
   const enabled = env.STOREFRONT_ENABLED?.trim().toLowerCase() === 'true';
@@ -64,14 +66,11 @@ export function readStorefrontConfig(env: Environment = process.env): Storefront
   const waylBaseUrl = required(env, 'WAYL_API_BASE_URL').replace(/\/$/, '');
   const isProduction = runtime === 'production';
   const expectedEnvironment = isProduction ? 'live' : 'test';
-  const expectedBaseUrl = isProduction
-    ? 'https://api.thewayl.com'
-    : 'https://api.thewayl-staging.com';
 
   if (waylEnvironment !== expectedEnvironment) {
     throw new StorefrontConfigError('wayl_environment_mismatch');
   }
-  if (waylBaseUrl !== expectedBaseUrl) {
+  if (waylBaseUrl !== WAYL_API_BASE_URL) {
     throw new StorefrontConfigError('wayl_host_mismatch');
   }
   const webhookSecret = required(env, 'WAYL_WEBHOOK_SECRET');
@@ -86,7 +85,7 @@ export function readStorefrontConfig(env: Environment = process.env): Storefront
     origin: originResult.data,
     wayl: {
       token: required(env, 'WAYL_API_TOKEN'),
-      baseUrl: expectedBaseUrl,
+      baseUrl: WAYL_API_BASE_URL,
       environment: expectedEnvironment,
       webhookSecret,
     },

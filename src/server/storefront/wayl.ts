@@ -6,18 +6,55 @@ import type { StorefrontConfig } from './config';
 
 const WAYL_TIMEOUT_MS = 8_000;
 
+const httpsUrlSchema = z.string().url().refine((value) => new URL(value).protocol === 'https:');
+
+const waylExpirySchema = z.string().regex(/^\d+(?:m|h|d)$/).refine((value) => {
+  const amount = Number.parseInt(value, 10);
+  const unit = value.at(-1);
+  const minutes = unit === 'd' ? amount * 24 * 60 : unit === 'h' ? amount * 60 : amount;
+  return minutes >= 1 && minutes <= 30 * 24 * 60;
+});
+
+const waylLineItemSchema = z.object({
+  label: z.string().trim().min(3).max(255),
+  amount: z.number().int().min(1),
+  type: z.enum(['increase', 'decrease']),
+});
+
+export const createWaylLinkInputSchema = z.object({
+  referenceId: z.string().trim().min(1).max(255),
+  total: z.number().int().min(1_000),
+  lineItems: z.array(waylLineItemSchema).min(1),
+  webhookUrl: httpsUrlSchema,
+  redirectionUrl: httpsUrlSchema,
+  customParameter: z.string().max(2_000).optional(),
+  expiresIn: waylExpirySchema.optional(),
+}).superRefine((value, ctx) => {
+  const net = value.lineItems.reduce(
+    (sum, line) => sum + (line.type === 'increase' ? line.amount : -line.amount),
+    0,
+  );
+  if (net !== value.total) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['lineItems'],
+      message: 'Wayl line items must reconcile to the checkout total.',
+    });
+  }
+});
+
 const waylLinkSchema = z.object({
   referenceId: z.string().min(1),
   id: z.string().min(1),
   code: z.string().optional(),
-  total: z.union([z.string(), z.number()]).transform(Number),
-  currency: z.string(),
+  total: z.union([z.string(), z.number()]).transform(Number).pipe(z.number().int().positive()),
+  currency: z.literal('IQD'),
   paymentMethod: z.string().nullable().optional(),
   status: z.string().min(1),
   completedAt: z.string().nullable().optional(),
   createdAt: z.string().optional(),
   updatedAt: z.string().optional(),
-  url: z.string().url(),
+  url: httpsUrlSchema,
   webhookUrl: z.string().url().optional(),
   redirectionUrl: z.string().url().optional(),
   linkExpiresIn: z.string().optional(),
@@ -30,19 +67,11 @@ const waylEnvelopeSchema = z.object({
 
 export type WaylLink = z.infer<typeof waylLinkSchema>;
 
-export type CreateWaylLinkInput = {
-  referenceId: string;
-  total: number;
-  lineItems: { label: string; amount: number; type: 'increase' | 'decrease' }[];
-  webhookUrl: string;
-  redirectionUrl: string;
-  customParameter?: string;
-  expiresIn?: string;
-};
+export type CreateWaylLinkInput = z.infer<typeof createWaylLinkInputSchema>;
 
 export class WaylClientError extends Error {
   constructor(
-    readonly code: 'timeout' | 'network' | 'http' | 'invalid_response' | 'not_found',
+    readonly code: 'timeout' | 'network' | 'http' | 'invalid_request' | 'invalid_response' | 'not_found',
     readonly status?: number,
   ) {
     super(code);
@@ -102,17 +131,20 @@ export class WaylClient {
   }
 
   async createPaymentLink(input: CreateWaylLinkInput): Promise<WaylLink> {
+    const parsedInput = createWaylLinkInputSchema.safeParse(input);
+    if (!parsedInput.success) throw new WaylClientError('invalid_request');
+    const validated = parsedInput.data;
     const requestBody = {
       env: this.config.environment,
-      referenceId: input.referenceId,
-      total: input.total,
+      referenceId: validated.referenceId,
+      total: validated.total,
       currency: 'IQD',
-      customParameter: input.customParameter,
-      lineItem: input.lineItems,
-      webhookUrl: input.webhookUrl,
+      customParameter: validated.customParameter ?? '',
+      lineItem: validated.lineItems,
+      webhookUrl: validated.webhookUrl,
       webhookSecret: this.config.webhookSecret,
-      redirectionUrl: input.redirectionUrl,
-      linkExpiresIn: input.expiresIn ?? '1h',
+      redirectionUrl: validated.redirectionUrl,
+      linkExpiresIn: validated.expiresIn ?? '1h',
     };
     try {
       const payload = await this.request('/api/v1/links', {
@@ -127,8 +159,8 @@ export class WaylClient {
         (error.code === 'timeout' || error.code === 'network' || (error.code === 'http' && (error.status ?? 0) >= 500));
       if (!uncertain) throw error;
       try {
-        const recovered = await this.getPaymentLink(input.referenceId);
-        if (recovered.total !== input.total || recovered.currency !== 'IQD') {
+        const recovered = await this.getPaymentLink(validated.referenceId);
+        if (recovered.total !== validated.total || recovered.currency !== 'IQD') {
           throw new WaylClientError('invalid_response');
         }
         return recovered;

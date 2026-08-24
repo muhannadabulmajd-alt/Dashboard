@@ -8,6 +8,7 @@ import {
   classifyWaylStatus,
   checkoutEventKey,
   waylWebhookEventDisposition,
+  waylWebhookEventId,
   waylWebhookReference,
   waylWebhookStatus,
 } from './contracts';
@@ -42,7 +43,7 @@ export async function processWaylWebhook(input: {
   }
   const referenceId = waylWebhookReference(payload);
   if (!referenceId) return { accepted: false, code: 'missing_reference' };
-  const eventKey = checkoutEventKey(input.rawBody);
+  const eventKey = checkoutEventKey(input.rawBody, waylWebhookEventId(payload));
   const existing = await prisma.waylWebhookEvent.findUnique({ where: { eventKey }, select: { id: true, status: true } });
   if (waylWebhookEventDisposition(existing?.status ?? null) === 'duplicate') {
     return { accepted: true, duplicate: true, status: existing?.status ?? 'UNKNOWN' };
