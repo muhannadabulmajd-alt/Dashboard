@@ -25,6 +25,12 @@ export const SalesSummarySchema = z.object({
   dimension: z.enum(['NONE', 'CHANNEL', 'CITY', 'PRODUCT']).nullable(),
 }).strict();
 
+export const ProductBuyersSchema = z.object({
+  productQuery: z.string().trim().min(1),
+  range: AssistantRangeSchema,
+  limit: z.number().int().min(1).max(50),
+}).strict();
+
 export const InventorySummarySchema = z.object({
   query: z.string().trim().nullable(),
   lowStockOnly: z.boolean(),

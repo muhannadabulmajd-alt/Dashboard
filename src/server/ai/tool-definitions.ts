@@ -65,8 +65,17 @@ export const AI_ASSISTANT_TOOLS: FunctionTool[] = [
     }),
   ),
   tool(
+    'product_buyers',
+    'Find customers who bought a product in completed Atlas sale orders. Match by SKU, EAN/internal barcode, Arabic or English product name, alias, or product specifications. Return unique customer names, phones, order counts, units, and product sales for a Baghdad-time period.',
+    object({
+      productQuery: string,
+      range,
+      limit: { type: 'integer', minimum: 1, maximum: 50 },
+    }),
+  ),
+  tool(
     'search_orders',
-    'Find Atlas orders by order number, customer ID, customer name, or customer phone.',
+    'Find Atlas orders by order number, customer ID/name/phone, SKU, barcode, product name, or product group.',
     object({ query: string, limit: { type: 'integer', minimum: 1, maximum: 25 } }),
   ),
   tool(

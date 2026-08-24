@@ -112,6 +112,7 @@ describe('Telegram Atlas AI transport contracts', () => {
   it('filters tools and writes by the linked Atlas role', () => {
     const salesTools = assistantToolsForRole('SALES_CRM').map((tool) => tool.name);
     expect(salesTools).toContain('prepare_create_order');
+    expect(salesTools).toContain('product_buyers');
     expect(salesTools).not.toContain('prepare_create_expense');
     expect(canExecuteAssistantAction('SALES_CRM', 'CREATE_ORDER')).toBe(true);
     expect(canExecuteAssistantAction('SALES_CRM', 'CREATE_EXPENSE')).toBe(false);
