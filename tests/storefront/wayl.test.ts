@@ -53,7 +53,7 @@ describe('Wayl client', () => {
       webhookUrl: 'https://dashboard.example.test/api/storefront/v1/wayl/webhook',
       webhookSecret: config.webhookSecret,
       redirectionUrl: 'https://store.example.test/checkout/return',
-      linkExpiresIn: '1h',
+      linkExpiresIn: '15m',
     });
   });
 
