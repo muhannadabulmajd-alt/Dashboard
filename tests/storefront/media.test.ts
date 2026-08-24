@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   getStorefrontBlobAuth,
+  storefrontImageReference,
+  storefrontMediaPath,
   STOREFRONT_IMAGE_MAX_BYTES,
   StorefrontMediaError,
   validateStorefrontImage,
@@ -17,6 +19,25 @@ describe('storefront media validation', () => {
 
   it('accepts supported image types within the size limit', () => {
     expect(() => validateStorefrontImage({ type: 'image/webp', size: 1024 })).not.toThrow();
+  });
+
+  it('keeps private Blob URLs behind the authenticated Store media route', () => {
+    expect(storefrontMediaPath('products', 'turkish coffee')).toBe(
+      '/api/storefront/v1/media/products/turkish%20coffee',
+    );
+    expect(storefrontImageReference(
+      'https://store-id.private.blob.vercel-storage.com/storefront/product.jpg',
+      'products',
+      'turkish-coffee',
+    )).toBe('/api/storefront/v1/media/products/turkish-coffee');
+  });
+
+  it('preserves external HTTPS product images', () => {
+    expect(storefrontImageReference(
+      'https://images.example.com/coffee.jpg',
+      'groups',
+      'coffee',
+    )).toBe('https://images.example.com/coffee.jpg');
   });
 
   it.each(['image/svg+xml', 'text/html', 'application/pdf'])('rejects %s uploads', (type) => {

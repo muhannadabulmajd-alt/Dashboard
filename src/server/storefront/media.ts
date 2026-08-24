@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { del, put } from '@vercel/blob';
+import { del, get, put, type GetBlobResult } from '@vercel/blob';
 import { prisma } from '@/server/db/client';
 
 export const STOREFRONT_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
@@ -12,6 +12,7 @@ export const STOREFRONT_IMAGE_TYPES = [
 ] as const;
 
 export type StorefrontMediaTarget = 'product' | 'productGroup';
+export type StorefrontMediaRouteTarget = 'products' | 'groups';
 
 export function getStorefrontBlobAuth(): { token: string } {
   const token = process.env.BLOB_READ_WRITE_TOKEN?.trim();
@@ -26,6 +27,7 @@ export class StorefrontMediaError extends Error {
       | 'invalid_file'
       | 'invalid_target'
       | 'not_found'
+      | 'read_failed'
       | 'upload_failed',
   ) {
     super(code);
@@ -48,14 +50,32 @@ function extensionFor(type: string): string {
   return type.slice('image/'.length);
 }
 
-function isManagedBlobUrl(value: string | null): value is string {
+function isHttpsUrl(value: string | null): value is string {
   if (!value) return false;
   try {
     const url = new URL(value);
-    return url.protocol === 'https:' && url.hostname.endsWith('.public.blob.vercel-storage.com');
+    return url.protocol === 'https:';
   } catch {
     return false;
   }
+}
+
+function isManagedBlobUrl(value: string | null): value is string {
+  if (!isHttpsUrl(value)) return false;
+  return new URL(value).hostname.endsWith('.blob.vercel-storage.com');
+}
+
+export function storefrontMediaPath(target: StorefrontMediaRouteTarget, slug: string): string {
+  return `/api/storefront/v1/media/${target}/${encodeURIComponent(slug)}`;
+}
+
+export function storefrontImageReference(
+  source: string | null,
+  target: StorefrontMediaRouteTarget,
+  slug: string,
+): string | null {
+  if (!source) return null;
+  return isManagedBlobUrl(source) ? storefrontMediaPath(target, slug) : source;
 }
 
 function describeBlobFailure(error: unknown): Record<string, string | number | undefined> {
@@ -91,7 +111,7 @@ export async function replaceStorefrontImage(input: {
     blob = await put(
       `storefront/${input.target}/${input.targetId}/primary.${extensionFor(input.file.type)}`,
       input.file,
-      { access: 'public', addRandomSuffix: true, ...blobAuth },
+      { access: 'private', addRandomSuffix: true, ...blobAuth },
     );
   } catch (error) {
     console.error('[storefront-media] Blob upload failed', describeBlobFailure(error));
@@ -124,4 +144,65 @@ export async function replaceStorefrontImage(input: {
     await del(current.imageUrl, blobAuth).catch(() => undefined);
   }
   return { url: blob.url };
+}
+
+export type StorefrontImageResult =
+  | { kind: 'blob'; value: GetBlobResult }
+  | { kind: 'external'; url: string };
+
+export async function readStorefrontImage(input: {
+  target: StorefrontMediaTarget;
+  targetId?: string;
+  slug?: string;
+  publishedOnly: boolean;
+  ifNoneMatch?: string | null;
+}): Promise<StorefrontImageResult> {
+  if ((!input.targetId && !input.slug) || (input.targetId && input.slug)) {
+    throw new StorefrontMediaError('invalid_target');
+  }
+
+  const activeFilter = input.publishedOnly
+    ? { isActive: true, storefrontPublished: true }
+    : {};
+  const source = input.target === 'product'
+    ? await prisma.product.findFirst({
+      where: input.targetId
+        ? { id: input.targetId, ...activeFilter }
+        : { storefrontSlug: input.slug!, ...activeFilter },
+      select: { imageUrl: true, group: { select: { imageUrl: true } } },
+    }).then((product) => product?.imageUrl ?? product?.group?.imageUrl ?? null)
+    : await prisma.productGroup.findFirst({
+      where: input.targetId
+        ? { id: input.targetId, ...activeFilter }
+        : { storefrontSlug: input.slug!, ...activeFilter },
+      select: {
+        imageUrl: true,
+        products: {
+          where: input.publishedOnly
+            ? { isActive: true, storefrontPublished: true }
+            : { isActive: true },
+          orderBy: { sku: 'asc' },
+          take: 1,
+          select: { imageUrl: true },
+        },
+      },
+    }).then((group) => group?.imageUrl ?? group?.products[0]?.imageUrl ?? null);
+
+  if (!source || !isHttpsUrl(source)) throw new StorefrontMediaError('not_found');
+  if (!isManagedBlobUrl(source)) return { kind: 'external', url: source };
+
+  try {
+    const access = new URL(source).hostname.includes('.private.') ? 'private' : 'public';
+    const value = await get(source, {
+      access,
+      ifNoneMatch: input.ifNoneMatch ?? undefined,
+      ...getStorefrontBlobAuth(),
+    });
+    if (!value) throw new StorefrontMediaError('not_found');
+    return { kind: 'blob', value };
+  } catch (error) {
+    if (error instanceof StorefrontMediaError) throw error;
+    console.error('[storefront-media] Blob read failed', describeBlobFailure(error));
+    throw new StorefrontMediaError('read_failed');
+  }
 }
