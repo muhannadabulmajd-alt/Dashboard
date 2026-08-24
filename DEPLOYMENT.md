@@ -87,6 +87,7 @@ Once you're in, you can **delete `ADMIN_PASSWORD`** from Vercel to turn the env-
 - Payment links use `POST /api/v1/links`; the unique Atlas order number is `referenceId`, IQD line items reconcile exactly to `total`, and Atlas stores the returned `data.url`.
 - Redirects are informational. Atlas confirms payment with `GET /api/v1/links/{referenceId}` before changing order finance.
 - Webhooks are verified against the exact raw request body using HMAC-SHA256 and `x-wayl-signature-256`, then reconciled against Wayl's authoritative link response. Duplicate event IDs are idempotent.
+- Checkout status reads require a checkout-scoped token issued only to the Store server. Atlas stores only its hash; the Store keeps the token in an encrypted HTTP-only cookie and never returns it to browser JavaScript.
 - Contract sources: [Wayl integration guide](https://wayl.io/docs) and [Wayl OpenAPI](https://api.thewayl.com/openapi.v1.json).
 
 ## Manual alternative (if you prefer the CLI)
