@@ -58,6 +58,19 @@ function isManagedBlobUrl(value: string | null): value is string {
   }
 }
 
+function describeBlobFailure(error: unknown): Record<string, string | number | undefined> {
+  if (!(error instanceof Error)) return { name: 'UnknownBlobError' };
+  const details = error as Error & { code?: string; status?: number; statusCode?: number };
+  return {
+    name: details.name,
+    code: details.code,
+    status: details.status ?? details.statusCode,
+    message: details.message
+      .replace(/(authorization|token|secret)(\s*[:=]\s*)\S+/gi, '$1$2[redacted]')
+      .slice(0, 300),
+  };
+}
+
 export async function replaceStorefrontImage(input: {
   target: StorefrontMediaTarget;
   targetId: string;
@@ -80,7 +93,8 @@ export async function replaceStorefrontImage(input: {
       input.file,
       { access: 'public', addRandomSuffix: true, ...blobAuth },
     );
-  } catch {
+  } catch (error) {
+    console.error('[storefront-media] Blob upload failed', describeBlobFailure(error));
     throw new StorefrontMediaError('upload_failed');
   }
 
