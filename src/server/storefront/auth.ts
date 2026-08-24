@@ -3,6 +3,7 @@ import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 
 export const STOREFRONT_TIMESTAMP_HEADER = 'x-atlas-timestamp';
 export const STOREFRONT_SIGNATURE_HEADER = 'x-atlas-signature';
+export const STOREFRONT_CHECKOUT_TOKEN_HEADER = 'x-storefront-checkout-token';
 export const STOREFRONT_SIGNATURE_TTL_SECONDS = 300;
 
 export function sha256Hex(value: string | Uint8Array): string {
@@ -38,6 +39,27 @@ export function signStorefrontRequest(input: {
 function safeEqualHex(left: string, right: string): boolean {
   if (!/^[a-f0-9]{64}$/i.test(left) || !/^[a-f0-9]{64}$/i.test(right)) return false;
   return timingSafeEqual(Buffer.from(left, 'hex'), Buffer.from(right, 'hex'));
+}
+
+export function deriveStorefrontCheckoutToken(input: {
+  checkoutId: string;
+  apiKey: string;
+}): string {
+  return createHmac('sha256', input.apiKey)
+    .update(`storefront-checkout:${input.checkoutId}`)
+    .digest('base64url');
+}
+
+export function storefrontCheckoutTokenHash(token: string): string {
+  return sha256Hex(token);
+}
+
+export function verifyStorefrontCheckoutToken(input: {
+  token?: string | null;
+  tokenHash: string;
+}): boolean {
+  if (!input.token) return false;
+  return safeEqualHex(storefrontCheckoutTokenHash(input.token), input.tokenHash);
 }
 
 export function verifyStorefrontSignature(input: {

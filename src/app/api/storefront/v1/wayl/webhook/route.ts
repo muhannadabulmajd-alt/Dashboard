@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
+import { randomUUID } from 'node:crypto';
 import { readStorefrontConfig, StorefrontConfigError } from '@/server/storefront/config';
+import { sha256Hex } from '@/server/storefront/auth';
 import { processWaylWebhook } from '@/server/storefront/webhook';
 import { verifyWaylWebhookSignature } from '@/server/storefront/wayl';
 
@@ -19,7 +21,15 @@ export async function POST(request: Request) {
   const rawBody = await request.text();
   const signature = request.headers.get('x-wayl-signature-256');
   if (!verifyWaylWebhookSignature(rawBody, signature, config.wayl.webhookSecret)) {
-    return NextResponse.json({ error: 'invalid_signature' }, { status: 401 });
+    const debugId = `wayl-webhook-${randomUUID().slice(0, 8)}`;
+    console.warn('[storefront-wayl-webhook] invalid signature', {
+      debugId,
+      bodyLength: Buffer.byteLength(rawBody),
+      bodySha256: sha256Hex(rawBody),
+      hasSignature: Boolean(signature),
+      signatureSha256: signature ? sha256Hex(signature) : null,
+    });
+    return NextResponse.json({ error: 'invalid_signature', debugId }, { status: 401 });
   }
   try {
     const result = await processWaylWebhook({

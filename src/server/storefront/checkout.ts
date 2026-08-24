@@ -1,13 +1,17 @@
 import 'server-only';
 
-import { randomBytes } from 'node:crypto';
-import type { Prisma, StorefrontCheckoutStatus } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
+import type { StorefrontCheckoutStatus } from '@prisma/client';
 import { prisma } from '@/server/db/client';
 import { normalizeIraqiPhone } from '@/lib/phone';
 import { createTrustedCommandContext } from '@/server/commands/actor-context';
 import { createOrderCommand } from '@/server/records/orders';
 import { quoteStorefrontOrder } from './catalog';
-import { sha256Hex } from './auth';
+import {
+  deriveStorefrontCheckoutToken,
+  storefrontCheckoutTokenHash,
+  verifyStorefrontCheckoutToken,
+} from './auth';
 import type { StorefrontConfig } from './config';
 import {
   storefrontCheckoutSchema,
@@ -15,6 +19,7 @@ import {
   validIdempotencyKey,
 } from './contracts';
 import { WaylClient, WaylClientError } from './wayl';
+import { reconcileWaylCheckout } from './webhook';
 
 export { storefrontCheckoutSchema, classifyWaylStatus, checkoutEventKey } from './contracts';
 export type { StorefrontCheckoutInput } from './contracts';
@@ -24,13 +29,15 @@ export class StorefrontCheckoutError extends Error {
     readonly code:
       | 'invalid_request'
       | 'invalid_idempotency_key'
+      | 'idempotency_conflict'
       | 'quote_changed'
       | 'customer_ambiguous'
       | 'integration_actor_missing'
       | 'order_failed'
       | 'payment_amount_too_low'
       | 'payment_link_failed'
-      | 'checkout_not_found',
+      | 'checkout_not_found'
+      | 'checkout_access_denied',
     readonly status: number = 400,
     readonly details?: Record<string, unknown>,
   ) {
@@ -234,18 +241,35 @@ export async function createStorefrontCheckout(
   }
 
   let checkout = await loadCheckout(idempotencyKey);
+  if (
+    checkout
+    && (
+      checkout.quoteHash !== quote.quoteHash
+      || checkout.paymentMode !== input.paymentMode
+      || checkout.subtotal !== quote.subtotal
+      || checkout.deliveryFee !== quote.deliveryFee
+      || checkout.total !== quote.total
+    )
+  ) {
+    throw new StorefrontCheckoutError('idempotency_conflict', 409);
+  }
   if (!checkout) {
     const [actor, customerExternalId] = await Promise.all([
       findIntegrationActor(),
       resolveCustomer(input.customer),
     ]);
     if (!actor) throw new StorefrontCheckoutError('integration_actor_missing', 503);
-    const publicToken = randomBytes(32).toString('base64url');
+    const checkoutId = randomUUID();
+    const publicToken = deriveStorefrontCheckoutToken({
+      checkoutId,
+      apiKey: options.config.apiKey,
+    });
     const result = await createOrderCommand(buildOrderForm(input, quote, customerExternalId), {
       actorContext: createTrustedCommandContext(actor),
       onCommitted: async (tx, order) => {
         await tx.storefrontCheckout.create({
           data: {
+            id: checkoutId,
             orderId: order.recordId,
             deliveryZoneId: quote.deliveryZone?.code
               ? (await tx.storefrontDeliveryZone.findUnique({
@@ -254,7 +278,7 @@ export async function createStorefrontCheckout(
                 }))?.id ?? null
               : null,
             idempotencyKey,
-            publicTokenHash: sha256Hex(publicToken),
+            publicTokenHash: storefrontCheckoutTokenHash(publicToken),
             paymentMode: input.paymentMode,
             status: input.paymentMode === 'COD' ? 'COD_PENDING' : 'CREATED',
             subtotal: quote.subtotal,
@@ -294,20 +318,48 @@ export async function createStorefrontCheckout(
   }
   if (!checkout) throw new StorefrontCheckoutError('order_failed', 500);
   checkout = await ensureWaylLink(checkout, quote, options.config, options.dashboardOrigin, input.locale);
-  return publicCheckout(checkout);
+  const accessToken = deriveStorefrontCheckoutToken({
+    checkoutId: checkout.id,
+    apiKey: options.config.apiKey,
+  });
+  if (!verifyStorefrontCheckoutToken({ token: accessToken, tokenHash: checkout.publicTokenHash })) {
+    checkout = await prisma.storefrontCheckout.update({
+      where: { id: checkout.id },
+      data: { publicTokenHash: storefrontCheckoutTokenHash(accessToken) },
+      include: { order: { select: { id: true, orderNumber: true, status: true } } },
+    });
+  }
+  return { ...publicCheckout(checkout), accessToken };
 }
 
-export async function getStorefrontCheckout(id: string) {
-  const checkout = await prisma.storefrontCheckout.findUnique({
+export async function getStorefrontCheckout(
+  id: string,
+  accessToken: string | null,
+  config: EnabledStorefrontConfig,
+) {
+  let checkout = await prisma.storefrontCheckout.findUnique({
     where: { id },
     include: { order: { select: { id: true, orderNumber: true, status: true } } },
   });
   if (!checkout) throw new StorefrontCheckoutError('checkout_not_found', 404);
+  if (!verifyStorefrontCheckoutToken({ token: accessToken, tokenHash: checkout.publicTokenHash })) {
+    throw new StorefrontCheckoutError('checkout_access_denied', 401);
+  }
+  if (
+    checkout.paymentMode === 'WAYL'
+    && checkout.waylReferenceId
+    && ['CREATED', 'PAYMENT_PENDING'].includes(checkout.status)
+  ) {
+    await reconcileWaylCheckout({
+      referenceId: checkout.waylReferenceId,
+      config,
+      source: 'storefront-return',
+    }).catch(() => undefined);
+    checkout = await prisma.storefrontCheckout.findUnique({
+      where: { id },
+      include: { order: { select: { id: true, orderNumber: true, status: true } } },
+    });
+    if (!checkout) throw new StorefrontCheckoutError('checkout_not_found', 404);
+  }
   return publicCheckout(checkout);
-}
-
-export function jsonObject(value: unknown): Prisma.InputJsonObject {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Prisma.InputJsonObject
-    : {};
 }
