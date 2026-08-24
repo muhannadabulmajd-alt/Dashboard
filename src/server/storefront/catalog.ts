@@ -3,6 +3,7 @@ import { prisma } from '@/server/db/client';
 import { effectivePrice } from '@/lib/metrics/pricing';
 import { sha256Hex } from './auth';
 import { storefrontQuoteSchema, type StorefrontQuoteInput } from './contracts';
+import { storefrontImageReference } from './media';
 
 export { storefrontQuoteSchema } from './contracts';
 export type { StorefrontQuoteInput } from './contracts';
@@ -97,6 +98,7 @@ async function loadPublishedProducts() {
   return products.map((product) => {
     const rawAvailable = inventory.get(product.id) ?? 0;
     const availableQuantity = product.trackInventory ? Math.max(0, Math.floor(rawAvailable)) : null;
+    const imageSource = product.imageUrl ?? product.group?.imageUrl ?? null;
     return {
       product,
       variation: {
@@ -104,7 +106,7 @@ async function loadPublishedProducts() {
         sku: product.sku,
         nameEn: product.nameEn,
         nameAr: product.nameAr,
-        imageUrl: product.imageUrl ?? product.group?.imageUrl ?? null,
+        imageUrl: storefrontImageReference(imageSource, 'products', product.storefrontSlug!),
         price: effectivePrice(product.prices, product.sellingPrice, now),
         currency: 'IQD' as const,
         sizeLabel: product.sizeLabel,
@@ -146,7 +148,9 @@ export async function getStorefrontCatalog() {
       nameEn: group?.nameEn ?? product.nameEn,
       nameAr: group?.nameAr ?? product.nameAr,
       description: group?.description ?? null,
-      imageUrl: group?.imageUrl ?? variation.imageUrl,
+      imageUrl: group
+        ? storefrontImageReference(group.imageUrl ?? product.imageUrl, 'groups', group.storefrontSlug!)
+        : variation.imageUrl,
       productLine: product.productLine,
       variations: [variation],
     });

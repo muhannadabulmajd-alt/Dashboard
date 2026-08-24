@@ -6,6 +6,7 @@ import { normalizeIraqiPhone } from '@/lib/phone';
 import { invoicePaymentSnapshot } from '@/lib/invoice';
 import { sha256Hex } from './auth';
 import { storefrontBearerToken, storefrontOrderLookupSchema } from './contracts';
+import { storefrontImageReference } from './media';
 
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -25,7 +26,15 @@ const orderInclude = {
     orderBy: { id: 'asc' as const },
     select: {
       sku: true, quantity: true, unitLabel: true, unitGrossPrice: true, lineDiscount: true, lineNet: true,
-      product: { select: { nameEn: true, nameAr: true, imageUrl: true, storefrontSlug: true } },
+      product: {
+        select: {
+          nameEn: true,
+          nameAr: true,
+          imageUrl: true,
+          storefrontSlug: true,
+          group: { select: { imageUrl: true } },
+        },
+      },
     },
   },
   storefrontCheckout: {
@@ -107,7 +116,13 @@ function publicOrder(
       total: line.lineNet,
       nameEn: line.product.nameEn,
       nameAr: line.product.nameAr,
-      imageUrl: line.product.imageUrl,
+      imageUrl: line.product.storefrontSlug
+        ? storefrontImageReference(
+          line.product.imageUrl ?? line.product.group?.imageUrl ?? null,
+          'products',
+          line.product.storefrontSlug,
+        )
+        : null,
       productSlug: line.product.storefrontSlug,
     })),
     checkout: order.storefrontCheckout ? {

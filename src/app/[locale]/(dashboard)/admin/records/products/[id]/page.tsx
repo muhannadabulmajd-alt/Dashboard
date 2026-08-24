@@ -105,7 +105,7 @@ export default async function ProductDetailPage({
           <div className="shrink-0 space-y-3">
             {p.imageUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={p.imageUrl} alt={name} className="h-32 w-32 rounded-[var(--radius)] border object-cover" />
+              <img src={`/api/storefront/media/product/${encodeURIComponent(p.id)}`} alt={name} className="h-32 w-32 rounded-[var(--radius)] border object-cover" />
             ) : null}
             <StorefrontMediaUpload target="product" targetId={p.id} locale={locale} />
           </div>
