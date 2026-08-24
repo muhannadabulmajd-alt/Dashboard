@@ -85,3 +85,5 @@ pnpm dev                      # http://localhost:3000  (redirects to /ar)
 
 - Vendor‑specific connectors (Shopify/Odoo/POS/courier) behind the existing `resolveConnectorSource` interface — the credentialed HTTP‑CSV connector is the working reference.
 - Per‑page filter relevance (hide filters that don't apply to a given page) and a CI workflow running typecheck + tests on every push.
+
+Staging deployment initialized.
