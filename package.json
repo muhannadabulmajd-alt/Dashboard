@@ -29,6 +29,8 @@
     "@auth/prisma-adapter": "^2.11.2",
     "@prisma/client": "^6.19.3",
     "@react-pdf/renderer": "^4.5.1",
+    "@simplewebauthn/server": "^13.3.2",
+    "@vercel/blob": "^2.8.0",
     "@vercel/queue": "^0.1.7",
     "bcryptjs": "^3.0.3",
     "clsx": "^2.1.1",

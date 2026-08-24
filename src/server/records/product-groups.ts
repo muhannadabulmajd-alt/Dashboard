@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { prisma } from '@/server/db/client';
 import { PRODUCT_LINES } from '@/lib/enums';
 import { requireCap, audit, reqField, optField, type ActionState } from './shared';
+import { normalizeStorefrontSlug } from '@/server/storefront/slug';
 
 const LIST = '/[locale]/(dashboard)/admin/records/product-groups';
 const CAP = 'manage:products' as const;
@@ -17,6 +18,8 @@ const schema = z.object({
   productType: z.string().optional(),
   description: z.string().optional(),
   imageUrl: z.string().url().optional().or(z.literal('')),
+  storefrontSlug: z.string().max(80).optional(),
+  storefrontPublished: z.boolean(),
 });
 
 function parse(fd: FormData) {
@@ -27,6 +30,8 @@ function parse(fd: FormData) {
     productType: optField(fd, 'productType'),
     description: optField(fd, 'description'),
     imageUrl: optField(fd, 'imageUrl'),
+    storefrontSlug: optField(fd, 'storefrontSlug'),
+    storefrontPublished: fd.get('storefrontPublished') != null,
   });
 }
 
@@ -57,7 +62,13 @@ export async function createProductGroup(_prev: ActionState, fd: FormData): Prom
   for (let attempt = 0; ; attempt++) {
     const code = await nextGroupCode();
     try {
-      created = await prisma.productGroup.create({ data: { ...clean(r.data), code } });
+      created = await prisma.productGroup.create({
+        data: {
+          ...clean(r.data),
+          storefrontSlug: normalizeStorefrontSlug(r.data.storefrontSlug, code),
+          code,
+        },
+      });
       break;
     } catch (e) {
       if (isUniqueViolation(e) && attempt < 5) continue; // race: regenerate
@@ -76,7 +87,15 @@ export async function updateProductGroup(id: string, _prev: ActionState, fd: For
   if (!r.success) return { error: 'invalid' };
   const locale = reqField(fd, 'locale') || 'ar';
   // `code` is immutable (BRD §10) — never updated.
-  await prisma.productGroup.update({ where: { id }, data: clean(r.data) });
+  const current = await prisma.productGroup.findUnique({ where: { id }, select: { code: true } });
+  if (!current) return { error: 'invalid' };
+  await prisma.productGroup.update({
+    where: { id },
+    data: {
+      ...clean(r.data),
+      storefrontSlug: normalizeStorefrontSlug(r.data.storefrontSlug, current.code),
+    },
+  });
   await audit(user.id, 'UPDATE', 'ProductGroup', { id });
   revalidatePath(LIST, 'page');
   redirect(`/${locale}/admin/records/product-groups/${id}`);

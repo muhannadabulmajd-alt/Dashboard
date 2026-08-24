@@ -16,6 +16,7 @@ import { RecordTabs } from '@/components/records/RecordTabs';
 import { archiveProductGroup, deleteProductGroup } from '@/server/records/product-groups';
 import { Link } from '@/i18n/navigation';
 import { getOrderStatusRoleMap } from '@/server/lists/resolver';
+import { StorefrontMediaUpload } from '@/components/records/StorefrontMediaUpload';
 
 type Tab = 'overview' | 'variations' | 'reports' | 'activity';
 
@@ -119,10 +120,13 @@ export default async function ProductGroupDetailPage({
             <KpiCard label={t('f.variations')} value={formatNumber(g.products.length, locale)} locale={locale} />
           </section>
           <div className="flex flex-col gap-4 sm:flex-row">
-            {g.imageUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={g.imageUrl} alt={name} className="h-32 w-32 shrink-0 rounded-[var(--radius)] border object-cover" />
-            ) : null}
+            <div className="shrink-0 space-y-3">
+              {g.imageUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={g.imageUrl} alt={name} className="h-32 w-32 rounded-[var(--radius)] border object-cover" />
+              ) : null}
+              <StorefrontMediaUpload target="productGroup" targetId={g.id} locale={locale} />
+            </div>
             <DetailGrid
               className="flex-1"
               items={[

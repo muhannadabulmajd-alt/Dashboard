@@ -747,6 +747,7 @@
       "inventory": "Inventory",
       "batches": "Roast batches",
       "branches": "Branches & Franchises",
+      "storefront": "Online store",
       "systemLists": "System lists"
     },
     "entityHints": {
@@ -758,6 +759,7 @@
       "inventory": "Stock items and movements",
       "batches": "Roasting log and green-coffee usage",
       "branches": "HQ, company branches and franchise accounts",
+      "storefront": "Published products, images and delivery zones",
       "systemLists": "Reference: channels, grinds, categories…"
     },
     "mainProducts": "Main products",
@@ -933,6 +935,9 @@
       "variationType": "Describe what makes this variation different, such as size, grind, roast or packaging.",
       "sellingPrice": "Used for new orders by default. Price history keeps old orders unchanged.",
       "aliases": "Used by order search and the assistant. Separate names with commas.",
+      "storefrontSlug": "A short web address. Leave blank to generate it from the permanent code.",
+      "storefrontPublished": "Only published active products appear in the online store.",
+      "allowBackorder": "Allow checkout when stock is unavailable. The order stays visibly pending.",
       "inventoryUnit": "Use the unit you count day to day, such as g, kg, bag, box or unit.",
       "linkedVariation": "When linked, completed orders can deduct this stock automatically.",
       "reorderPoint": "Low-stock alerts trigger when current stock falls below this level.",
@@ -1050,8 +1055,33 @@
       "address1": "Address", "street": "Street / landmark", "notes": "Notes", "source": "Source",
       "code": "Code", "description": "Description", "variations": "Variations", "variation": "Variation", "group": "Product group", "mainProduct": "Main product",
       "productType": "Product type", "productTypeHint": "e.g. Coffee, Gift, Merch", "imageUrl": "Image URL",
-      "aliases": "Search aliases", "aliasesHint": "Arabic, English, or operational names separated by commas"
+      "aliases": "Search aliases", "aliasesHint": "Arabic, English, or operational names separated by commas",
+      "storefrontSlug": "Store web address", "storefrontPublished": "Show in online store", "allowBackorder": "Allow backorders"
     }
+  },
+  "storefrontAdmin": {
+    "title": "Online store settings",
+    "subtitle": "Control published products and the delivery choices used at checkout.",
+    "back": "Back to data management",
+    "zones": "Delivery zones",
+    "addZone": "Add delivery zone",
+    "addZoneHint": "Do not guess delivery prices. Add only the zones and fees Laheeb currently offers.",
+    "code": "Permanent code",
+    "nameEn": "Name (EN)",
+    "nameAr": "Name (AR)",
+    "governorate": "Governorate code (optional)",
+    "deliveryFee": "Delivery fee (IQD)",
+    "minimumOrder": "Minimum order (IQD)",
+    "freeDeliveryAt": "Free delivery from (IQD)",
+    "sortOrder": "Display order",
+    "save": "Save",
+    "add": "Add zone",
+    "archive": "Archive",
+    "restore": "Restore",
+    "active": "Active",
+    "inactive": "Archived",
+    "empty": "No delivery zones are configured. Pickup checkout can still be used.",
+    "result": { "saved": "Store settings saved.", "invalid": "Review the zone fields and try again.", "exists": "That zone code already exists." }
   },
   "common": {
     "signOut": "Sign out",

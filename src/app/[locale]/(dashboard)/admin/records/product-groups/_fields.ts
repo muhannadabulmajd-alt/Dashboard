@@ -25,5 +25,7 @@ export function productGroupFields(
     { name: 'productType', label: t('f.productType'), type: 'text', placeholder: t('f.productTypeHint') },
     { name: 'description', label: t('f.description'), type: 'text' },
     { name: 'imageUrl', label: t('f.imageUrl'), type: 'text', placeholder: 'https://…' },
+    { name: 'storefrontSlug', label: t('f.storefrontSlug'), type: 'text', placeholder: 'espresso-spring', hint: t('h.storefrontSlug') },
+    { name: 'storefrontPublished', label: t('f.storefrontPublished'), type: 'checkbox', hint: t('h.storefrontPublished') },
   ];
 }

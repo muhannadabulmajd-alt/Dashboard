@@ -27,7 +27,11 @@ export default async function EditProductGroupPage({
     nameEn: g.nameEn,
     nameAr: g.nameAr,
     productLine: g.productLine,
+    productType: g.productType ?? '',
     description: g.description ?? '',
+    imageUrl: g.imageUrl ?? '',
+    storefrontSlug: g.storefrontSlug ?? '',
+    storefrontPublished: g.storefrontPublished,
   };
   const errors = { invalid: t('err.invalid'), exists: t('err.exists'), forbidden: t('err.forbidden') };
 

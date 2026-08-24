@@ -40,6 +40,14 @@ Target stack: **Vercel** (Next.js host) + **Neon** (free serverless PostgreSQL).
 | `AI_ASSISTANT_MODEL` | `gpt-5.4-mini-2026-03-17` |
 | `AI_ASSISTANT_MAX_REQUESTS_PER_MINUTE` | `10` |
 | `AI_ASSISTANT_HISTORY_RETENTION_DAYS` | `90` |
+| `STOREFRONT_ENABLED` | `true` to serve the private Store API; `false` is the immediate rollback switch |
+| `STOREFRONT_API_KEY` | a different 32+ character secret for Preview and Production |
+| `STOREFRONT_ORIGIN` | exact Store HTTPS origin, with no path or trailing slash |
+| `WAYL_API_TOKEN` | Wayl key for the matching environment; keep server-only |
+| `WAYL_API_BASE_URL` | Preview: `https://api.thewayl-staging.com`; Production: `https://api.thewayl.com` |
+| `WAYL_ENV` | Preview: `test`; Production: `live` |
+| `WAYL_WEBHOOK_SECRET` | a different webhook secret for Preview and Production |
+| `BLOB_READ_WRITE_TOKEN` | managed automatically by the Vercel Blob integration; Dashboard only |
 
 ## 4. That's it — no terminal
 
@@ -70,6 +78,7 @@ Once you're in, you can **delete `ADMIN_PASSWORD`** from Vercel to turn the env-
 - **Emailed reports:** set `RESEND_API_KEY` + a verified `REPORT_FROM` domain; otherwise reports generate but only log.
 - **Connectors:** configure the credentialed HTTP-CSV connector at **/admin/connectors**; tokens are encrypted with `ENCRYPTION_KEY`.
 - **Atlas AI Assistant:** add the five AI variables above separately to Vercel Preview and Production. Chats remain private in Atlas, expire after the configured retention period, and OpenAI requests use `store: false`.
+- **Storefront:** scope Preview values to the `staging` branch and keep its API key, Store origin, Wayl staging key, and webhook secret separate from Production. Wayl and Blob credentials belong only to Dashboard. Redeploy Dashboard before Store whenever build-time variables change.
 
 ## Manual alternative (if you prefer the CLI)
 
