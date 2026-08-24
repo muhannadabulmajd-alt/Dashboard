@@ -1028,7 +1028,7 @@
       }
     },
     "f": {
-      "sku": "الرمز", "retailBarcode": "باركود البيع EAN-13", "name": "الاسم", "nameEn": "الاسم (EN)", "nameAr": "الاسم (AR)", "productLine": "الفئة", "size": "الحجم", "grind": "الطحن",
+      "sku": "الرمز", "retailBarcode": "باركود البيع EAN-13", "name": "الاسم", "nameEn": "الاسم (EN)", "nameAr": "الاسم (AR)", "productLine": "الفئة", "variationType": "نوع التنويع", "size": "الحجم", "grind": "الطحن",
       "roastLevel": "التحميص", "origin": "المنشأ", "price": "السعر", "cost": "التكلفة", "status": "الحالة",
       "active": "نشط", "inactive": "مؤرشف",
       "externalId": "المعرّف", "phone": "الهاتف", "email": "البريد", "governorate": "المحافظة",

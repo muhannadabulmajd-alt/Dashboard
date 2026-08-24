@@ -13,6 +13,12 @@ export const STOREFRONT_IMAGE_TYPES = [
 
 export type StorefrontMediaTarget = 'product' | 'productGroup';
 
+export function getStorefrontBlobAuth(): { token: string } {
+  const token = process.env.BLOB_READ_WRITE_TOKEN?.trim();
+  if (!token) throw new StorefrontMediaError('blob_not_configured');
+  return { token };
+}
+
 export class StorefrontMediaError extends Error {
   constructor(
     readonly code:
@@ -58,9 +64,7 @@ export async function replaceStorefrontImage(input: {
   file: File;
   userId: string;
 }): Promise<{ url: string }> {
-  if (!process.env.BLOB_READ_WRITE_TOKEN?.trim()) {
-    throw new StorefrontMediaError('blob_not_configured');
-  }
+  const blobAuth = getStorefrontBlobAuth();
   validateStorefrontImage(input.file);
   if (!input.targetId.trim()) throw new StorefrontMediaError('invalid_target');
 
@@ -74,7 +78,7 @@ export async function replaceStorefrontImage(input: {
     blob = await put(
       `storefront/${input.target}/${input.targetId}/primary.${extensionFor(input.file.type)}`,
       input.file,
-      { access: 'public', addRandomSuffix: true },
+      { access: 'public', addRandomSuffix: true, ...blobAuth },
     );
   } catch {
     throw new StorefrontMediaError('upload_failed');
@@ -98,12 +102,12 @@ export async function replaceStorefrontImage(input: {
       });
     });
   } catch (error) {
-    await del(blob.url).catch(() => undefined);
+    await del(blob.url, blobAuth).catch(() => undefined);
     throw error;
   }
 
   if (isManagedBlobUrl(current.imageUrl)) {
-    await del(current.imageUrl).catch(() => undefined);
+    await del(current.imageUrl, blobAuth).catch(() => undefined);
   }
   return { url: blob.url };
 }

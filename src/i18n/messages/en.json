@@ -1028,7 +1028,7 @@
       }
     },
     "f": {
-      "sku": "SKU", "retailBarcode": "Retail EAN-13", "name": "Name", "nameEn": "Name (EN)", "nameAr": "Name (AR)", "productLine": "Line", "size": "Size", "grind": "Grind",
+      "sku": "SKU", "retailBarcode": "Retail EAN-13", "name": "Name", "nameEn": "Name (EN)", "nameAr": "Name (AR)", "productLine": "Line", "variationType": "Variation type", "size": "Size", "grind": "Grind",
       "roastLevel": "Roast", "origin": "Origin", "price": "Price", "cost": "Cost", "status": "Status",
       "active": "Active", "inactive": "Archived",
       "externalId": "ID", "phone": "Phone", "email": "Email", "governorate": "Governorate",
