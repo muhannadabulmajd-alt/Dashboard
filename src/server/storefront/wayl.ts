@@ -3,6 +3,7 @@ import 'server-only';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import type { StorefrontConfig } from './config';
+import { WAYL_PAYMENT_LINK_EXPIRY } from './urls';
 
 const WAYL_TIMEOUT_MS = 8_000;
 
@@ -144,7 +145,7 @@ export class WaylClient {
       webhookUrl: validated.webhookUrl,
       webhookSecret: this.config.webhookSecret,
       redirectionUrl: validated.redirectionUrl,
-      linkExpiresIn: validated.expiresIn ?? '1h',
+      linkExpiresIn: validated.expiresIn ?? WAYL_PAYMENT_LINK_EXPIRY,
     };
     try {
       const payload = await this.request('/api/v1/links', {

@@ -20,6 +20,11 @@ import {
 } from './contracts';
 import { WaylClient, WaylClientError } from './wayl';
 import { reconcileWaylCheckout } from './webhook';
+import {
+  storefrontCheckoutReturnUrl,
+  WAYL_PAYMENT_LINK_EXPIRY,
+  WAYL_PAYMENT_LINK_EXPIRY_MS,
+} from './urls';
 
 export { storefrontCheckoutSchema, classifyWaylStatus, checkoutEventKey } from './contracts';
 export type { StorefrontCheckoutInput } from './contracts';
@@ -187,8 +192,12 @@ async function ensureWaylLink(
       ],
       customParameter: checkout.id,
       webhookUrl: `${dashboardOrigin}/api/storefront/v1/wayl/webhook`,
-      redirectionUrl: `${config.origin}/${locale}/checkout/return?checkout=${encodeURIComponent(checkout.id)}`,
-      expiresIn: '1h',
+      redirectionUrl: storefrontCheckoutReturnUrl({
+        origin: config.origin,
+        locale,
+        checkoutId: checkout.id,
+      }),
+      expiresIn: WAYL_PAYMENT_LINK_EXPIRY,
     });
     return prisma.storefrontCheckout.update({
       where: { id: checkout.id },
@@ -199,7 +208,7 @@ async function ensureWaylLink(
         waylCode: link.code ?? null,
         waylUrl: link.url,
         waylStatus: link.status,
-        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+        expiresAt: new Date(Date.now() + WAYL_PAYMENT_LINK_EXPIRY_MS),
         reviewReason: null,
       },
       include: { order: { select: { id: true, orderNumber: true, status: true } } },
