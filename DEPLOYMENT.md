@@ -44,7 +44,7 @@ Target stack: **Vercel** (Next.js host) + **Neon** (free serverless PostgreSQL).
 | `STOREFRONT_API_KEY` | a different 32+ character secret for Preview and Production |
 | `STOREFRONT_ORIGIN` | exact Store HTTPS origin, with no path or trailing slash |
 | `WAYL_API_TOKEN` | Wayl key for the matching environment; keep server-only |
-| `WAYL_API_BASE_URL` | Preview: `https://api.thewayl-staging.com`; Production: `https://api.thewayl.com` |
+| `WAYL_API_BASE_URL` | `https://api.thewayl.com` in Preview and Production, as confirmed by Wayl support |
 | `WAYL_ENV` | Preview: `test`; Production: `live` |
 | `WAYL_WEBHOOK_SECRET` | a different webhook secret for Preview and Production |
 | `BLOB_READ_WRITE_TOKEN` | managed automatically by the Vercel Blob integration; Dashboard only |
@@ -78,7 +78,16 @@ Once you're in, you can **delete `ADMIN_PASSWORD`** from Vercel to turn the env-
 - **Emailed reports:** set `RESEND_API_KEY` + a verified `REPORT_FROM` domain; otherwise reports generate but only log.
 - **Connectors:** configure the credentialed HTTP-CSV connector at **/admin/connectors**; tokens are encrypted with `ENCRYPTION_KEY`.
 - **Atlas AI Assistant:** add the five AI variables above separately to Vercel Preview and Production. Chats remain private in Atlas, expire after the configured retention period, and OpenAI requests use `store: false`.
-- **Storefront:** scope Preview values to the `staging` branch and keep its API key, Store origin, Wayl staging key, and webhook secret separate from Production. Wayl and Blob credentials belong only to Dashboard. Redeploy Dashboard before Store whenever build-time variables change.
+- **Storefront:** scope Preview values to the `staging` branch and keep its API key, Store origin, Wayl key, and webhook secret separate from Production. Both environments use Wayl's `https://api.thewayl.com` host, while `WAYL_ENV=test` keeps Preview test-mode requests distinct from Production's `WAYL_ENV=live`. Wayl and Blob credentials belong only to Dashboard. Redeploy Dashboard before Store whenever build-time variables change.
+
+### Wayl contract notes
+
+- Wayl support confirmed that Preview and Production both call `https://api.thewayl.com`; isolation is provided by separate merchant keys plus the request body's `env` value (`test` or `live`). Do not restore the deprecated Preview hostname even though it is still listed in the current OpenAPI server array.
+- Atlas sends `X-WAYL-AUTHENTICATION` only from server code. The Store and browser never receive this header or token.
+- Payment links use `POST /api/v1/links`; the unique Atlas order number is `referenceId`, IQD line items reconcile exactly to `total`, and Atlas stores the returned `data.url`.
+- Redirects are informational. Atlas confirms payment with `GET /api/v1/links/{referenceId}` before changing order finance.
+- Webhooks are verified against the exact raw request body using HMAC-SHA256 and `x-wayl-signature-256`, then reconciled against Wayl's authoritative link response. Duplicate event IDs are idempotent.
+- Contract sources: [Wayl integration guide](https://wayl.io/docs) and [Wayl OpenAPI](https://api.thewayl.com/openapi.v1.json).
 
 ## Manual alternative (if you prefer the CLI)
 

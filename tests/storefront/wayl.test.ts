@@ -1,10 +1,15 @@
 import { createHmac } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
-import { WaylClient, WaylClientError, verifyWaylWebhookSignature } from '@/server/storefront/wayl';
+import {
+  createWaylLinkInputSchema,
+  WaylClient,
+  WaylClientError,
+  verifyWaylWebhookSignature,
+} from '@/server/storefront/wayl';
 
 const config = {
   token: 'wayl-test-token',
-  baseUrl: 'https://api.thewayl-staging.com' as const,
+  baseUrl: 'https://api.thewayl.com' as const,
   environment: 'test' as const,
   webhookSecret: 'wayl-webhook-secret',
 };
@@ -22,7 +27,7 @@ const link = {
 };
 
 describe('Wayl client', () => {
-  it('uses the configured staging host and authentication header', async () => {
+  it('uses the shared API host with the test environment and authentication header', async () => {
     const fetchImpl = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(
       async () => new Response(JSON.stringify(link), { status: 201 }),
     );
@@ -36,9 +41,20 @@ describe('Wayl client', () => {
     });
     expect(result.total).toBe(10_000);
     const [url, request] = fetchImpl.mock.calls[0];
-    expect(url).toBe('https://api.thewayl-staging.com/api/v1/links');
+    expect(url).toBe('https://api.thewayl.com/api/v1/links');
     expect((request?.headers as Record<string, string>)['X-WAYL-AUTHENTICATION']).toBe(config.token);
-    expect(JSON.parse(String(request?.body))).toMatchObject({ env: 'test', referenceId: 'LHB-TEST-1' });
+    expect(JSON.parse(String(request?.body))).toEqual({
+      env: 'test',
+      referenceId: 'LHB-TEST-1',
+      total: 10_000,
+      currency: 'IQD',
+      customParameter: '',
+      lineItem: [{ label: 'Basket value', amount: 10_000, type: 'increase' }],
+      webhookUrl: 'https://dashboard.example.test/api/storefront/v1/wayl/webhook',
+      webhookSecret: config.webhookSecret,
+      redirectionUrl: 'https://store.example.test/checkout/return',
+      linkExpiresIn: '1h',
+    });
   });
 
   it('recovers an uncertain create by retrieving the same reference', async () => {
@@ -57,7 +73,7 @@ describe('Wayl client', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
-  it('does not recover a rejected request through production', async () => {
+  it('does not retry an explicitly rejected request', async () => {
     const fetchImpl = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(
       async () => new Response('{}', { status: 401 }),
     );
@@ -70,6 +86,30 @@ describe('Wayl client', () => {
       redirectionUrl: 'https://store.example.test/checkout/return',
     })).rejects.toMatchObject({ code: 'http', status: 401 } satisfies Partial<WaylClientError>);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects malformed link requests before contacting Wayl', async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    const client = new WaylClient(config, fetchImpl);
+    await expect(client.createPaymentLink({
+      referenceId: 'LHB-TEST-1',
+      total: 10_000,
+      lineItems: [{ label: 'Basket value', amount: 9_999, type: 'increase' }],
+      webhookUrl: 'https://dashboard.example.test/api/storefront/v1/wayl/webhook',
+      redirectionUrl: 'https://store.example.test/checkout/return',
+    })).rejects.toMatchObject({ code: 'invalid_request' } satisfies Partial<WaylClientError>);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('enforces the documented total, URL, expiry, and line-item limits', () => {
+    expect(createWaylLinkInputSchema.safeParse({
+      referenceId: 'LHB-TEST-1',
+      total: 999,
+      lineItems: [{ label: 'ab', amount: 999, type: 'increase' }],
+      webhookUrl: 'http://dashboard.example.test/webhook',
+      redirectionUrl: 'https://store.example.test/return',
+      expiresIn: '31d',
+    }).success).toBe(false);
   });
 });
 

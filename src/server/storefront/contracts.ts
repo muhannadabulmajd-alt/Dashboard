@@ -75,8 +75,9 @@ export function classifyWaylStatus(value: string): 'PAID' | 'PENDING' | 'FAILED'
   }
 }
 
-export function checkoutEventKey(rawBody: string): string {
-  return createHash('sha256').update(rawBody).digest('hex');
+export function checkoutEventKey(rawBody: string, eventId?: string | null): string {
+  const stableSource = eventId?.trim() ? `wayl-event:${eventId.trim()}` : rawBody;
+  return createHash('sha256').update(stableSource).digest('hex');
 }
 
 export function waylWebhookEventDisposition(status: string | null): 'retry' | 'duplicate' | 'new' {
@@ -100,5 +101,9 @@ export function waylWebhookReference(payload: Record<string, unknown>): string |
 }
 
 export function waylWebhookStatus(payload: Record<string, unknown>): string | null {
-  return nestedString(payload, 'status');
+  return nestedString(payload, 'paymentStatus') ?? nestedString(payload, 'status');
+}
+
+export function waylWebhookEventId(payload: Record<string, unknown>): string | null {
+  return nestedString(payload, 'id');
 }
