@@ -164,6 +164,69 @@ describe('AI Responses API orchestration', () => {
     expect(onEvent).toHaveBeenCalledWith(actionPreview);
   });
 
+  it('returns a structured Atlas read result without consuming another tool round', async () => {
+    const card: AiStreamEvent = {
+      type: 'result_card',
+      card: {
+        title: 'Customers who bought Drip bag box',
+        answer: '59 linked customers bought this item.',
+        generatedAt: '2026-08-24T13:30:00.000Z',
+        rows: [{
+          id: 'customer_1',
+          title: 'Customer One',
+          subtitle: '+9647700000000',
+          href: '/admin/records/customers/customer_1',
+        }],
+        href: '/customers/product-buyers?product=LHB-DRP-BOX10-15G-DB-M',
+      },
+    };
+    const toolResponse = responseStream([], {
+      id: 'resp_product_buyers',
+      status: 'completed',
+      output: [{
+        type: 'function_call',
+        id: 'fc_product_buyers',
+        call_id: 'call_product_buyers',
+        name: 'product_buyers',
+        arguments: JSON.stringify({
+          productQuery: 'LHB-DRP-BOX10-15G-DB-M',
+          range: { preset: 'all', from: null, to: null },
+          limit: 50,
+        }),
+        status: 'completed',
+      }],
+      usage: { input_tokens: 40, output_tokens: 8 },
+      error: null,
+    });
+    const stream = vi.fn(() => toolResponse);
+    const executeTool = vi.fn().mockResolvedValue({
+      modelOutput: { status: 'ok', buyers: 59 },
+      events: [card],
+    });
+    const onEvent = vi.fn();
+
+    const result = await runAssistant({
+      ...runnerInput(onEvent),
+      messages: [{
+        role: 'user',
+        content: 'List the names and phones of customers who bought LHB-DRP-BOX10-15G-DB-M',
+      }],
+    }, {
+      client: { responses: { stream } } as unknown as OpenAI,
+      executeTool,
+    });
+
+    expect(stream).toHaveBeenCalledTimes(1);
+    expect(executeTool).toHaveBeenCalledWith(
+      'product_buyers',
+      expect.objectContaining({ productQuery: 'LHB-DRP-BOX10-15G-DB-M' }),
+      expect.any(Object),
+    );
+    expect(result.content).toBe('');
+    expect(result.events).toEqual([card]);
+    expect(onEvent).toHaveBeenCalledWith(card);
+  });
+
   it('fails closed when the model reports an incomplete response', async () => {
     const stream = vi.fn(() => responseStream([], {
       id: 'resp_incomplete',

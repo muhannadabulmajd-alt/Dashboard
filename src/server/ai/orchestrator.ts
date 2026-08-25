@@ -11,6 +11,7 @@ import { executeAssistantTool, type ToolExecution } from './tools';
 type ResponseInput = OpenAITypes.Responses.ResponseInput;
 type ResponseInputItem = OpenAITypes.Responses.ResponseInputItem;
 type ResponseFunctionToolCall = OpenAITypes.Responses.ResponseFunctionToolCall;
+type TerminalReadEvent = Extract<AiStreamEvent, { type: 'result_card' | 'clarification' }>;
 
 export type AssistantRunResult = {
   content: string;
@@ -92,6 +93,12 @@ function parseArguments(call: ResponseFunctionToolCall): unknown {
   } catch {
     throw new Error('ai_tool_arguments_invalid');
   }
+}
+
+function terminalReadEvent(events: AiStreamEvent[]): TerminalReadEvent | undefined {
+  return events.find((event): event is TerminalReadEvent => (
+    event.type === 'result_card' || event.type === 'clarification'
+  ));
 }
 
 export async function runAssistant(
@@ -203,6 +210,21 @@ export async function runAssistant(
           emittedEvents.push(event);
           await input.onEvent(event);
         }
+        // Result cards and clarification choices are complete Atlas answers.
+        // Returning immediately avoids asking the model to rediscover data it
+        // already received and prevents repeated tool calls from exhausting the
+        // bounded tool-round budget.
+        if (terminalReadEvent(execution.events)) {
+          return {
+            content: '',
+            events: emittedEvents,
+            model: config.model,
+            requestId,
+            inputTokens,
+            outputTokens,
+            latencyMs: Date.now() - startedAt,
+          };
+        }
         toolOutputs.push({
           type: 'function_call_output',
           call_id: call.call_id,
@@ -231,6 +253,23 @@ export async function runAssistant(
         ...responseOutputForReplay(response.output),
         ...toolOutputs,
       ];
+    }
+
+    const actionPreviewReady = emittedEvents.some((event) => event.type === 'action_preview');
+    if (actionPreviewReady) {
+      const content = input.locale === 'ar'
+        ? 'المعاينة جاهزة. راجع التفاصيل ثم استخدم زر التأكيد أو الإلغاء.'
+        : 'The preview is ready. Review the details, then use Confirm or Cancel.';
+      await input.onEvent({ type: 'text_delta', delta: content });
+      return {
+        content,
+        events: emittedEvents,
+        model: config.model,
+        requestId,
+        inputTokens,
+        outputTokens,
+        latencyMs: Date.now() - startedAt,
+      };
     }
 
     throw new Error('ai_tool_round_limit');
