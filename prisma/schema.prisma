@@ -362,40 +362,40 @@ enum AiNotificationStatus {
 // ---------------------------------------------------------------------------
 
 model User {
-  id             String    @id @default(cuid())
-  email          String    @unique
-  name           String
-  hashedPassword String
-  role           Role      @default(VIEWER)
-  isActive       Boolean   @default(true)
-  branchId       String?
+  id                      String    @id @default(cuid())
+  email                   String    @unique
+  name                    String
+  hashedPassword          String
+  role                    Role      @default(VIEWER)
+  isActive                Boolean   @default(true)
+  branchId                String?
   defaultFinanceAccountId String?
-  createdById    String?
-  lastLoginAt    DateTime?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  createdById             String?
+  lastLoginAt             DateTime?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
 
-  branch              Branch?              @relation(fields: [branchId], references: [id])
-  defaultFinanceAccount FinanceAccount?     @relation("UserDefaultFinanceAccount", fields: [defaultFinanceAccountId], references: [id], onDelete: SetNull)
-  createdBy           User?                @relation("UserCreatedBy", fields: [createdById], references: [id])
-  createdUsers        User[]               @relation("UserCreatedBy")
-  operatedBatches     RoastBatch[]         @relation("BatchOperator")
-  createdOrders       Order[]              @relation("OrderCreatedBy")
-  dashboards          Dashboard[]          @relation("DashboardOwner")
-  dashboardShares     DashboardShare[]
-  auditLogs           AuditLog[]
-  providerSettlements ProviderSettlement[]
-  aiConversations     AiConversation[]
-  aiPendingActions    AiPendingAction[]
-  aiRequestLogs       AiRequestLog[]
-  aiRateLimitBuckets  AiRateLimitBucket[]
-  aiExecutionReceipts AiExecutionReceipt[]
-  aiDocuments         AiDocument[]
-  aiAttachments       AiAttachment[]
-  aiAutomationPrefs   AiAutomationPreference[]
-  aiNotifications     AiNotificationLog[]
-  telegramIdentity    TelegramIdentity?    @relation("TelegramIdentityUser")
-  linkedTelegramUsers TelegramIdentity[]   @relation("TelegramIdentityLinkedBy")
+  branch                Branch?                  @relation(fields: [branchId], references: [id])
+  defaultFinanceAccount FinanceAccount?          @relation("UserDefaultFinanceAccount", fields: [defaultFinanceAccountId], references: [id], onDelete: SetNull)
+  createdBy             User?                    @relation("UserCreatedBy", fields: [createdById], references: [id])
+  createdUsers          User[]                   @relation("UserCreatedBy")
+  operatedBatches       RoastBatch[]             @relation("BatchOperator")
+  createdOrders         Order[]                  @relation("OrderCreatedBy")
+  dashboards            Dashboard[]              @relation("DashboardOwner")
+  dashboardShares       DashboardShare[]
+  auditLogs             AuditLog[]
+  providerSettlements   ProviderSettlement[]
+  aiConversations       AiConversation[]
+  aiPendingActions      AiPendingAction[]
+  aiRequestLogs         AiRequestLog[]
+  aiRateLimitBuckets    AiRateLimitBucket[]
+  aiExecutionReceipts   AiExecutionReceipt[]
+  aiDocuments           AiDocument[]
+  aiAttachments         AiAttachment[]
+  aiAutomationPrefs     AiAutomationPreference[]
+  aiNotifications       AiNotificationLog[]
+  telegramIdentity      TelegramIdentity?        @relation("TelegramIdentityUser")
+  linkedTelegramUsers   TelegramIdentity[]       @relation("TelegramIdentityLinkedBy")
 
   @@index([role])
   @@index([branchId])
@@ -1050,13 +1050,13 @@ model AiConversation {
   createdAt        DateTime              @default(now())
   updatedAt        DateTime              @updatedAt
 
-  user           User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  messages       AiMessage[]
-  pendingActions AiPendingAction[]
-  requestLogs    AiRequestLog[]
+  user              User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages          AiMessage[]
+  pendingActions    AiPendingAction[]
+  requestLogs       AiRequestLog[]
   executionReceipts AiExecutionReceipt[]
-  documents       AiDocument[]
-  attachments     AiAttachment[]
+  documents         AiDocument[]
+  attachments       AiAttachment[]
 
   @@unique([id, userId])
   @@index([userId, lastMessageAt])
@@ -1087,34 +1087,34 @@ model AiMessage {
 }
 
 model AiPendingAction {
-  id               String                @id @default(cuid())
-  conversationId   String
-  userId           String
-  sourceMessageId  String?
-  type             AiPendingActionType
-  risk             AiPendingActionRisk   @default(MEDIUM)
-  extractedData    Json
-  validatedData    Json?
-  missingFields    Json?
-  preview          Json
-  preconditionHash String
-  executionKey     String                @unique
-  status           AiPendingActionStatus @default(PENDING)
-  confirmationChallenge String?
+  id                      String                @id @default(cuid())
+  conversationId          String
+  userId                  String
+  sourceMessageId         String?
+  type                    AiPendingActionType
+  risk                    AiPendingActionRisk   @default(MEDIUM)
+  extractedData           Json
+  validatedData           Json?
+  missingFields           Json?
+  preview                 Json
+  preconditionHash        String
+  executionKey            String                @unique
+  status                  AiPendingActionStatus @default(PENDING)
+  confirmationChallenge   String?
   confirmationRequestedAt DateTime?
-  expiresAt        DateTime
-  executedAt       DateTime?
-  recordType       String?
-  recordId         String?
-  result           Json?
-  errorCode        String?
-  debugId          String?
-  createdAt        DateTime              @default(now())
-  updatedAt        DateTime              @updatedAt
+  expiresAt               DateTime
+  executedAt              DateTime?
+  recordType              String?
+  recordId                String?
+  result                  Json?
+  errorCode               String?
+  debugId                 String?
+  createdAt               DateTime              @default(now())
+  updatedAt               DateTime              @updatedAt
 
-  conversation  AiConversation @relation(fields: [conversationId, userId], references: [id, userId], onDelete: Cascade)
-  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  sourceMessage AiMessage?     @relation("AiPendingActionSource", fields: [sourceMessageId], references: [id], onDelete: SetNull)
+  conversation     AiConversation      @relation(fields: [conversationId, userId], references: [id, userId], onDelete: Cascade)
+  user             User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sourceMessage    AiMessage?          @relation("AiPendingActionSource", fields: [sourceMessageId], references: [id], onDelete: SetNull)
   executionReceipt AiExecutionReceipt?
   attachments      AiAttachment[]
 
@@ -1125,29 +1125,29 @@ model AiPendingAction {
 }
 
 model AiExecutionReceipt {
-  id              String            @id @default(cuid())
-  executionKey    String            @unique
-  pendingActionId String            @unique
+  id              String              @id @default(cuid())
+  executionKey    String              @unique
+  pendingActionId String              @unique
   conversationId  String
   userId          String
   channel         AiDeliveryChannel
   actionType      AiPendingActionType
   inputHash       String
-  status          AiExecutionStatus @default(COMMITTED)
+  status          AiExecutionStatus   @default(COMMITTED)
   recordType      String
   recordId        String
   result          Json
   linkedRecords   Json?
   auditLogId      String?
   errorCode       String?
-  committedAt     DateTime          @default(now())
+  committedAt     DateTime            @default(now())
   completedAt     DateTime?
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
 
-  pendingAction AiPendingAction @relation(fields: [pendingActionId], references: [id], onDelete: Cascade)
-  conversation  AiConversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  pendingAction AiPendingAction    @relation(fields: [pendingActionId], references: [id], onDelete: Cascade)
+  conversation  AiConversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user          User               @relation(fields: [userId], references: [id], onDelete: Cascade)
   documents     AiDocument[]
   deliveries    AiDeliveryOutbox[]
 
@@ -1190,20 +1190,20 @@ model AiDocument {
 }
 
 model AiDeliveryOutbox {
-  id                String           @id @default(cuid())
+  id                String            @id @default(cuid())
   receiptId         String
   documentId        String
   channel           AiDeliveryChannel
   destination       String
-  status            AiDeliveryStatus @default(PENDING)
-  attempts          Int              @default(0)
-  availableAt       DateTime         @default(now())
+  status            AiDeliveryStatus  @default(PENDING)
+  attempts          Int               @default(0)
+  availableAt       DateTime          @default(now())
   lastAttemptAt     DateTime?
   deliveredAt       DateTime?
   externalMessageId String?
   errorCode         String?
-  createdAt         DateTime         @default(now())
-  updatedAt         DateTime         @updatedAt
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
 
   receipt  AiExecutionReceipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
   document AiDocument         @relation(fields: [documentId], references: [id], onDelete: Cascade)
@@ -1257,17 +1257,17 @@ model AiCapabilitySetting {
 }
 
 model AiAutomationPreference {
-  id        String           @id @default(cuid())
+  id        String            @id @default(cuid())
   userId    String
   kind      AiAutomationKind
-  enabled   Boolean          @default(false)
-  locale    String           @default("en")
+  enabled   Boolean           @default(false)
+  locale    String            @default("en")
   channel   AiDeliveryChannel @default(WEB)
   settings  Json?
   nextRunAt DateTime?
   lastRunAt DateTime?
-  createdAt DateTime         @default(now())
-  updatedAt DateTime         @updatedAt
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
