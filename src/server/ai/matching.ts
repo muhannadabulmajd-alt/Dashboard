@@ -99,6 +99,7 @@ export async function matchFinanceAccount(query: string) {
 
 export async function matchParty(query: string, type?: 'SUPPLIER' | 'CUSTOMER') {
   const normalized = normalizeAssistantText(query);
+  const normalizedPhone = normalizeIraqiPhone(query);
   const rows = await prisma.party.findMany({
     where: { isActive: true, ...(type ? { type } : {}) },
     select: {
@@ -114,6 +115,7 @@ export async function matchParty(query: string, type?: 'SUPPLIER' | 'CUSTOMER') 
   });
   const exact = rows.filter((row) =>
     row.id === query ||
+    (normalizedPhone && normalizeIraqiPhone(row.phone) === normalizedPhone) ||
     normalizeAssistantText(row.name) === normalized ||
     normalizeAssistantText(row.externalKey ?? '') === normalized,
   );

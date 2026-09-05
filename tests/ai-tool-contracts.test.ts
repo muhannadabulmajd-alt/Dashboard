@@ -76,6 +76,7 @@ describe('AI write tool validation', () => {
       assetName: null,
       assetCategory: null,
       supplierQuery: null,
+      newSupplier: null,
       paidMode: null,
       paidAmount: null,
       accountQuery: null,
@@ -85,9 +86,65 @@ describe('AI write tool validation', () => {
       branchQuery: null,
       reference: null,
       notes: null,
+      lines: null,
     };
     expect(PreparePurchaseSchema.parse(base)).toEqual(base);
     expect(() => PreparePurchaseSchema.parse({ ...base, sql: 'DROP TABLE' })).toThrow();
+  });
+
+  it('accepts three-decimal multi-line purchases with explicit treatment data', () => {
+    const input = {
+      purchaseType: 'MIXED' as const,
+      date: null,
+      totalAmount: null,
+      currency: null,
+      rate: null,
+      quantity: null,
+      unit: null,
+      inventoryItemQuery: null,
+      newItemNameEn: null,
+      newItemNameAr: null,
+      newItemCategory: null,
+      assetName: null,
+      assetCategory: null,
+      supplierQuery: 'Coffee equipment supplier',
+      newSupplier: {
+        name: 'Coffee equipment supplier',
+        type: 'SUPPLIER' as const,
+        phone: '+9647700000000',
+        email: null,
+        address: 'Baghdad',
+        notes: null,
+      },
+      paidMode: 'PARTIAL' as const,
+      paidAmount: 100_000,
+      accountQuery: 'Cash',
+      paymentMethod: 'CASH',
+      paymentDate: null,
+      dueDate: null,
+      branchQuery: null,
+      reference: 'SUP-TEST-1',
+      notes: null,
+      lines: [{
+        itemType: 'INVENTORY' as const,
+        itemName: 'Packaging bags',
+        categoryType: 'PACKAGING' as const,
+        assetKey: null,
+        assetCategory: null,
+        inventoryItemQuery: null,
+        newItemNameEn: 'Packaging bags',
+        newItemNameAr: 'أكياس تغليف',
+        newItemCategory: 'PACKAGING' as const,
+        unit: 'unit' as const,
+        quantity: 125.375,
+        unitCost: 1_000,
+        discount: 0,
+        extra: 5_000,
+        branchQuery: null,
+        notes: null,
+      }],
+    };
+    expect(PreparePurchaseSchema.parse(input).lines?.[0].quantity).toBe(125.375);
   });
 
   it('publishes only strict allowlisted function schemas', () => {

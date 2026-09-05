@@ -38,7 +38,9 @@ import {
   PrepareCustomerUpdateSchema,
   PrepareDashboardDraftSchema,
   PrepareInventoryAdjustmentSchema,
+  PrepareLedgerLineSchema,
   PreparePartyUpdateSchema,
+  PreparePartyDetailsSchema,
   PreparePaymentSchema,
   PrepareRefundSchema,
   PrepareReversalSchema,
@@ -55,6 +57,7 @@ import {
   ResolvedDashboardDraftActionSchema,
   ResolvedExpenseActionSchema,
   ResolvedInventoryAdjustmentActionSchema,
+  ResolvedLedgerLineActionSchema,
   ResolvedOrderActionSchema,
   ResolvedOrderStatusActionSchema,
   ResolvedPartyActionSchema,
@@ -951,9 +954,11 @@ async function resolveOptionalParty(
   field: string,
   type?: 'SUPPLIER' | 'CUSTOMER',
   createIfMissing = false,
+  suppliedDetails: z.infer<typeof PreparePartyDetailsSchema> | null = null,
 ): Promise<PartyResolution> {
-  if (!query) return { ok: true, value: null, newParty: null };
-  const match = await matchParty(query, type);
+  const lookup = query || suppliedDetails?.name || suppliedDetails?.phone || null;
+  if (!lookup) return { ok: true, value: null, newParty: null };
+  const match = await matchParty(lookup, type);
   if (match.kind === 'exact') return { ok: true, value: match.value, newParty: null };
   if (match.kind === 'ambiguous') {
     return {
@@ -962,12 +967,18 @@ async function resolveOptionalParty(
     };
   }
   if (createIfMissing) {
+    const name = suppliedDetails?.name || query;
+    if (!name) return { ok: false, result: missingResult(locale, [localized(locale, 'party name', 'اسم الجهة')]) };
     return {
       ok: true,
       value: null,
       newParty: ResolvedPartyActionSchema.parse({
-        name: query,
-        type: type ?? 'OTHER',
+        name,
+        type: type ?? suppliedDetails?.type ?? 'OTHER',
+        phone: suppliedDetails?.phone || undefined,
+        email: suppliedDetails?.email || undefined,
+        address: suppliedDetails?.address || undefined,
+        notes: suppliedDetails?.notes || undefined,
       }),
     };
   }
@@ -1104,36 +1115,171 @@ async function resolveFinanceAccount(
   return { ok: true, value: account.value };
 }
 
+type ResolvedLedgerLine = z.infer<typeof ResolvedLedgerLineActionSchema>;
+
+function expenseCategoryForInventory(category: string | null): z.infer<typeof ResolvedLedgerLineActionSchema>['categoryType'] {
+  if (category === 'GREEN_COFFEE') return 'GREEN_COFFEE';
+  if (category === 'PACKAGING') return 'PACKAGING';
+  if (category === 'ACCESSORY') return 'EQUIPMENT';
+  return 'OVERHEAD';
+}
+
+function treatmentForLine(itemType: ResolvedLedgerLine['itemType']): 'CAPEX' | 'INVENTORY' | 'OPEX' | 'REVIEW' {
+  if (itemType === 'ASSET') return 'CAPEX';
+  if (itemType === 'INVENTORY') return 'INVENTORY';
+  if (itemType === 'EXPENSE' || itemType === 'SERVICE') return 'OPEX';
+  return 'REVIEW';
+}
+
+async function resolveLedgerLines(
+  rawLines: z.infer<typeof PrepareLedgerLineSchema>[],
+  context: ToolContext,
+  parentBranchId: string | null,
+): Promise<{ ok: true; lines: ResolvedLedgerLine[] } | { ok: false; result: ToolExecution }> {
+  const lines: ResolvedLedgerLine[] = [];
+  for (let index = 0; index < rawLines.length; index += 1) {
+    const input = rawLines[index];
+    const prefix = `lines.${index}`;
+    const missing: string[] = [];
+    if (!input.itemType) missing.push(`${prefix}.itemType`);
+    if (input.quantity === null) missing.push(`${prefix}.quantity`);
+    if (input.unitCost === null) missing.push(`${prefix}.unitCost`);
+    if (missing.length) return { ok: false, result: missingResult(context.locale, missing) };
+
+    const itemType = input.itemType as ResolvedLedgerLine['itemType'];
+    let inventoryItemId: string | null = null;
+    let inventoryItemMode: 'existing' | 'new' = 'existing';
+    let newItemNameEn = '';
+    let newItemNameAr = '';
+    let newItemCategory = input.newItemCategory;
+    let existingInventory: { id: string; name: string; unit: string; category: string } | null = null;
+    if (itemType === 'INVENTORY') {
+      if (input.inventoryItemQuery) {
+        const resolved = await resolveInventoryForAction(input.inventoryItemQuery, `${prefix}.inventoryItemQuery`, context);
+        if (!resolved.ok) return resolved;
+        existingInventory = resolved.value;
+        inventoryItemId = resolved.value?.id ?? null;
+      } else {
+        inventoryItemMode = 'new';
+        newItemNameEn = input.newItemNameEn || input.itemName || '';
+        newItemNameAr = input.newItemNameAr || newItemNameEn;
+        if (!newItemNameEn || !newItemCategory) {
+          return {
+            ok: false,
+            result: missingResult(context.locale, [
+              localized(context.locale, `new inventory name and category for line ${index + 1}`, `اسم وفئة مادة المخزون الجديدة للبند ${index + 1}`),
+            ]),
+          };
+        }
+      }
+    }
+
+    const branch = await resolveOptionalBranch(input.branchQuery, context.locale);
+    if (!branch.ok) return branch;
+    const unit = existingInventory?.unit || input.unit || (itemType === 'INVENTORY' ? null : 'unit');
+    if (!unit) {
+      return { ok: false, result: missingResult(context.locale, [`${prefix}.unit`]) };
+    }
+    if (existingInventory && input.unit && input.unit !== existingInventory.unit) {
+      return {
+        ok: false,
+        result: clarificationResult({
+          field: `${prefix}.unit`,
+          message: localized(
+            context.locale,
+            `The selected inventory item uses ${existingInventory.unit}.`,
+            `مادة المخزون المختارة تستخدم وحدة ${existingInventory.unit}.`,
+          ),
+        }),
+      };
+    }
+    const itemName = input.itemName || existingInventory?.name || newItemNameEn;
+    if (!itemName) return { ok: false, result: missingResult(context.locale, [`${prefix}.itemName`]) };
+    let categoryType = input.categoryType;
+    if (itemType === 'INVENTORY') categoryType = expenseCategoryForInventory(existingInventory?.category ?? newItemCategory);
+    if (itemType === 'ASSET') categoryType = categoryType || 'EQUIPMENT';
+    if ((itemType === 'EXPENSE' || itemType === 'SERVICE') && !categoryType) {
+      return {
+        ok: false,
+        result: missingResult(context.locale, [
+          localized(context.locale, `spending category for ${itemName}`, `فئة الإنفاق للبند ${itemName}`),
+        ]),
+      };
+    }
+    const parsed = ResolvedLedgerLineActionSchema.safeParse({
+      token: `ai-${index + 1}`,
+      itemType,
+      itemName,
+      categoryType,
+      assetKey: input.assetKey,
+      assetCategory: itemType === 'ASSET' ? input.assetCategory || 'Equipment' : input.assetCategory,
+      inventoryItemId,
+      inventoryItemMode,
+      newItemNameEn,
+      newItemNameAr,
+      newItemCategory,
+      unit,
+      quantity: input.quantity,
+      unitCost: input.unitCost,
+      discount: input.discount ?? 0,
+      extra: input.extra ?? 0,
+      branchId: branch.value?.id ?? parentBranchId,
+      notes: input.notes,
+    });
+    if (!parsed.success) {
+      return {
+        ok: false,
+        result: clarificationResult({
+          field: `${prefix}.${parsed.error.issues[0]?.path.join('.') || 'line'}`,
+          message: localized(context.locale, `Line ${index + 1} is incomplete or invalid.`, `البند ${index + 1} غير مكتمل أو غير صحيح.`),
+        }),
+      };
+    }
+    lines.push(parsed.data);
+  }
+  return { ok: true, lines };
+}
+
 async function prepareExpense(raw: unknown, context: ToolContext): Promise<ToolExecution> {
   const input = PrepareExpenseSchema.parse(raw);
+  const date = dateValue(input.date) ?? context.now;
+  const currency = input.currency ?? 'IQD';
   const missing: string[] = [];
-  if (!dateValue(input.date)) missing.push(localized(context.locale, 'valid date', 'تاريخ صحيح'));
-  if (!input.amount) missing.push(localized(context.locale, 'amount', 'المبلغ'));
-  if (!input.currency) missing.push(localized(context.locale, 'currency', 'العملة'));
-  if (input.currency === 'USD' && !input.rate) missing.push(localized(context.locale, 'USD conversion rate', 'سعر تحويل الدولار'));
-  if (!input.accountQuery) missing.push(localized(context.locale, 'payment account', 'حساب الدفع'));
-  if (!input.categoryType) missing.push(localized(context.locale, 'spending category', 'فئة الإنفاق'));
-  if (!input.description) missing.push(localized(context.locale, 'description', 'الوصف'));
+  if (input.date && !dateValue(input.date)) missing.push(localized(context.locale, 'valid date', 'تاريخ صحيح'));
+  if (!input.lines?.length && !input.amount) missing.push(localized(context.locale, 'amount', 'المبلغ'));
+  if (currency === 'USD' && !input.rate) missing.push(localized(context.locale, 'USD conversion rate', 'سعر تحويل الدولار'));
+  if (!input.lines?.length && !input.categoryType) missing.push(localized(context.locale, 'spending category', 'فئة الإنفاق'));
+  if (!input.lines?.length && !input.description) missing.push(localized(context.locale, 'description', 'الوصف'));
   if (missing.length) return missingResult(context.locale, missing);
-  const accountMatch = await matchFinanceAccount(input.accountQuery as string);
-  if (accountMatch.kind === 'none') return noMatch(context.locale, 'accountQuery', localized(context.locale, 'finance account', 'حساب مالي'));
-  if (accountMatch.kind === 'ambiguous') return ambiguousMatch(context.locale, 'accountQuery', accountMatch.candidates, (row) => `${String(row.name)} · ${String(row.currency)}`, (row) => String(row.id));
-  const party = await resolveOptionalParty(input.partyQuery, context.locale, 'partyQuery', undefined, true);
+  const account = await resolveFinanceAccount(input.accountQuery, context);
+  if (!account.ok) return account.result;
+  const party = await resolveOptionalParty(input.partyQuery, context.locale, 'partyQuery', undefined, true, input.newParty);
   if (!party.ok) return party.result;
   const branch = await resolveOptionalBranch(input.branchQuery, context.locale);
   if (!branch.ok) return branch.result;
+  const resolvedLines = input.lines
+    ? await resolveLedgerLines(input.lines, context, branch.value?.id ?? null)
+    : null;
+  if (resolvedLines && !resolvedLines.ok) return resolvedLines.result;
+  const lines = resolvedLines?.ok ? resolvedLines.lines : null;
+  const computedAmount = lines?.reduce(
+    (sum, line) => sum + Math.max(0, line.quantity * line.unitCost - line.discount + line.extra),
+    0,
+  ) ?? input.amount;
+  const description = input.description || lines?.map((line) => line.itemName).join(', ');
   const validated = ResolvedExpenseActionSchema.parse({
-    date: (dateValue(input.date) as Date).toISOString(),
-    amount: input.amount,
-    currency: input.currency,
+    date: date.toISOString(),
+    amount: lines ? null : input.amount,
+    currency,
     rate: input.rate,
-    accountId: accountMatch.value.id,
-    categoryType: input.categoryType,
+    accountId: account.value.id,
+    categoryType: lines ? null : input.categoryType,
     partyId: party.value?.id ?? null,
     newParty: party.newParty,
-    description: input.description,
+    description,
     reference: input.reference,
     branchId: branch.value?.id ?? null,
+    lines,
   });
   return actionResult({
     context,
@@ -1143,9 +1289,14 @@ async function prepareExpense(raw: unknown, context: ToolContext): Promise<ToolE
     title: localized(context.locale, 'Record expense', 'تسجيل مصروف'),
     summary: localized(context.locale, `Record ${validated.description}.`, `تسجيل ${validated.description}.`),
     fields: [
-      { label: localized(context.locale, 'Amount', 'المبلغ'), value: formatMoney(toMinor(validated.amount, validated.currency), validated.currency, context.locale) },
-      { label: localized(context.locale, 'Category', 'الفئة'), value: validated.categoryType },
-      { label: localized(context.locale, 'Account', 'الحساب'), value: accountMatch.value.name },
+      { label: localized(context.locale, 'Amount', 'المبلغ'), value: formatMoney(toMinor(computedAmount as number, validated.currency), validated.currency, context.locale) },
+      ...(validated.lines?.map((line, index) => ({
+        label: localized(context.locale, `Line ${index + 1}`, `البند ${index + 1}`),
+        value: `${line.itemName} · ${treatmentForLine(line.itemType)} · ${formatQuantity(line.quantity, context.locale)} ${line.unit} × ${formatMoney(toMinor(line.unitCost, validated.currency), validated.currency, context.locale)}`,
+      })) ?? [{ label: localized(context.locale, 'Category', 'الفئة'), value: validated.categoryType ?? '—' }]),
+      { label: localized(context.locale, 'Account', 'الحساب'), value: account.value.name },
+      ...(party.value || party.newParty ? [{ label: localized(context.locale, 'Party', 'الجهة'), value: party.value?.name ?? party.newParty?.name ?? '—' }] : []),
+      ...(party.newParty ? [{ label: localized(context.locale, 'Party setup', 'إعداد الجهة'), value: localized(context.locale, 'Create new party with this record', 'إنشاء جهة جديدة مع هذا السجل') }] : []),
       { label: localized(context.locale, 'Date', 'التاريخ'), value: validated.date.slice(0, 10) },
     ],
   });
@@ -1153,53 +1304,79 @@ async function prepareExpense(raw: unknown, context: ToolContext): Promise<ToolE
 
 async function preparePurchase(raw: unknown, context: ToolContext): Promise<ToolExecution> {
   const input = PreparePurchaseSchema.parse(raw);
+  const date = dateValue(input.date) ?? context.now;
+  const currency = input.currency ?? 'IQD';
   const missing: string[] = [];
-  if (!input.purchaseType) missing.push(localized(context.locale, 'purchase type', 'نوع الشراء'));
-  if (!dateValue(input.date)) missing.push(localized(context.locale, 'valid purchase date', 'تاريخ شراء صحيح'));
-  if (!input.totalAmount) missing.push(localized(context.locale, 'total amount', 'المبلغ الإجمالي'));
-  if (!input.currency) missing.push(localized(context.locale, 'currency', 'العملة'));
-  if (input.currency === 'USD' && !input.rate) missing.push(localized(context.locale, 'USD conversion rate', 'سعر تحويل الدولار'));
-  if (!input.quantity) missing.push(localized(context.locale, 'quantity', 'الكمية'));
-  if (!input.unit) missing.push(localized(context.locale, 'measurement unit', 'وحدة القياس'));
-  if (!input.supplierQuery) missing.push(localized(context.locale, 'supplier', 'المورد'));
+  if (input.date && !dateValue(input.date)) missing.push(localized(context.locale, 'valid purchase date', 'تاريخ شراء صحيح'));
+  if (!input.lines?.length && !input.purchaseType) missing.push(localized(context.locale, 'purchase type', 'نوع الشراء'));
+  if (!input.lines?.length && !input.totalAmount) missing.push(localized(context.locale, 'total amount', 'المبلغ الإجمالي'));
+  if (currency === 'USD' && !input.rate) missing.push(localized(context.locale, 'USD conversion rate', 'سعر تحويل الدولار'));
+  if (!input.lines?.length && !input.quantity) missing.push(localized(context.locale, 'quantity', 'الكمية'));
+  if (!input.lines?.length && !input.unit) missing.push(localized(context.locale, 'measurement unit', 'وحدة القياس'));
+  if (!input.supplierQuery && !input.newSupplier?.name) missing.push(localized(context.locale, 'supplier', 'المورد'));
   if (!input.paidMode) missing.push(localized(context.locale, 'payment state', 'حالة الدفع'));
-  if (input.purchaseType === 'INVENTORY' && !input.inventoryItemQuery && !input.newItemNameEn) missing.push(localized(context.locale, 'inventory item or new item name', 'مادة المخزون أو اسم مادة جديدة'));
-  if (input.purchaseType === 'INVENTORY' && !input.inventoryItemQuery && !input.newItemCategory) missing.push(localized(context.locale, 'new inventory category', 'فئة مادة المخزون الجديدة'));
-  if (input.purchaseType === 'ASSET' && !input.assetName) missing.push(localized(context.locale, 'asset name', 'اسم الأصل'));
-  if (input.purchaseType === 'ASSET' && !input.assetCategory) missing.push(localized(context.locale, 'asset category', 'فئة الأصل'));
-  if ((input.paidMode === 'PAID' || input.paidMode === 'PARTIAL') && !input.accountQuery) missing.push(localized(context.locale, 'payment account', 'حساب الدفع'));
+  if (!input.lines?.length && input.purchaseType === 'INVENTORY' && !input.inventoryItemQuery && !input.newItemNameEn) missing.push(localized(context.locale, 'inventory item or new item name', 'مادة المخزون أو اسم مادة جديدة'));
+  if (!input.lines?.length && input.purchaseType === 'INVENTORY' && !input.inventoryItemQuery && !input.newItemCategory) missing.push(localized(context.locale, 'new inventory category', 'فئة مادة المخزون الجديدة'));
+  if (!input.lines?.length && input.purchaseType === 'ASSET' && !input.assetName) missing.push(localized(context.locale, 'asset name', 'اسم الأصل'));
+  if (!input.lines?.length && input.purchaseType === 'ASSET' && !input.assetCategory) missing.push(localized(context.locale, 'asset category', 'فئة الأصل'));
+  if ((input.paidMode === 'PAID' || input.paidMode === 'PARTIAL') && !input.paymentMethod) missing.push(localized(context.locale, 'payment method', 'طريقة الدفع'));
   if (input.paidMode === 'PARTIAL' && !input.paidAmount) missing.push(localized(context.locale, 'paid amount', 'المبلغ المدفوع'));
   if (missing.length) return missingResult(context.locale, missing);
 
-  const supplier = await resolveOptionalParty(input.supplierQuery, context.locale, 'supplierQuery', 'SUPPLIER', true);
+  const supplier = await resolveOptionalParty(input.supplierQuery, context.locale, 'supplierQuery', 'SUPPLIER', true, input.newSupplier);
   if (!supplier.ok) return supplier.result;
   if (!supplier.value && !supplier.newParty) return noMatch(context.locale, 'supplierQuery', localized(context.locale, 'supplier', 'مورد'));
+  const branch = await resolveOptionalBranch(input.branchQuery, context.locale);
+  if (!branch.ok) return branch.result;
+  const resolvedLines = input.lines
+    ? await resolveLedgerLines(input.lines, context, branch.value?.id ?? null)
+    : null;
+  if (resolvedLines && !resolvedLines.ok) return resolvedLines.result;
+  const lines = resolvedLines?.ok ? resolvedLines.lines : null;
+  const totalAmount = lines?.reduce(
+    (sum, line) => sum + Math.max(0, line.quantity * line.unitCost - line.discount + line.extra),
+    0,
+  ) ?? input.totalAmount;
+  if (!totalAmount || totalAmount <= 0) return missingResult(context.locale, [localized(context.locale, 'positive purchase total', 'إجمالي شراء موجب')]);
+
+  let purchaseType = input.purchaseType;
+  if (lines) {
+    const treatments = new Set(lines.map((line) => treatmentForLine(line.itemType)));
+    purchaseType = treatments.size === 1 && treatments.has('INVENTORY')
+      ? 'INVENTORY'
+      : treatments.size === 1 && treatments.has('CAPEX')
+        ? 'ASSET'
+        : 'MIXED';
+  }
   let inventoryItemId: string | null = null;
-  if (input.inventoryItemQuery) {
-    const item = await matchInventoryItem(input.inventoryItemQuery);
+  if (!lines && input.inventoryItemQuery) {
+    const item = await matchInventoryItem(input.inventoryItemQuery, buildBranchScope(context.user));
     if (item.kind === 'none') return noMatch(context.locale, 'inventoryItemQuery', localized(context.locale, 'inventory item', 'مادة مخزون'));
     if (item.kind === 'ambiguous') return ambiguousMatch(context.locale, 'inventoryItemQuery', item.candidates, (row) => `${String(row.nameEn)} / ${String(row.nameAr)} · ${String(row.unit)}`, (row) => String(row.id));
     inventoryItemId = item.value.id;
   }
   let accountId: string | null = null;
   let accountName = '—';
-  if (input.accountQuery) {
-    const account = await matchFinanceAccount(input.accountQuery);
-    if (account.kind === 'none') return noMatch(context.locale, 'accountQuery', localized(context.locale, 'finance account', 'حساب مالي'));
-    if (account.kind === 'ambiguous') return ambiguousMatch(context.locale, 'accountQuery', account.candidates, (row) => `${String(row.name)} · ${String(row.currency)}`, (row) => String(row.id));
+  if (input.paidMode === 'PAID' || input.paidMode === 'PARTIAL') {
+    const account = await resolveFinanceAccount(input.accountQuery, context);
+    if (!account.ok) return account.result;
     accountId = account.value.id;
     accountName = account.value.name;
   }
-  const branch = await resolveOptionalBranch(input.branchQuery, context.locale);
-  if (!branch.ok) return branch.result;
+  if (input.paidMode === 'PARTIAL' && input.paidAmount && input.paidAmount >= totalAmount) {
+    return clarificationResult({
+      field: 'paidAmount',
+      message: localized(context.locale, 'A partial payment must be less than the purchase total.', 'يجب أن يكون الدفع الجزئي أقل من إجمالي الشراء.'),
+    });
+  }
   const validated = ResolvedPurchaseActionSchema.parse({
-    purchaseType: input.purchaseType,
-    date: (dateValue(input.date) as Date).toISOString(),
-    totalAmount: input.totalAmount,
-    currency: input.currency,
+    purchaseType,
+    date: date.toISOString(),
+    totalAmount: lines ? null : input.totalAmount,
+    currency,
     rate: input.rate,
-    quantity: input.quantity,
-    unit: input.unit,
+    quantity: lines ? null : input.quantity,
+    unit: lines ? null : input.unit,
     inventoryItemId,
     newItemNameEn: input.newItemNameEn,
     newItemNameAr: input.newItemNameAr,
@@ -1212,15 +1389,22 @@ async function preparePurchase(raw: unknown, context: ToolContext): Promise<Tool
     paidAmount: input.paidAmount,
     accountId,
     paymentMethod: input.paymentMethod,
-    paymentDate: dateValue(input.paymentDate)?.toISOString() ?? null,
-    dueDate: dateValue(input.dueDate)?.toISOString() ?? null,
+    paymentDate: input.paidMode === 'PAID' || input.paidMode === 'PARTIAL'
+      ? (dateValue(input.paymentDate) ?? date).toISOString()
+      : null,
+    dueDate: input.paidMode === 'CREDIT' || input.paidMode === 'PARTIAL'
+      ? (dateValue(input.dueDate) ?? date).toISOString()
+      : null,
     branchId: branch.value?.id ?? null,
     reference: input.reference,
     notes: input.notes,
+    lines,
   });
-  const itemName = validated.purchaseType === 'ASSET'
-    ? validated.assetName as string
-    : input.inventoryItemQuery || validated.newItemNameEn || validated.newItemNameAr || 'Inventory';
+  const itemName = lines
+    ? lines.map((line) => line.itemName).join(', ')
+    : validated.purchaseType === 'ASSET'
+      ? validated.assetName as string
+      : input.inventoryItemQuery || validated.newItemNameEn || validated.newItemNameAr || 'Inventory';
   return actionResult({
     context,
     type: 'CREATE_PURCHASE',
@@ -1229,9 +1413,14 @@ async function preparePurchase(raw: unknown, context: ToolContext): Promise<Tool
     title: localized(context.locale, validated.purchaseType === 'ASSET' ? 'Record asset purchase' : 'Record inventory purchase', validated.purchaseType === 'ASSET' ? 'تسجيل شراء أصل' : 'تسجيل شراء مخزون'),
     summary: localized(context.locale, `Record ${itemName} from ${supplier.value?.name ?? supplier.newParty?.name}.`, `تسجيل ${itemName} من ${supplier.value?.name ?? supplier.newParty?.name}.`),
     fields: [
-      { label: localized(context.locale, 'Item', 'المادة'), value: itemName },
-      { label: localized(context.locale, 'Quantity', 'الكمية'), value: `${formatQuantity(validated.quantity, context.locale)} ${validated.unit}` },
-      { label: localized(context.locale, 'Total', 'الإجمالي'), value: formatMoney(toMinor(validated.totalAmount, validated.currency), validated.currency, context.locale) },
+      ...(validated.lines?.map((line, index) => ({
+        label: localized(context.locale, `Line ${index + 1}`, `البند ${index + 1}`),
+        value: `${line.itemName} · ${treatmentForLine(line.itemType)} · ${formatQuantity(line.quantity, context.locale)} ${line.unit} × ${formatMoney(toMinor(line.unitCost, validated.currency), validated.currency, context.locale)}`,
+      })) ?? [
+        { label: localized(context.locale, 'Item', 'المادة'), value: itemName },
+        { label: localized(context.locale, 'Quantity', 'الكمية'), value: `${formatQuantity(validated.quantity as number, context.locale)} ${validated.unit}` },
+      ]),
+      { label: localized(context.locale, 'Total', 'الإجمالي'), value: formatMoney(toMinor(totalAmount, validated.currency), validated.currency, context.locale) },
       { label: localized(context.locale, 'Supplier', 'المورد'), value: supplier.value?.name ?? supplier.newParty?.name ?? '—' },
       ...(supplier.newParty ? [{
         label: localized(context.locale, 'Supplier setup', 'إعداد المورد'),

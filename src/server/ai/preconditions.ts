@@ -110,6 +110,10 @@ async function lockActionRows(tx: Prisma.TransactionClient, type: AiPendingActio
     if (input.partyId) await lockById(tx, 'Party', input.partyId);
     if (input.newParty) await lockNewParty(tx, input.newParty);
     if (input.branchId) await lockById(tx, 'Branch', input.branchId);
+    for (const line of input.lines ?? []) {
+      if (line.inventoryItemId) await lockById(tx, 'InventoryItem', line.inventoryItemId);
+      if (line.branchId) await lockById(tx, 'Branch', line.branchId);
+    }
     return;
   }
   if (type === 'CREATE_PURCHASE') {
@@ -119,6 +123,10 @@ async function lockActionRows(tx: Prisma.TransactionClient, type: AiPendingActio
     if (input.newSupplier) await lockNewParty(tx, input.newSupplier);
     if (input.accountId) await lockById(tx, 'FinanceAccount', input.accountId);
     if (input.branchId) await lockById(tx, 'Branch', input.branchId);
+    for (const line of input.lines ?? []) {
+      if (line.inventoryItemId) await lockById(tx, 'InventoryItem', line.inventoryItemId);
+      if (line.branchId) await lockById(tx, 'Branch', line.branchId);
+    }
     return;
   }
   if (type === 'UPDATE_CUSTOMER') {
@@ -407,7 +415,7 @@ async function orderPreconditions(raw: unknown, db: Db) {
 
 async function expensePreconditions(raw: unknown, db: Db) {
   const input = ResolvedExpenseActionSchema.parse(raw);
-  const [account, party, branch, newParty] = await Promise.all([
+  const [account, party, branch, newParty, lines] = await Promise.all([
     db.financeAccount.findUnique({
       where: { id: input.accountId },
       select: { id: true, currency: true, type: true, isActive: true },
@@ -419,13 +427,24 @@ async function expensePreconditions(raw: unknown, db: Db) {
       ? db.branch.findUnique({ where: { id: input.branchId }, select: { id: true, isActive: true } })
       : Promise.resolve(null),
     newPartyPreconditions(input.newParty, db),
+    Promise.all((input.lines ?? []).map(async (line) => ({
+      item: line.inventoryItemId
+        ? await db.inventoryItem.findUnique({
+            where: { id: line.inventoryItemId },
+            select: { id: true, isActive: true, unit: true, branchId: true },
+          })
+        : null,
+      branch: line.branchId
+        ? await db.branch.findUnique({ where: { id: line.branchId }, select: { id: true, isActive: true } })
+        : null,
+    }))),
   ]);
-  return { account, party, branch, newParty };
+  return { account, party, branch, newParty, lines };
 }
 
 async function purchasePreconditions(raw: unknown, db: Db) {
   const input = ResolvedPurchaseActionSchema.parse(raw);
-  const [item, supplier, account, branch, newSupplier] = await Promise.all([
+  const [item, supplier, account, branch, newSupplier, lines] = await Promise.all([
     input.inventoryItemId
       ? db.inventoryItem.findUnique({
           where: { id: input.inventoryItemId },
@@ -445,8 +464,19 @@ async function purchasePreconditions(raw: unknown, db: Db) {
       ? db.branch.findUnique({ where: { id: input.branchId }, select: { id: true, isActive: true } })
       : Promise.resolve(null),
     newPartyPreconditions(input.newSupplier, db),
+    Promise.all((input.lines ?? []).map(async (line) => ({
+      item: line.inventoryItemId
+        ? await db.inventoryItem.findUnique({
+            where: { id: line.inventoryItemId },
+            select: { id: true, isActive: true, unit: true, branchId: true },
+          })
+        : null,
+      branch: line.branchId
+        ? await db.branch.findUnique({ where: { id: line.branchId }, select: { id: true, isActive: true } })
+        : null,
+    }))),
   ]);
-  return { item, supplier, account, branch, newSupplier };
+  return { item, supplier, account, branch, newSupplier, lines };
 }
 
 async function customerUpdatePreconditions(raw: unknown, db: Db) {
@@ -972,6 +1002,24 @@ export function actionPreconditionIssues(
     }
     const branch = state.branch as { isActive?: boolean } | null;
     if (input.branchId && !branch?.isActive) issues.push({ field: 'branchQuery', code: 'branch_inactive' });
+    const lineStates = Array.isArray(state.lines)
+      ? state.lines as Array<{ item?: { id?: string; isActive?: boolean; unit?: string; branchId?: string | null } | null; branch?: { isActive?: boolean } | null }>
+      : [];
+    input.lines?.forEach((line, index) => {
+      const lineState = lineStates[index];
+      if (line.inventoryItemId && (!lineState?.item?.id || !lineState.item.isActive)) {
+        issues.push({ field: `lines.${index}.inventoryItemQuery`, code: 'inventory_item_missing' });
+      }
+      if (line.inventoryItemId && lineState?.item?.unit !== line.unit) {
+        issues.push({ field: `lines.${index}.unit`, code: 'inventory_unit_mismatch' });
+      }
+      if (line.branchId && !lineState?.branch?.isActive) {
+        issues.push({ field: `lines.${index}.branchQuery`, code: 'branch_inactive' });
+      }
+      if (line.inventoryItemId && line.branchId && lineState?.item?.branchId && lineState.item.branchId !== line.branchId) {
+        issues.push({ field: `lines.${index}.branchQuery`, code: 'inventory_branch_mismatch' });
+      }
+    });
     return issues;
   }
   if (type === 'CREATE_PURCHASE') {
@@ -999,7 +1047,11 @@ export function actionPreconditionIssues(
       if (code) issues.push({ field: 'accountQuery', code });
       if (!input.paymentDate) issues.push({ field: 'paymentDate', code: 'payment_date_required' });
     }
-    if (input.paidMode === 'PARTIAL' && (!input.paidAmount || input.paidAmount >= input.totalAmount)) {
+    const totalAmount = input.totalAmount ?? input.lines?.reduce(
+      (sum, line) => sum + Math.max(0, line.quantity * line.unitCost - line.discount + line.extra),
+      0,
+    ) ?? 0;
+    if (input.paidMode === 'PARTIAL' && (!input.paidAmount || input.paidAmount >= totalAmount)) {
       issues.push({ field: 'paidAmount', code: 'partial_payment_invalid' });
     }
     if ((input.paidMode === 'CREDIT' || input.paidMode === 'PARTIAL') && !input.dueDate) {
@@ -1007,6 +1059,24 @@ export function actionPreconditionIssues(
     }
     const branch = state.branch as { isActive?: boolean } | null;
     if (input.branchId && !branch?.isActive) issues.push({ field: 'branchQuery', code: 'branch_inactive' });
+    const lineStates = Array.isArray(state.lines)
+      ? state.lines as Array<{ item?: { id?: string; isActive?: boolean; unit?: string; branchId?: string | null } | null; branch?: { isActive?: boolean } | null }>
+      : [];
+    input.lines?.forEach((line, index) => {
+      const lineState = lineStates[index];
+      if (line.inventoryItemId && (!lineState?.item?.id || !lineState.item.isActive)) {
+        issues.push({ field: `lines.${index}.inventoryItemQuery`, code: 'inventory_item_missing' });
+      }
+      if (line.inventoryItemId && lineState?.item?.unit !== line.unit) {
+        issues.push({ field: `lines.${index}.unit`, code: 'inventory_unit_mismatch' });
+      }
+      if (line.branchId && !lineState?.branch?.isActive) {
+        issues.push({ field: `lines.${index}.branchQuery`, code: 'branch_inactive' });
+      }
+      if (line.inventoryItemId && line.branchId && lineState?.item?.branchId && lineState.item.branchId !== line.branchId) {
+        issues.push({ field: `lines.${index}.branchQuery`, code: 'inventory_branch_mismatch' });
+      }
+    });
     return issues;
   }
   if (type === 'UPDATE_CUSTOMER') {

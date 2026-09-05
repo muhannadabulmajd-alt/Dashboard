@@ -387,7 +387,7 @@ async function executeExpense(
     locale,
     recordKind: 'MONEY_OUT',
     date: input.date,
-    amount: input.amount,
+    ...(input.amount !== null ? { amount: input.amount } : {}),
     currency: input.currency,
     rate: input.rate,
     accountId: input.accountId,
@@ -397,6 +397,7 @@ async function executeExpense(
     description: input.description,
     reference: input.reference,
     branchId: input.branchId,
+    lines: input.lines ?? undefined,
   }, {
     actorContext: createTrustedCommandContext(user),
     beforeExecute,
@@ -428,16 +429,17 @@ async function executePurchase(
 ) {
   const input = ResolvedPurchaseActionSchema.parse(raw);
   const isInventory = input.purchaseType === 'INVENTORY';
+  const isMultiLine = Boolean(input.lines?.length);
   let record: ExecutionRecord | null = null;
   const result = await createCentralRecordFromInput({
     locale,
-    recordKind: isInventory ? 'STOCK_PURCHASE' : 'ASSET_PURCHASE',
+    recordKind: isMultiLine || isInventory ? 'STOCK_PURCHASE' : 'ASSET_PURCHASE',
     date: input.date,
-    amount: input.totalAmount,
+    ...(input.totalAmount !== null ? { amount: input.totalAmount } : {}),
     currency: input.currency,
     rate: input.rate,
-    quantity: input.quantity,
-    unit: input.unit,
+    quantity: input.quantity ?? undefined,
+    unit: input.unit ?? undefined,
     inventoryItemMode: input.inventoryItemId ? 'existing' : 'new',
     inventoryItemId: input.inventoryItemId,
     newItemNameEn: input.newItemNameEn,
@@ -456,6 +458,7 @@ async function executePurchase(
     branchId: input.branchId,
     reference: input.reference,
     description: input.notes || (isInventory ? input.newItemNameEn : input.assetName),
+    lines: input.lines ?? undefined,
   }, {
     actorContext: createTrustedCommandContext(user),
     beforeExecute,

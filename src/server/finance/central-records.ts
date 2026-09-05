@@ -712,17 +712,18 @@ export async function createCentralRecordCommand(
   if (!kind || !date) return { error: 'invalid' };
 
   const lineTokens = parseLedgerLineTokens(fd);
-  const isMultiLinePurchase = kind === 'STOCK_PURCHASE' && lineTokens.length > 0;
-  const linePayload = isMultiLinePurchase ? await parseLedgerLines(fd) : null;
-  const money = isMultiLinePurchase ? linePayload?.money ?? null : await parseMoney(fd);
+  const isMultiLineRecord = (kind === 'STOCK_PURCHASE' || kind === 'MONEY_OUT') && lineTokens.length > 0;
+  const linePayload = isMultiLineRecord ? await parseLedgerLines(fd) : null;
+  const money = isMultiLineRecord ? linePayload?.money ?? null : await parseMoney(fd);
   if (!money || money.amount <= 0) return { error: 'invalid' };
 
   const quantity = kind === 'STOCK_PURCHASE' || kind === 'ASSET_PURCHASE' ? parseQuantity(fd) : null;
-  if (!isMultiLinePurchase && (kind === 'STOCK_PURCHASE' || kind === 'ASSET_PURCHASE') && !quantity) return { error: 'invalid' };
+  if (!isMultiLineRecord && (kind === 'STOCK_PURCHASE' || kind === 'ASSET_PURCHASE') && !quantity) return { error: 'invalid' };
 
   const paidMode = parsePurchasePaymentMode(fd);
-  const payable = paidMode !== 'PAID';
-  const needsPaymentAccount = (kind === 'STOCK_PURCHASE' || kind === 'ASSET_PURCHASE') && (paidMode === 'PAID' || paidMode === 'PARTIAL');
+  const payable = kind !== 'MONEY_OUT' && paidMode !== 'PAID';
+  const needsPaymentAccount = kind === 'MONEY_OUT'
+    || ((kind === 'STOCK_PURCHASE' || kind === 'ASSET_PURCHASE') && (paidMode === 'PAID' || paidMode === 'PARTIAL'));
   if (needsPaymentAccount && !optField(fd, 'accountId')) {
     return { error: 'invalid' };
   }
@@ -748,17 +749,18 @@ export async function createCentralRecordCommand(
         );
         fd.set('partyId', party.id);
       }
-      if (isMultiLinePurchase && linePayload) {
+      if (isMultiLineRecord && linePayload) {
       const paymentMethod = parsePaymentMethod(fd);
+      const entryType: FinanceType = kind === 'MONEY_OUT' ? 'EXPENSE' : 'PURCHASE';
       const entry = await tx.financeEntry.create({
         data: {
-          ...baseEntryData(fd, date, money, 'PURCHASE', payable, payable ? 'PAYABLE' : null),
+          ...baseEntryData(fd, date, money, entryType, payable, payable ? 'PAYABLE' : null),
           recordClass: ledgerRecordClassForLines(linePayload.lines),
-          accountId: paidMode === 'PAID' ? optField(fd, 'accountId') ?? null : null,
+          accountId: kind === 'MONEY_OUT' || paidMode === 'PAID' ? optField(fd, 'accountId') ?? null : null,
           categoryType: overallCategory(linePayload.lines),
-          paymentMethod: paidMode === 'CREDIT' ? 'CREDIT' : paymentMethod,
+          paymentMethod: payable && paidMode === 'CREDIT' ? 'CREDIT' : paymentMethod,
           createdById: user.id,
-          description: optField(fd, 'description') ?? 'Vendor invoice / purchase',
+          description: optField(fd, 'description') ?? (kind === 'MONEY_OUT' ? 'Multi-line business spending' : 'Vendor invoice / purchase'),
         },
         select: { id: true },
       });
@@ -860,7 +862,7 @@ export async function createCentralRecordCommand(
         }
       }
 
-      if (paidMode === 'PARTIAL') {
+      if (kind !== 'MONEY_OUT' && paidMode === 'PARTIAL') {
         await tx.financeEntry.create({
           data: {
             date: parseOptionalDate(optField(fd, 'paymentDate')) ?? date,
@@ -888,7 +890,7 @@ export async function createCentralRecordCommand(
           entity: 'FinanceEntry',
           entityId: entry.id,
           metadata: {
-            source: 'multi-item-ledger-panel',
+            source: options.actorContext ? 'ai-assistant-finance' : 'multi-item-ledger-panel',
             kind,
             lines: linePayload.lines.map((line) => ({
               lineNo: line.lineNo,

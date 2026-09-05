@@ -54,6 +54,41 @@ const customer = object({
   segment: enumSchema(CUSTOMER_SEGMENTS, true),
 });
 
+const partyDetails = object({
+  name: nullableString,
+  type: enumSchema(PARTY_TYPES, true),
+  phone: nullableString,
+  email: nullableString,
+  address: nullableString,
+  notes: nullableString,
+});
+
+const ledgerLine = object({
+  itemType: enumSchema(['INVENTORY', 'ASSET', 'EXPENSE', 'SERVICE', 'OTHER'], true),
+  itemName: nullableString,
+  categoryType: enumSchema(EXPENSE_CATEGORY_TYPES, true),
+  assetKey: nullableString,
+  assetCategory: nullableString,
+  inventoryItemQuery: nullableString,
+  newItemNameEn: nullableString,
+  newItemNameAr: nullableString,
+  newItemCategory: enumSchema(INVENTORY_CATEGORIES, true),
+  unit: enumSchema(MEASUREMENT_UNITS, true),
+  quantity: nullableNumber,
+  unitCost: nullableNumber,
+  discount: nullableNumber,
+  extra: nullableNumber,
+  branchQuery: nullableString,
+  notes: nullableString,
+});
+
+const nullableLedgerLines: Schema = {
+  anyOf: [
+    { type: 'array', minItems: 1, maxItems: 50, items: ledgerLine },
+    { type: 'null' },
+  ],
+};
+
 function tool(name: string, description: string, parameters: Schema): FunctionTool {
   return { type: 'function', name, description, parameters, strict: true };
 }
@@ -152,7 +187,7 @@ export const AI_ASSISTANT_TOOLS: FunctionTool[] = [
   ),
   tool(
     'prepare_create_expense',
-    'Prepare an operating expense for explicit confirmation. Account, category, amount, currency, date, and description are required.',
+    'Prepare one or more operating-expense, service, asset, inventory, or review lines for explicit confirmation. Dates default to Baghdad today, currency defaults to IQD, and the configured user default account may be used. Never silently classify OTHER lines.',
     object({
       date: nullableString,
       amount: nullableNumber,
@@ -161,16 +196,18 @@ export const AI_ASSISTANT_TOOLS: FunctionTool[] = [
       accountQuery: nullableString,
       categoryType: enumSchema(EXPENSE_CATEGORY_TYPES, true),
       partyQuery: nullableString,
+      newParty: { anyOf: [partyDetails, { type: 'null' }] },
       description: nullableString,
       reference: nullableString,
       branchQuery: nullableString,
+      lines: nullableLedgerLines,
     }),
   ),
   tool(
     'prepare_create_purchase',
-    'Prepare an inventory or fixed-asset purchase for explicit confirmation. Never guess supplier, payment, item, or asset details.',
+    'Prepare a single or multi-line inventory, fixed-asset, service, or mixed supplier purchase for explicit confirmation. Preserve full supplier details and never guess low-confidence classification or payment routing.',
     object({
-      purchaseType: enumSchema(['INVENTORY', 'ASSET'], true),
+      purchaseType: enumSchema(['INVENTORY', 'ASSET', 'MIXED'], true),
       date: nullableString,
       totalAmount: nullableNumber,
       currency: enumSchema(CURRENCIES, true),
@@ -184,6 +221,7 @@ export const AI_ASSISTANT_TOOLS: FunctionTool[] = [
       assetName: nullableString,
       assetCategory: nullableString,
       supplierQuery: nullableString,
+      newSupplier: { anyOf: [partyDetails, { type: 'null' }] },
       paidMode: enumSchema(['PAID', 'CREDIT', 'PARTIAL'], true),
       paidAmount: nullableNumber,
       accountQuery: nullableString,
@@ -193,6 +231,7 @@ export const AI_ASSISTANT_TOOLS: FunctionTool[] = [
       branchQuery: nullableString,
       reference: nullableString,
       notes: nullableString,
+      lines: nullableLedgerLines,
     }),
   ),
   tool(

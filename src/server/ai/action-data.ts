@@ -41,6 +41,36 @@ export const ResolvedPartyActionSchema = z.object({
   collectsOrderPayments: z.boolean().default(false),
 }).strict();
 
+export const ResolvedLedgerLineActionSchema = z.object({
+  token: z.string().trim().min(1).optional(),
+  itemType: z.enum(['INVENTORY', 'ASSET', 'EXPENSE', 'SERVICE', 'OTHER']),
+  itemName: z.string().trim().min(1),
+  categoryType: z.enum(EXPENSE_CATEGORY_TYPES).nullable(),
+  assetKey: z.string().trim().nullable(),
+  assetCategory: z.string().trim().nullable(),
+  inventoryItemId: z.string().trim().nullable(),
+  inventoryItemMode: z.enum(['existing', 'new']),
+  newItemNameEn: z.string().trim(),
+  newItemNameAr: z.string().trim(),
+  newItemCategory: z.enum(INVENTORY_CATEGORIES).nullable(),
+  unit: z.enum(MEASUREMENT_UNITS),
+  quantity: z.number().positive().refine((value) => Number.isInteger(value * 1000)),
+  unitCost: z.number().positive(),
+  discount: z.number().nonnegative(),
+  extra: z.number().nonnegative(),
+  branchId: z.string().trim().nullable(),
+  notes: z.string().trim().nullable(),
+}).strict().superRefine((value, ctx) => {
+  if (value.itemType === 'INVENTORY') {
+    if (value.inventoryItemMode === 'existing' && !value.inventoryItemId) {
+      ctx.addIssue({ code: 'custom', path: ['inventoryItemId'], message: 'An existing inventory item is required.' });
+    }
+    if (value.inventoryItemMode === 'new' && (!value.newItemNameEn || !value.newItemCategory)) {
+      ctx.addIssue({ code: 'custom', path: ['newItemNameEn'], message: 'A new inventory item name and category are required.' });
+    }
+  }
+});
+
 export const ResolvedOrderActionSchema = z.object({
   customerExternalId: z.string().nullable(),
   newCustomer: ResolvedCustomerActionSchema.nullable(),
@@ -72,30 +102,34 @@ export const ResolvedOrderActionSchema = z.object({
 
 export const ResolvedExpenseActionSchema = z.object({
   date: z.string().datetime(),
-  amount: z.number().positive(),
+  amount: z.number().positive().nullable(),
   currency: z.enum(CURRENCIES),
   rate: z.number().positive().nullable(),
   accountId: z.string(),
-  categoryType: z.enum(EXPENSE_CATEGORY_TYPES),
+  categoryType: z.enum(EXPENSE_CATEGORY_TYPES).nullable(),
   partyId: z.string().nullable(),
   newParty: ResolvedPartyActionSchema.nullable().default(null),
   description: z.string().min(1),
   reference: z.string().nullable(),
   branchId: z.string().nullable(),
+  lines: z.array(ResolvedLedgerLineActionSchema).min(1).max(50).nullable(),
 }).strict().superRefine((value, ctx) => {
   if (value.partyId && value.newParty) {
     ctx.addIssue({ code: 'custom', path: ['newParty'], message: 'Choose an existing party or create a new one.' });
   }
+  if (!value.lines?.length && (!value.amount || !value.categoryType)) {
+    ctx.addIssue({ code: 'custom', path: ['amount'], message: 'A single expense requires an amount and category.' });
+  }
 });
 
 export const ResolvedPurchaseActionSchema = z.object({
-  purchaseType: z.enum(['INVENTORY', 'ASSET']),
+  purchaseType: z.enum(['INVENTORY', 'ASSET', 'MIXED']),
   date: z.string().datetime(),
-  totalAmount: z.number().positive(),
+  totalAmount: z.number().positive().nullable(),
   currency: z.enum(CURRENCIES),
   rate: z.number().positive().nullable(),
-  quantity: z.number().positive(),
-  unit: z.enum(MEASUREMENT_UNITS),
+  quantity: z.number().positive().nullable(),
+  unit: z.enum(MEASUREMENT_UNITS).nullable(),
   inventoryItemId: z.string().nullable(),
   newItemNameEn: z.string().nullable(),
   newItemNameAr: z.string().nullable(),
@@ -113,9 +147,20 @@ export const ResolvedPurchaseActionSchema = z.object({
   branchId: z.string().nullable(),
   reference: z.string().nullable(),
   notes: z.string().nullable(),
+  lines: z.array(ResolvedLedgerLineActionSchema).min(1).max(50).nullable(),
 }).strict().superRefine((value, ctx) => {
   if (Boolean(value.supplierId) === Boolean(value.newSupplier)) {
     ctx.addIssue({ code: 'custom', path: ['supplierId'], message: 'Exactly one supplier source is required.' });
+  }
+  if (value.lines?.length) return;
+  if (!value.totalAmount || !value.quantity || !value.unit || value.purchaseType === 'MIXED') {
+    ctx.addIssue({ code: 'custom', path: ['lines'], message: 'A single purchase requires type, amount, quantity, and unit.' });
+  }
+  if (value.purchaseType === 'INVENTORY' && !value.inventoryItemId && (!value.newItemNameEn || !value.newItemCategory)) {
+    ctx.addIssue({ code: 'custom', path: ['inventoryItemId'], message: 'An inventory item is required.' });
+  }
+  if (value.purchaseType === 'ASSET' && (!value.assetName || !value.assetCategory)) {
+    ctx.addIssue({ code: 'custom', path: ['assetName'], message: 'An asset name and category are required.' });
   }
 });
 

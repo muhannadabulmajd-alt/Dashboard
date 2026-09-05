@@ -58,6 +58,34 @@ export const PrepareCustomerSchema = z.object({
   segment: z.enum(CUSTOMER_SEGMENTS).nullable(),
 }).strict();
 
+export const PreparePartyDetailsSchema = z.object({
+  name: z.string().trim().nullable(),
+  type: z.enum(PARTY_TYPES).nullable(),
+  phone: z.string().trim().nullable(),
+  email: z.string().trim().nullable(),
+  address: z.string().trim().nullable(),
+  notes: z.string().trim().nullable(),
+}).strict();
+
+export const PrepareLedgerLineSchema = z.object({
+  itemType: z.enum(['INVENTORY', 'ASSET', 'EXPENSE', 'SERVICE', 'OTHER']).nullable(),
+  itemName: z.string().trim().nullable(),
+  categoryType: z.enum(EXPENSE_CATEGORY_TYPES).nullable(),
+  assetKey: z.string().trim().nullable(),
+  assetCategory: z.string().trim().nullable(),
+  inventoryItemQuery: z.string().trim().nullable(),
+  newItemNameEn: z.string().trim().nullable(),
+  newItemNameAr: z.string().trim().nullable(),
+  newItemCategory: z.enum(INVENTORY_CATEGORIES).nullable(),
+  unit: z.enum(MEASUREMENT_UNITS).nullable(),
+  quantity: z.number().positive().nullable(),
+  unitCost: z.number().positive().nullable(),
+  discount: z.number().nonnegative().nullable(),
+  extra: z.number().nonnegative().nullable(),
+  branchQuery: z.string().trim().nullable(),
+  notes: z.string().trim().nullable(),
+}).strict();
+
 export const PrepareOrderSchema = z.object({
   customerQuery: z.string().trim().nullable(),
   newCustomer: PrepareCustomerSchema.nullable(),
@@ -94,13 +122,15 @@ export const PrepareExpenseSchema = z.object({
   accountQuery: z.string().trim().nullable(),
   categoryType: z.enum(EXPENSE_CATEGORY_TYPES).nullable(),
   partyQuery: z.string().trim().nullable(),
+  newParty: PreparePartyDetailsSchema.nullable(),
   description: z.string().trim().nullable(),
   reference: z.string().trim().nullable(),
   branchQuery: z.string().trim().nullable(),
+  lines: z.array(PrepareLedgerLineSchema).min(1).max(50).nullable(),
 }).strict();
 
 export const PreparePurchaseSchema = z.object({
-  purchaseType: z.enum(['INVENTORY', 'ASSET']).nullable(),
+  purchaseType: z.enum(['INVENTORY', 'ASSET', 'MIXED']).nullable(),
   date: z.string().nullable(),
   totalAmount: z.number().positive().nullable(),
   currency: z.enum(CURRENCIES).nullable(),
@@ -114,6 +144,7 @@ export const PreparePurchaseSchema = z.object({
   assetName: z.string().trim().nullable(),
   assetCategory: z.string().trim().nullable(),
   supplierQuery: z.string().trim().nullable(),
+  newSupplier: PreparePartyDetailsSchema.nullable(),
   paidMode: z.enum(['PAID', 'CREDIT', 'PARTIAL']).nullable(),
   paidAmount: z.number().nonnegative().nullable(),
   accountQuery: z.string().trim().nullable(),
@@ -123,6 +154,7 @@ export const PreparePurchaseSchema = z.object({
   branchQuery: z.string().trim().nullable(),
   reference: z.string().trim().nullable(),
   notes: z.string().trim().nullable(),
+  lines: z.array(PrepareLedgerLineSchema).min(1).max(50).nullable(),
 }).strict();
 
 export const PrepareOrderStatusSchema = z.object({
