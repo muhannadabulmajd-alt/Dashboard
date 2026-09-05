@@ -69,7 +69,7 @@ describe('AI Responses API orchestration', () => {
   });
 
   it('sends validated receipt images and PDFs as multimodal input without provider storage', async () => {
-    const stream = vi.fn(() => textStream('I found the receipt details.'));
+    const stream = vi.fn((_request: unknown, _options?: unknown) => textStream('I found the receipt details.'));
     await runAssistant({
       ...runnerInput(),
       attachments: [
