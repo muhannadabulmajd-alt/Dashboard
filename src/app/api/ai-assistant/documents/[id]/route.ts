@@ -40,4 +40,3 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: 'document_pending' }, { status: 202 });
   }
 }
-
