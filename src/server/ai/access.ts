@@ -15,6 +15,7 @@ const TOOL_CAPABILITIES: Record<string, Capability> = {
   delivery_summary: 'view:fulfillment',
   roastery_summary: 'view:roastery',
   inventory_recommendations: 'view:inventory',
+  demand_forecast: 'view:sales',
   operational_alerts: 'view:dashboard',
   search_customers: 'view:customers',
   prepare_create_customer: 'manage:customers',

@@ -186,6 +186,15 @@ export const AI_ASSISTANT_TOOLS: FunctionTool[] = [
     }),
   ),
   tool(
+    'demand_forecast',
+    'Forecast product-unit demand from completed Atlas sales using a transparent recent-versus-prior weighted run rate. This is advisory and never writes.',
+    object({
+      lookbackDays: { type: 'integer', minimum: 14, maximum: 180 },
+      horizonDays: { type: 'integer', minimum: 1, maximum: 90 },
+      limit: { type: 'integer', minimum: 1, maximum: 50 },
+    }),
+  ),
+  tool(
     'operational_alerts',
     'Read current role-authorized Atlas alerts for stockouts, reorder levels, expiring inventory, unsafe product margins, and failed deliveries. This is advisory and never writes.',
     object({

@@ -12,12 +12,13 @@ import { salesByDimension, stockRow, topProducts } from '@/lib/metrics';
 import * as Metrics from '@/lib/metrics';
 import { can } from '@/lib/rbac';
 import { inferCustomerCandidate, recoverCustomerCandidate } from '@/lib/customer-candidate';
+import { buildDemandForecast } from '@/lib/ai-demand-forecast';
 import { compatibleCustomerMatches } from '@/server/commands/customers';
 import { getCustomers, getOrderHistory } from '@/server/db/repositories/customers.repo';
 import { getShipments } from '@/server/db/repositories/fulfillment.repo';
 import { getInventoryItems } from '@/server/db/repositories/inventory.repo';
 import { getBatchRows } from '@/server/db/repositories/roastery.repo';
-import { getCatalogForAlerts, getOrders } from '@/server/db/repositories/sales.repo';
+import { getCatalogForAlerts, getOrderLines, getOrders } from '@/server/db/repositories/sales.repo';
 import { prisma } from '@/server/db/client';
 import { buildBranchScope } from '@/server/filters/where-builder';
 import { getPaymentFacts, getProfitFacts } from '@/server/finance/facts';
@@ -43,6 +44,7 @@ import {
   ExpenseSummarySchema,
   FinanceOverviewSchema,
   CustomerInsightsSchema,
+  DemandForecastSchema,
   DeliverySummarySchema,
   InventorySummarySchema,
   InventoryRecommendationsSchema,
@@ -1041,6 +1043,76 @@ async function inventoryRecommendations(raw: unknown, context: ToolContext): Pro
     })),
     href: '/inventory',
   }, context, 'inventory-recommendations');
+}
+
+async function demandForecast(raw: unknown, context: ToolContext): Promise<ToolExecution> {
+  const input = DemandForecastSchema.parse(raw);
+  const recentDays = Math.ceil(input.lookbackDays / 2);
+  const previousDays = input.lookbackDays - recentDays;
+  const recentStart = new Date(context.now.getTime() - recentDays * 86_400_000);
+  const previousStart = new Date(recentStart.getTime() - previousDays * 86_400_000);
+  const filters = DashboardFiltersSchema.parse({ range: 'all' });
+  const scope = buildBranchScope(context.user);
+  const [previous, recent] = await Promise.all([
+    getOrderLines(filters, scope, { start: previousStart, end: new Date(recentStart.getTime() - 1) }),
+    getOrderLines(filters, scope, { start: recentStart, end: context.now }),
+  ]);
+  const forecasts = buildDemandForecast({
+    previous,
+    recent,
+    previousDays,
+    recentDays,
+    horizonDays: input.horizonDays,
+  }).filter((row) => row.forecastUnits > 0);
+  const visible = forecasts.slice(0, input.limit);
+  const confidenceLabel = (confidence: 'HIGH' | 'MEDIUM' | 'LOW') => ({
+    HIGH: localized(context.locale, 'high confidence', 'ثقة عالية'),
+    MEDIUM: localized(context.locale, 'medium confidence', 'ثقة متوسطة'),
+    LOW: localized(context.locale, 'low confidence', 'ثقة منخفضة'),
+  })[confidence];
+  return cardResult({
+    title: localized(context.locale, 'Demand forecast', 'توقع الطلب'),
+    answer: forecasts.length
+      ? localized(
+          context.locale,
+          `Projected product demand for the next ${input.horizonDays} days from ${input.lookbackDays} days of completed sales. This weighted run-rate forecast is read-only and should be reviewed before purchasing or production decisions.`,
+          `توقع طلب المنتجات للأيام ${formatNumber(input.horizonDays, 'ar')} القادمة استناداً إلى ${formatNumber(input.lookbackDays, 'ar')} يوماً من المبيعات المكتملة. هذا توقع مرجح للقراءة فقط ويجب مراجعته قبل قرارات الشراء أو الإنتاج.`,
+        )
+      : localized(context.locale, 'There is not enough completed-sales activity to produce a positive demand forecast.', 'لا توجد مبيعات مكتملة كافية لإنتاج توقع طلب موجب.'),
+    period: periodLabel(previousStart, context.now, context.locale),
+    generatedAt: generatedAt(context.now),
+    metrics: [
+      {
+        label: localized(context.locale, 'Forecast units', 'الوحدات المتوقعة'),
+        value: formatNumber(forecasts.reduce((sum, row) => sum + row.forecastUnits, 0), context.locale),
+        hint: localized(context.locale, `${input.horizonDays}-day horizon`, `أفق ${formatNumber(input.horizonDays, 'ar')} يوم`),
+      },
+      { label: localized(context.locale, 'Products forecast', 'المنتجات المتوقعة'), value: formatNumber(forecasts.length, context.locale) },
+      { label: localized(context.locale, 'Rising demand', 'طلب متصاعد'), value: formatNumber(forecasts.filter((row) => (row.trendPct ?? 0) > 0.1).length, context.locale) },
+      { label: localized(context.locale, 'High-confidence products', 'منتجات بثقة عالية'), value: formatNumber(forecasts.filter((row) => row.confidence === 'HIGH').length, context.locale) },
+    ],
+    rows: visible.map((row) => ({
+      id: row.productId,
+      title: context.locale === 'ar' ? row.nameAr : row.nameEn,
+      subtitle: [
+        row.sku,
+        localized(
+          context.locale,
+          `recent ${formatNumber(row.recentUnits, context.locale)} · prior ${formatNumber(row.previousUnits, context.locale)}`,
+          `الحديث ${formatNumber(row.recentUnits, 'ar')} · السابق ${formatNumber(row.previousUnits, 'ar')}`,
+        ),
+        row.trendPct === null ? localized(context.locale, 'new signal', 'إشارة جديدة') : formatPercent(row.trendPct, context.locale),
+        confidenceLabel(row.confidence),
+      ].join(' · '),
+      value: localized(
+        context.locale,
+        `${formatNumber(row.forecastUnits, context.locale)} units / ${input.horizonDays} days`,
+        `${formatNumber(row.forecastUnits, 'ar')} وحدة / ${formatNumber(input.horizonDays, 'ar')} يوم`,
+      ),
+      href: `/sales?sku=${encodeURIComponent(row.sku)}`,
+    })),
+    href: '/sales',
+  }, context, 'demand-forecast');
 }
 
 async function operationalAlerts(raw: unknown, context: ToolContext): Promise<ToolExecution> {
@@ -2794,6 +2866,7 @@ const TOOL_HANDLERS: Record<string, (raw: unknown, context: ToolContext) => Prom
   delivery_summary: deliverySummary,
   roastery_summary: roasterySummary,
   inventory_recommendations: inventoryRecommendations,
+  demand_forecast: demandForecast,
   operational_alerts: operationalAlerts,
   search_customers: searchCustomers,
   prepare_create_customer: prepareCustomer,

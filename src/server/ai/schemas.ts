@@ -76,6 +76,12 @@ export const InventoryRecommendationsSchema = z.object({
   limit: z.number().int().min(1).max(50),
 }).strict();
 
+export const DemandForecastSchema = z.object({
+  lookbackDays: z.number().int().min(14).max(180),
+  horizonDays: z.number().int().min(1).max(90),
+  limit: z.number().int().min(1).max(50),
+}).strict();
+
 export const OperationalAlertsSchema = z.object({
   expiryDays: z.number().int().min(1).max(180),
   limit: z.number().int().min(1).max(50),

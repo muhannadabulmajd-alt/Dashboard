@@ -8,6 +8,7 @@ import {
   ProductBuyersSchema,
   FinanceOverviewSchema,
   CustomerInsightsSchema,
+  DemandForecastSchema,
   DeliverySummarySchema,
   RoasterySummarySchema,
   InventoryRecommendationsSchema,
@@ -23,6 +24,7 @@ import { AI_ASSISTANT_TOOLS } from '@/server/ai/tool-definitions';
 import { actionPreconditionIssues } from '@/server/ai/preconditions';
 import { QuickOrderDraftSchema } from '@/lib/ai-quick-order';
 import { compatibleCustomerMatches } from '@/server/commands/customers';
+import { buildDemandForecast } from '@/lib/ai-demand-forecast';
 
 describe('AI write tool validation', () => {
   it('accepts a bounded guided order draft and rejects unsafe extras', () => {
@@ -157,7 +159,7 @@ describe('AI write tool validation', () => {
   });
 
   it('publishes only strict allowlisted function schemas', () => {
-    expect(AI_ASSISTANT_TOOLS).toHaveLength(28);
+    expect(AI_ASSISTANT_TOOLS).toHaveLength(29);
     expect(new Set(AI_ASSISTANT_TOOLS.map((tool) => tool.name)).size).toBe(AI_ASSISTANT_TOOLS.length);
     for (const tool of AI_ASSISTANT_TOOLS) {
       expect(tool.strict).toBe(true);
@@ -168,6 +170,7 @@ describe('AI write tool validation', () => {
     expect(AI_ASSISTANT_TOOLS.some((tool) => tool.name === 'product_buyers')).toBe(true);
     expect(AI_ASSISTANT_TOOLS.some((tool) => tool.name === 'finance_overview')).toBe(true);
     expect(AI_ASSISTANT_TOOLS.some((tool) => tool.name === 'inventory_recommendations')).toBe(true);
+    expect(AI_ASSISTANT_TOOLS.some((tool) => tool.name === 'demand_forecast')).toBe(true);
   });
 
   it('bounds governed cross-module analytics without accepting arbitrary query fields', () => {
@@ -177,9 +180,37 @@ describe('AI write tool validation', () => {
     expect(DeliverySummarySchema.parse({ range, dimension: 'COURIER', slaDays: 3, limit: 25 }).slaDays).toBe(3);
     expect(RoasterySummarySchema.parse({ range, dimension: 'BATCH', limit: 25 }).dimension).toBe('BATCH');
     expect(InventoryRecommendationsSchema.parse({ query: null, horizonDays: 30, limit: 25 }).horizonDays).toBe(30);
+    expect(DemandForecastSchema.parse({ lookbackDays: 60, horizonDays: 30, limit: 25 }).lookbackDays).toBe(60);
     expect(OperationalAlertsSchema.parse({ expiryDays: 21, limit: 25 }).expiryDays).toBe(21);
     expect(() => FinanceOverviewSchema.parse({ range, view: 'ACCOUNTS', limit: 25, sql: 'select *' })).toThrow();
     expect(() => InventoryRecommendationsSchema.parse({ query: null, horizonDays: 365, limit: 25 })).toThrow();
+    expect(() => DemandForecastSchema.parse({ lookbackDays: 7, horizonDays: 30, limit: 25 })).toThrow();
+  });
+
+  it('builds a transparent recent-versus-prior demand forecast', () => {
+    const line = (productId: string, sku: string, quantity: number) => ({
+      productId,
+      sku,
+      quantity,
+      product: { nameEn: productId, nameAr: productId },
+    });
+    const forecast = buildDemandForecast({
+      previous: [line('coffee', 'COFFEE-1', 14)],
+      recent: [line('coffee', 'COFFEE-1', 28), line('new', 'NEW-1', 7)],
+      previousDays: 14,
+      recentDays: 14,
+      horizonDays: 7,
+    });
+
+    expect(forecast[0]).toMatchObject({
+      productId: 'coffee',
+      previousUnits: 14,
+      recentUnits: 28,
+      trendPct: 1,
+      forecastUnits: 15,
+      confidence: 'HIGH',
+    });
+    expect(forecast[1]).toMatchObject({ productId: 'new', trendPct: null, forecastUnits: 4, confidence: 'MEDIUM' });
   });
 
   it('requires distinct accounts for a governed transfer', () => {
