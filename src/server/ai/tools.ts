@@ -17,7 +17,7 @@ import { getCustomers, getOrderHistory } from '@/server/db/repositories/customer
 import { getShipments } from '@/server/db/repositories/fulfillment.repo';
 import { getInventoryItems } from '@/server/db/repositories/inventory.repo';
 import { getBatchRows } from '@/server/db/repositories/roastery.repo';
-import { getCatalogForAlerts, getOrderLines, getOrders } from '@/server/db/repositories/sales.repo';
+import { getCatalogForAlerts, getOrders } from '@/server/db/repositories/sales.repo';
 import { prisma } from '@/server/db/client';
 import { buildBranchScope } from '@/server/filters/where-builder';
 import { getPaymentFacts, getProfitFacts } from '@/server/finance/facts';

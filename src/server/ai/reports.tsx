@@ -166,7 +166,7 @@ async function buildWorkbook(card: AiResultCard, locale: AppLocale): Promise<Uin
       if (row % 2 === 1) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFAF8F2' } };
     }
   }
-  return Uint8Array.from(await workbook.xlsx.writeBuffer());
+  return new Uint8Array(await workbook.xlsx.writeBuffer());
 }
 
 function AiReportPdf({ card, locale }: { card: AiResultCard; locale: AppLocale }) {
@@ -216,7 +216,8 @@ function AiReportPdf({ card, locale }: { card: AiResultCard; locale: AppLocale }
 }
 
 async function buildPdf(card: AiResultCard, locale: AppLocale): Promise<Uint8Array> {
-  const content = await renderToBuffer(createElement(AiReportPdf, { card, locale }));
+  const element = createElement(AiReportPdf, { card, locale }) as Parameters<typeof renderToBuffer>[0];
+  const content = await renderToBuffer(element);
   return Uint8Array.from(content);
 }
 

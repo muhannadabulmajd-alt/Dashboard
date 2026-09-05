@@ -29,7 +29,7 @@ export async function GET(
       metadata: { reportType: report.reportType, format: rawFormat },
     },
   });
-  return new NextResponse(report.bytes, {
+  return new NextResponse(Uint8Array.from(report.bytes), {
     headers: {
       'Content-Type': report.contentType,
       'Content-Disposition': `attachment; filename="${report.fileName.replace(/[\r\n"]/g, '')}"`,
