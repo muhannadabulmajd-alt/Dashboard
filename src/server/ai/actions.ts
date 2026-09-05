@@ -497,9 +497,9 @@ async function executeOrderStatus(
     operation: 'STATUS',
     status: input.status,
     completionMode: input.completionMode,
-    accountId: input.accountId,
-    providerKey: input.providerKey,
-    paymentMethod: input.paymentMethod,
+    accountId: input.accountId ?? undefined,
+    providerKey: input.providerKey ?? undefined,
+    paymentMethod: input.paymentMethod ?? undefined,
     date: input.date,
   }, {
     actorContext: createTrustedCommandContext(user),

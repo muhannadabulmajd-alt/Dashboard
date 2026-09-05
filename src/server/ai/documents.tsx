@@ -9,7 +9,7 @@ import {
   renderToBuffer,
   StyleSheet,
 } from '@react-pdf/renderer';
-import type { AiDocumentKind, Prisma } from '@prisma/client';
+import type { AiDocumentKind } from '@prisma/client';
 import type { AppLocale } from '@/lib/money';
 import { formatMoney, formatNumber } from '@/lib/money';
 import { prisma } from '@/server/db/client';
