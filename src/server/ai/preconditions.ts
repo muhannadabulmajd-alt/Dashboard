@@ -1009,7 +1009,7 @@ export function actionPreconditionIssues(
     if (!(state.governorate as ManagedListState | undefined)?.active) issues.push({ field: 'governorate', code: 'governorate_invalid' });
     if (!(state.fulfillment as ManagedListState | undefined)?.active) issues.push({ field: 'fulfillmentMethod', code: 'fulfillment_invalid' });
     if (!status?.active || status.role === 'UNKNOWN') issues.push({ field: 'status', code: 'status_invalid' });
-    const customer = state.customer as { id?: string; isActive?: boolean; nameEn?: string | null; nameAr?: string | null } | null;
+    const customer = state.customer as { id: string; isActive?: boolean; nameEn?: string | null; nameAr?: string | null } | null;
     if (input.customerExternalId && (!customer || !customer.isActive)) issues.push({ field: 'customerQuery', code: 'customer_inactive' });
     const possibleCustomers = Array.isArray(state.possibleNewCustomerDuplicates)
       ? state.possibleNewCustomerDuplicates as Array<{ id: string; nameEn: string | null; nameAr: string | null }>
