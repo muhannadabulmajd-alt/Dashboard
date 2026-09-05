@@ -10,6 +10,7 @@ vi.mock('next/cache', () => ({
   unstable_cache: <T extends (...args: never[]) => unknown>(callback: T) => callback,
 }));
 vi.mock('next/navigation', () => ({ redirect: vi.fn() }));
+vi.mock('@/server/auth/session', () => ({ getCurrentUser: vi.fn(async () => null) }));
 vi.mock('@/server/telegram/api', () => ({ sendTelegramDocument }));
 
 import type { CurrentUser } from '@/server/auth/session';
