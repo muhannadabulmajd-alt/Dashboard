@@ -16,7 +16,7 @@ import {
 } from '@/server/commands/actor-context';
 import { can } from '@/lib/rbac';
 import { shouldRetryTelegramProcessing } from '@/lib/telegram-errors';
-import { sendTelegramDocument } from '@/server/telegram/api';
+import { downloadTelegramFile, sendTelegramDocument } from '@/server/telegram/api';
 
 const adminUser: CurrentUser = {
   id: 'admin-1',
@@ -62,6 +62,31 @@ describe('Telegram Atlas AI transport contracts', () => {
     expect(supportedTelegramUpdate(groupUpdate)).toMatchObject({ privateChat: false, chatId: '-1001' });
     expect(telegramLocale('en', 'حلل المبيعات')).toBe('ar');
     expect(telegramLocale('en', 'Show sales')).toBe('en');
+  });
+
+  it('extracts the largest private photo and document captions without trusting media metadata', () => {
+    const update = TelegramUpdateSchema.parse({
+      update_id: 13,
+      message: {
+        message_id: 5,
+        from: { id: 123, first_name: 'Muhannad' },
+        chat: { id: 123, type: 'private' },
+        caption: 'سجل هذا الوصل',
+        photo: [
+          { file_id: 'small', width: 90, height: 90, file_size: 100 },
+          { file_id: 'large', width: 1280, height: 1280, file_size: 2_000 },
+        ],
+      },
+    });
+    expect(supportedTelegramUpdate(update)).toMatchObject({
+      text: 'سجل هذا الوصل',
+      media: {
+        type: 'photo',
+        fileId: 'large',
+        mimeType: 'image/jpeg',
+        fileSize: 2_000,
+      },
+    });
   });
 
   it('validates compact callback payloads', () => {
@@ -167,5 +192,39 @@ describe('Telegram Atlas AI transport contracts', () => {
     expect(document.name).toBe('laheeb-invoice-LHB-ORD-260823-WA-0001.pdf');
     expect(document.type).toBe('application/pdf');
     expect(await document.text()).toBe('%PDF-1.7');
+  });
+
+  it('downloads Telegram media with a size bound and never includes auth headers', async () => {
+    vi.stubEnv('TELEGRAM_BOT_ENABLED', 'true');
+    vi.stubEnv('TELEGRAM_BOT_TOKEN', 'test-token');
+    vi.stubEnv('TELEGRAM_WEBHOOK_SECRET', 'test-secret');
+    const request = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        ok: true,
+        result: { file_id: 'file-1', file_unique_id: 'unique-1', file_size: 9, file_path: 'voice/file_1.ogg' },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(new TextEncoder().encode('OggSvoice'), {
+        status: 200,
+        headers: { 'content-length': '9' },
+      }));
+
+    const result = await downloadTelegramFile('file-1', 20);
+    expect(new TextDecoder().decode(result.bytes)).toBe('OggSvoice');
+    expect(request.mock.calls[0][0]).toBe('https://api.telegram.org/bottest-token/getFile');
+    expect(request.mock.calls[1][0]).toBe('https://api.telegram.org/file/bottest-token/voice/file_1.ogg');
+    expect((request.mock.calls[1][1]?.headers as Record<string, string> | undefined)?.authorization).toBeUndefined();
+  });
+
+  it('rejects Telegram media from getFile metadata before downloading it', async () => {
+    vi.stubEnv('TELEGRAM_BOT_ENABLED', 'true');
+    vi.stubEnv('TELEGRAM_BOT_TOKEN', 'test-token');
+    vi.stubEnv('TELEGRAM_WEBHOOK_SECRET', 'test-secret');
+    const request = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
+      ok: true,
+      result: { file_id: 'file-2', file_unique_id: 'unique-2', file_size: 21, file_path: 'docs/file_2.pdf' },
+    }), { status: 200 }));
+
+    await expect(downloadTelegramFile('file-2', 20)).rejects.toThrow('attachment_too_large');
+    expect(request).toHaveBeenCalledOnce();
   });
 });

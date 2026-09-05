@@ -4,12 +4,17 @@ export const AI_MESSAGE_MAX_LENGTH = 4_000;
 export const AI_CONTEXT_MESSAGE_LIMIT = 12;
 export const AI_TOOL_ROUND_LIMIT = 4;
 export const AI_PENDING_ACTION_MINUTES = 15;
+export const AI_ATTACHMENT_MAX_COUNT = 4;
 
 export const AiChatRequestSchema = z.object({
   conversationId: z.string().cuid().optional(),
-  message: z.string().trim().min(1).max(AI_MESSAGE_MAX_LENGTH),
+  message: z.string().trim().max(AI_MESSAGE_MAX_LENGTH).optional(),
+  attachmentIds: z.array(z.string().cuid()).max(AI_ATTACHMENT_MAX_COUNT).optional(),
   locale: z.enum(['ar', 'en']),
-}).strict();
+}).strict().refine((data) => Boolean(data.message || data.attachmentIds?.length), {
+  message: 'A message or attachment is required.',
+  path: ['message'],
+});
 
 export type AiResultMetric = {
   label: string;

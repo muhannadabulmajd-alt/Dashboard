@@ -8,8 +8,10 @@ import { cancelPendingAction, confirmPendingAction } from '@/server/ai/actions';
 import { getAiAssistantConfig } from '@/server/ai/config';
 import { aiDebugId } from '@/server/ai/hash';
 import { processAssistantMessage } from '@/server/ai/service';
+import { storeAiAttachment } from '@/server/ai/attachments';
 import {
   answerTelegramCallback,
+  downloadTelegramFile,
   editTelegramMessage,
   sendTelegramMessage,
   sendTelegramTyping,
@@ -321,6 +323,22 @@ export async function processTelegramUpdate(telegramUpdateId: string): Promise<v
     }
 
     let message = telegram.text?.trim() ?? '';
+    const attachmentIds: string[] = [];
+    if (telegram.media) {
+      if (telegram.media.fileSize && telegram.media.fileSize > aiConfig.mediaMaxBytes) {
+        throw new Error('attachment_too_large');
+      }
+      const downloaded = await downloadTelegramFile(telegram.media.fileId, aiConfig.mediaMaxBytes);
+      const attachment = await storeAiAttachment({
+        userId: user.id,
+        channel: 'TELEGRAM',
+        bytes: downloaded.bytes,
+        declaredMimeType: telegram.media.mimeType,
+        fileName: telegram.media.fileName,
+        telegramFileId: telegram.media.fileId,
+      });
+      attachmentIds.push(attachment.id);
+    }
     let conversationId: string | undefined;
     if (callback?.type === 'quick') message = TELEGRAM_QUICK_PROMPTS[callback.key]?.[locale] ?? '';
     if (callback?.type === 'choice') {
@@ -330,10 +348,12 @@ export async function processTelegramUpdate(telegramUpdateId: string): Promise<v
         conversationId = selected.conversationId;
       }
     }
-    if (!message) {
+    if (!message && !attachmentIds.length) {
       await sendTelegramMessage({
         chatId: telegram.chatId,
-        text: locale === 'ar' ? 'أرسل رسالة نصية أو اختر أحد الأزرار.' : 'Send a text message or choose one of the buttons.',
+        text: locale === 'ar'
+          ? 'أرسل رسالة نصية أو صورة وصل أو ملف PDF أو رسالة صوتية، أو اختر أحد الأزرار.'
+          : 'Send text, a receipt image, a PDF, or a voice message, or choose one of the buttons.',
         keyboard: quickActionKeyboard(locale),
       });
       await markComplete(receipt.id, 'IGNORED', { errorCode: 'unsupported_message' });
@@ -369,6 +389,7 @@ export async function processTelegramUpdate(telegramUpdateId: string): Promise<v
       user,
       locale,
       message,
+      attachmentIds,
       conversationId,
       channel: 'TELEGRAM',
       externalThreadId: telegram.chatId,
@@ -394,7 +415,7 @@ export async function processTelegramUpdate(telegramUpdateId: string): Promise<v
   } catch (error) {
     const errorCode = error instanceof Error ? error.message.split(':')[0].slice(0, 120) : 'telegram_processing_failed';
     const retryable = shouldRetryTelegramProcessing(error);
-    console.error('Telegram AI update failed', { telegramUpdateId, debugId, errorCode, error });
+    console.error('Telegram AI update failed', { telegramUpdateId, debugId, errorCode, retryable });
     await prisma.telegramUpdate.update({
       where: { id: telegramUpdateId },
       data: {

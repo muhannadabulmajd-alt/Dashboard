@@ -68,6 +68,52 @@ describe('AI Responses API orchestration', () => {
     expect(onEvent).toHaveBeenCalledWith({ type: 'text_delta', delta: 'Direct answer' });
   });
 
+  it('sends validated receipt images and PDFs as multimodal input without provider storage', async () => {
+    const stream = vi.fn(() => textStream('I found the receipt details.'));
+    await runAssistant({
+      ...runnerInput(),
+      attachments: [
+        {
+          id: 'image-1',
+          kind: 'RECEIPT_IMAGE',
+          mimeType: 'image/jpeg',
+          extension: 'jpg',
+          fileName: 'receipt.jpg',
+          content: Uint8Array.from([0xff, 0xd8, 0xff]),
+          extractedText: null,
+        },
+        {
+          id: 'document-1',
+          kind: 'DOCUMENT',
+          mimeType: 'application/pdf',
+          extension: 'pdf',
+          fileName: 'invoice.pdf',
+          content: new TextEncoder().encode('%PDF'),
+          extractedText: null,
+        },
+      ],
+    }, {
+      client: { responses: { stream } } as unknown as OpenAI,
+      executeTool: vi.fn(),
+    });
+
+    const request = stream.mock.calls[0][0] as {
+      store: boolean;
+      input: Array<{ role?: string; content?: Array<Record<string, unknown>> }>;
+    };
+    expect(request.store).toBe(false);
+    const content = request.input.find((item) => item.role === 'user')?.content ?? [];
+    expect(content).toContainEqual(expect.objectContaining({
+      type: 'input_image',
+      image_url: expect.stringMatching(/^data:image\/jpeg;base64,/),
+    }));
+    expect(content).toContainEqual(expect.objectContaining({
+      type: 'input_file',
+      filename: 'invoice.pdf',
+      file_data: Buffer.from('%PDF').toString('base64'),
+    }));
+  });
+
   it('passes strict tool output into the next model round while writes remain previews', async () => {
     const actionPreview: AiStreamEvent = {
       type: 'action_preview',

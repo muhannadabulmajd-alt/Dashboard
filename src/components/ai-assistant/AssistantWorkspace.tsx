@@ -14,6 +14,7 @@ import {
   LoaderCircle,
   MessageSquarePlus,
   PackagePlus,
+  Paperclip,
   ReceiptText,
   RotateCcw,
   ShoppingBag,
@@ -57,6 +58,15 @@ type StoredMessage = {
   content: string | null;
   payload: unknown;
   createdAt: string;
+};
+
+type UploadedAttachment = {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  byteSize: number;
+  kind: 'RECEIPT_IMAGE' | 'DOCUMENT' | 'AUDIO';
+  href: string;
 };
 
 type ActionResult = {
@@ -420,12 +430,16 @@ export function AssistantWorkspace({
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
+  const [attachments, setAttachments] = useState<UploadedAttachment[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [actionBusy, setActionBusy] = useState<string | null>(null);
   const [quickOrderOpen, setQuickOrderOpen] = useState(false);
   const viewportRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const attachmentInputRef = useRef<HTMLInputElement>(null);
   const historyTriggerRef = useRef<HTMLButtonElement>(null);
   const historyDialogRef = useRef<HTMLDivElement>(null);
   const historyCloseRef = useRef<HTMLButtonElement>(null);
@@ -503,6 +517,8 @@ export function AssistantWorkspace({
     setConversationId(null);
     setMessages([]);
     setInput('');
+    setAttachments([]);
+    setAttachmentError(null);
     setHistoryOpen(false);
     requestAnimationFrame(() => composerRef.current?.focus());
   };
@@ -571,17 +587,62 @@ export function AssistantWorkspace({
     }));
   };
 
+  const uploadAttachments = async (files: FileList | null) => {
+    const selected = Array.from(files ?? []);
+    if (!selected.length || uploading || sending) return;
+    setUploading(true);
+    setAttachmentError(null);
+    try {
+      const remaining = Math.max(0, 4 - attachments.length);
+      if (selected.length > remaining) throw new Error(t('attachmentCountError'));
+      const totalBytes = attachments.reduce((sum, item) => sum + item.byteSize, 0)
+        + selected.reduce((sum, file) => sum + file.size, 0);
+      if (totalBytes > 10 * 1024 * 1024) throw new Error(t('attachmentSizeError'));
+      const uploaded: UploadedAttachment[] = [];
+      for (const file of selected) {
+        const form = new FormData();
+        form.set('file', file);
+        if (conversationId) form.set('conversationId', conversationId);
+        const response = await fetch('/api/ai-assistant/attachments', { method: 'POST', body: form });
+        const body = await response.json().catch(() => ({})) as UploadedAttachment & { error?: string };
+        if (!response.ok) {
+          throw new Error(body.error === 'attachment_too_large'
+            ? t('attachmentSizeError')
+            : body.error === 'attachment_mime_mismatch' || body.error === 'attachment_type_unsupported'
+              ? t('attachmentTypeError')
+              : t('attachmentUploadError'));
+        }
+        uploaded.push(body);
+      }
+      setAttachments((current) => [...current, ...uploaded]);
+    } catch (error) {
+      setAttachmentError(error instanceof Error ? error.message : t('attachmentUploadError'));
+    } finally {
+      setUploading(false);
+      if (attachmentInputRef.current) attachmentInputRef.current.value = '';
+    }
+  };
+
   const sendMessage = async (raw?: string) => {
     const messageText = (raw ?? input).trim();
-    if (!messageText || sending) return;
+    const selectedAttachments = raw === undefined ? attachments : [];
+    if ((!messageText && !selectedAttachments.length) || sending || uploading) return;
     const userId = `local-user-${Date.now()}`;
     const assistantId = `local-assistant-${Date.now()}`;
     setInput('');
+    setAttachments([]);
+    setAttachmentError(null);
     setSending(true);
     shouldFollowRef.current = true;
     setMessages((current) => [
       ...current,
-      { id: userId, role: 'USER', content: messageText, events: [], createdAt: new Date().toISOString() },
+      {
+        id: userId,
+        role: 'USER',
+        content: messageText || `${t('attachedFiles')}: ${selectedAttachments.map((item) => item.fileName).join(', ')}`,
+        events: [],
+        createdAt: new Date().toISOString(),
+      },
       { id: assistantId, role: 'ASSISTANT', content: '', events: [], createdAt: new Date().toISOString(), streaming: true },
     ]);
 
@@ -591,7 +652,12 @@ export function AssistantWorkspace({
       const response = await fetch('/api/ai-assistant/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ conversationId: conversationId ?? undefined, message: messageText, locale }),
+        body: JSON.stringify({
+          conversationId: conversationId ?? undefined,
+          message: messageText || undefined,
+          attachmentIds: selectedAttachments.map((attachment) => attachment.id),
+          locale,
+        }),
         signal: controller.signal,
       });
       if (!response.ok || !response.body) {
@@ -621,6 +687,7 @@ export function AssistantWorkspace({
       if (!completed) throw new Error(locale === 'ar' ? 'انقطع الرد قبل اكتماله. لم يتم تغيير أي بيانات.' : 'The response ended before completion. No data was changed.');
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return;
+      if (selectedAttachments.length) setAttachments(selectedAttachments);
       addEvent(assistantId, {
         type: 'error',
         message: error instanceof Error && error.message !== 'request_failed'
@@ -854,7 +921,44 @@ export function AssistantWorkspace({
           <div className="mx-auto mb-2 flex max-w-3xl justify-start">
             <button type="button" onClick={() => setQuickOrderOpen(true)} disabled={sending} className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-border bg-card px-3 text-sm font-bold text-roast hover:border-amber/45 hover:bg-linen/35 disabled:opacity-50"><ShoppingBag className="size-4" />{t('quickActions.createOrder')}</button>
           </div>
+          {attachments.length ? (
+            <div className="mx-auto mb-2 flex max-w-3xl flex-wrap gap-2">
+              {attachments.map((attachment) => (
+                <span key={attachment.id} className="inline-flex max-w-full items-center gap-2 rounded-lg border border-border bg-linen/30 px-2.5 py-1.5 text-xs text-roast">
+                  <Paperclip className="size-3.5 shrink-0" />
+                  <span className="max-w-56 truncate">{attachment.fileName}</span>
+                  <button
+                    type="button"
+                    onClick={() => setAttachments((current) => current.filter((item) => item.id !== attachment.id))}
+                    aria-label={t('removeAttachment', { name: attachment.fileName })}
+                    className="inline-flex size-6 items-center justify-center rounded-md hover:bg-card"
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          ) : null}
+          {attachmentError ? <p className="mx-auto mb-2 max-w-3xl text-xs font-medium text-destructive">{attachmentError}</p> : null}
           <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-2xl border border-border bg-background p-2 shadow-[0_8px_24px_rgba(83,45,31,0.06)] focus-within:border-amber/50 focus-within:ring-2 focus-within:ring-amber/10">
+            <input
+              ref={attachmentInputRef}
+              type="file"
+              multiple
+              accept="image/jpeg,image/png,image/webp,application/pdf,audio/*"
+              className="sr-only"
+              onChange={(event) => void uploadAttachments(event.currentTarget.files)}
+            />
+            <button
+              type="button"
+              disabled={sending || uploading || attachments.length >= 4}
+              onClick={() => attachmentInputRef.current?.click()}
+              aria-label={t('attach')}
+              title={t('attach')}
+              className="inline-flex size-11 shrink-0 items-center justify-center rounded-xl text-muted-foreground hover:bg-linen/50 hover:text-roast disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {uploading ? <LoaderCircle className="size-5 animate-spin" /> : <Paperclip className="size-5" />}
+            </button>
             <textarea
               ref={composerRef}
               value={input}
@@ -875,7 +979,7 @@ export function AssistantWorkspace({
             />
             <button
               type="submit"
-              disabled={sending || !input.trim()}
+              disabled={sending || uploading || (!input.trim() && !attachments.length)}
               aria-label={t('send')}
               className="inline-flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground hover:bg-amber/90 disabled:cursor-not-allowed disabled:opacity-40"
             >

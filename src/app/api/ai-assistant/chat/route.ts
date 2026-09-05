@@ -29,7 +29,8 @@ export async function POST(request: NextRequest) {
           await processAssistantMessage({
             user: userOrResponse,
             locale: parsed.data.locale,
-            message: parsed.data.message,
+            message: parsed.data.message ?? '',
+            attachmentIds: parsed.data.attachmentIds,
             conversationId: parsed.data.conversationId,
             channel: 'WEB',
             signal: request.signal,

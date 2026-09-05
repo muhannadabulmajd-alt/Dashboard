@@ -21,11 +21,17 @@ import {
 import { runAssistant } from './orchestrator';
 import { isOpenAiCreditUnavailable, safeOpenAiError, type SafeOpenAiError } from './provider-error';
 import { consumeAiRateLimit } from './rate-limit';
+import {
+  linkAssistantAttachments,
+  loadAssistantAttachments,
+  transcribeAiAttachment,
+} from './attachments';
 
 export type AssistantMessageInput = {
   user: CurrentUser;
   locale: 'ar' | 'en';
   message: string;
+  attachmentIds?: string[];
   conversationId?: string;
   channel?: AiConversationChannel;
   externalThreadId?: string;
@@ -64,11 +70,26 @@ function actionFailureMessage(locale: 'ar' | 'en', errorCode: string, debugId: s
 
 export async function processAssistantMessage(input: AssistantMessageInput): Promise<AssistantMessageResult> {
   await consumeAiRateLimit(input.user.id);
+  const attachments = await loadAssistantAttachments({
+    userId: input.user.id,
+    attachmentIds: input.attachmentIds,
+  });
+  const transcripts = await Promise.all(
+    attachments.filter((attachment) => attachment.kind === 'AUDIO').map(transcribeAiAttachment),
+  );
+  const attachmentNames = attachments.map((attachment) => attachment.fileName);
+  const effectiveMessage = [
+    input.message.trim(),
+    attachmentNames.length ? `Attached files: ${attachmentNames.join(', ')}` : '',
+    ...transcripts.map((text) => `Voice message transcript:\n${text}`),
+  ].filter(Boolean).join('\n\n') || (input.locale === 'ar'
+    ? 'راجع المرفق واستخرج بياناته التشغيلية.'
+    : 'Review the attachment and extract its operational details.');
   const conversation = await getOrCreateConversation({
     conversationId: input.conversationId,
     userId: input.user.id,
     locale: input.locale,
-    firstMessage: input.message,
+    firstMessage: input.message.trim() || attachmentNames.join(', '),
     channel: input.channel ?? 'WEB',
     externalThreadId: input.externalThreadId,
   });
@@ -82,10 +103,16 @@ export async function processAssistantMessage(input: AssistantMessageInput): Pro
   const userMessage = await saveAiMessage({
     conversationId: conversation.id,
     role: 'USER',
-    content: input.message,
+    content: effectiveMessage,
+  });
+  await linkAssistantAttachments({
+    attachmentIds: attachments.map((attachment) => attachment.id),
+    userId: input.user.id,
+    conversationId: conversation.id,
+    sourceMessageId: userMessage.id,
   });
 
-  let actionCommand = assistantActionCommand(input.message);
+  let actionCommand = assistantActionCommand(effectiveMessage);
   const pendingAction = await prisma.aiPendingAction.findFirst({
       where: {
         conversationId: conversation.id,
@@ -99,7 +126,7 @@ export async function processAssistantMessage(input: AssistantMessageInput): Pro
     pendingAction?.risk === 'HIGH'
     && pendingAction.confirmationRequestedAt
     && pendingAction.confirmationChallenge
-    && normalizeAssistantText(input.message) === normalizeAssistantText(pendingAction.confirmationChallenge),
+    && normalizeAssistantText(effectiveMessage) === normalizeAssistantText(pendingAction.confirmationChallenge),
   );
   if (!actionCommand && submittedHighRiskChallenge) actionCommand = 'confirm';
   if (actionCommand) {
@@ -111,7 +138,7 @@ export async function processAssistantMessage(input: AssistantMessageInput): Pro
               actionId: pendingAction.id,
               user: input.user,
               locale: input.locale,
-              confirmationText: submittedHighRiskChallenge ? input.message : undefined,
+              confirmationText: submittedHighRiskChallenge ? effectiveMessage : undefined,
             })
           : await cancelPendingAction({ actionId: pendingAction.id, user: input.user, locale: input.locale });
         await emit({
@@ -165,6 +192,7 @@ export async function processAssistantMessage(input: AssistantMessageInput): Pro
       conversationId: conversation.id,
       sourceMessageId: userMessage.id,
       messages,
+      attachments: attachments.filter((attachment) => attachment.kind !== 'AUDIO'),
       user: input.user,
       locale: input.locale,
       signal: input.signal,
@@ -192,6 +220,16 @@ export async function processAssistantMessage(input: AssistantMessageInput): Pro
       outputTokens: result.outputTokens,
       requestId: result.requestId ?? undefined,
     });
+    const preparedAction = result.events.find((event) => event.type === 'action_preview');
+    if (preparedAction?.type === 'action_preview') {
+      await linkAssistantAttachments({
+        attachmentIds: attachments.map((attachment) => attachment.id),
+        userId: input.user.id,
+        conversationId: conversation.id,
+        sourceMessageId: userMessage.id,
+        pendingActionId: preparedAction.action.id,
+      });
+    }
     try {
       await prisma.aiRequestLog.update({
         where: { id: requestLog.id },
