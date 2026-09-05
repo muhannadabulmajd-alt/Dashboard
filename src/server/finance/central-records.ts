@@ -7,6 +7,7 @@ import { prisma } from '@/server/db/client';
 import { getCurrentUser } from '@/server/auth/session';
 import { getUsdToIqd } from '@/server/settings';
 import type { TrustedCommandContext } from '@/server/commands/actor-context';
+import type { CentralRecordTransactionCheckpoint } from '@/server/commands/transaction-checkpoints';
 import {
   audit,
   optField,
@@ -63,19 +64,6 @@ const RECORD_KINDS = [
 
 type RecordKind = (typeof RECORD_KINDS)[number];
 type Tx = Prisma.TransactionClient;
-
-export const CENTRAL_RECORD_TRANSACTION_CHECKPOINTS = [
-  'precondition',
-  'party',
-  'finance_entry',
-  'line_effects',
-  'payment',
-  'audit',
-  'cost_sync',
-  'commit_hook',
-] as const;
-
-export type CentralRecordTransactionCheckpoint = (typeof CENTRAL_RECORD_TRANSACTION_CHECKPOINTS)[number];
 
 const LINE_TYPES = ['INVENTORY', 'ASSET', 'EXPENSE', 'SERVICE', 'OTHER'] as const;
 type LedgerLineType = (typeof LINE_TYPES)[number];

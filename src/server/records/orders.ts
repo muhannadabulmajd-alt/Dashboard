@@ -31,6 +31,7 @@ import {
   type CustomerOrderEnrichmentInput,
 } from '@/server/commands/customers';
 import type { TrustedCommandContext } from '@/server/commands/actor-context';
+import type { OrderCreateTransactionCheckpoint } from '@/server/commands/transaction-checkpoints';
 import {
   requireCap,
   resolveCommandActor,
@@ -82,20 +83,6 @@ type OrderCreateStage =
   | 'finance_sync'
   | 'customer_stats'
   | 'commit_hook';
-
-export const ORDER_CREATE_TRANSACTION_CHECKPOINTS = [
-  'precondition',
-  'order_number',
-  'customer',
-  'inventory_readiness',
-  'order_insert',
-  'stock_sync',
-  'finance_sync',
-  'customer_stats',
-  'commit_hook',
-] as const;
-
-export type OrderCreateTransactionCheckpoint = (typeof ORDER_CREATE_TRANSACTION_CHECKPOINTS)[number];
 
 const headerSchema = z.object({
   orderNumber: z.string().optional(),

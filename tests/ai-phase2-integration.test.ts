@@ -15,16 +15,14 @@ vi.mock('@/server/telegram/api', () => ({ sendTelegramDocument }));
 
 import type { CurrentUser } from '@/server/auth/session';
 import { createTrustedCommandContext } from '@/server/commands/actor-context';
-import { prisma } from '@/server/db/client';
 import {
   CENTRAL_RECORD_TRANSACTION_CHECKPOINTS,
-  createCentralRecordFromInput,
-} from '@/server/finance/central-records';
-import { getInvoiceData } from '@/server/invoice/data';
-import {
   ORDER_CREATE_TRANSACTION_CHECKPOINTS,
-  createOrderFromInput,
-} from '@/server/records/orders';
+} from '@/server/commands/transaction-checkpoints';
+import { prisma } from '@/server/db/client';
+import { createCentralRecordFromInput } from '@/server/finance/central-records';
+import { getInvoiceData } from '@/server/invoice/data';
+import { createOrderFromInput } from '@/server/records/orders';
 import { confirmPendingAction } from '@/server/ai/actions';
 import {
   ResolvedExpenseActionSchema,
