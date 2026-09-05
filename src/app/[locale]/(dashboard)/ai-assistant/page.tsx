@@ -1,6 +1,7 @@
 import { Bot, ShieldCheck } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
 import { AssistantWorkspace } from '@/components/ai-assistant/AssistantWorkspace';
+import { AutomationPreferences } from '@/components/ai-assistant/AutomationPreferences';
 import { Card, CardContent, PageHeader } from '@/components/ui/primitives';
 import { getAiAssistantConfig } from '@/server/ai/config';
 import { prisma } from '@/server/db/client';
@@ -78,34 +79,37 @@ export default async function AiAssistantPage({
         )}
       />
       {available ? (
-        <AssistantWorkspace
-          locale={locale}
-          pageContext={pageContext ?? undefined}
-          retentionDays={config.historyRetentionDays}
-          initialConversations={rows.map((row) => ({
-            id: row.id,
-            title: row.title,
-            locale: row.locale,
-            channel: row.channel,
-            lastMessageAt: row.lastMessageAt.toISOString(),
-            messageCount: row._count.messages,
-          }))}
-          quickOrder={{
-            catalog,
-            customers: customers.map((customer) => ({
-              externalId: customer.externalId!,
-              label: `${locale === 'ar' ? customer.nameAr || customer.nameEn || customer.phone || customer.externalId : customer.nameEn || customer.nameAr || customer.phone || customer.externalId} (${customer.externalId})`,
-              phone: customer.phone,
-              governorate: customer.governorate,
-              recentOrder: customer.orders[0] ?? null,
-            })),
-            channelOptions: channels,
-            governorateOptions: governorates,
-            fulfillmentOptions: fulfillment,
-            statusOptions: statuses,
-            defaults,
-          }}
-        />
+        <>
+          <AutomationPreferences locale={locale} />
+          <AssistantWorkspace
+            locale={locale}
+            pageContext={pageContext ?? undefined}
+            retentionDays={config.historyRetentionDays}
+            initialConversations={rows.map((row) => ({
+              id: row.id,
+              title: row.title,
+              locale: row.locale,
+              channel: row.channel,
+              lastMessageAt: row.lastMessageAt.toISOString(),
+              messageCount: row._count.messages,
+            }))}
+            quickOrder={{
+              catalog,
+              customers: customers.map((customer) => ({
+                externalId: customer.externalId!,
+                label: `${locale === 'ar' ? customer.nameAr || customer.nameEn || customer.phone || customer.externalId : customer.nameEn || customer.nameAr || customer.phone || customer.externalId} (${customer.externalId})`,
+                phone: customer.phone,
+                governorate: customer.governorate,
+                recentOrder: customer.orders[0] ?? null,
+              })),
+              channelOptions: channels,
+              governorateOptions: governorates,
+              fulfillmentOptions: fulfillment,
+              statusOptions: statuses,
+              defaults,
+            }}
+          />
+        </>
       ) : (
         <Card variant="surface">
           <CardContent className="flex min-h-72 flex-col items-center justify-center text-center">

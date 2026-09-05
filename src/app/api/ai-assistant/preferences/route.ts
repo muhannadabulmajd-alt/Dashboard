@@ -2,14 +2,21 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { AiAutomationPreferenceInputSchema } from '@/lib/ai-automations';
 import { getAiAutomationPreferences, saveAiAutomationPreference } from '@/server/ai/automations';
 import { isHttpResponse, requireAiApiUser } from '@/server/ai/http';
+import { prisma } from '@/server/db/client';
 
 export const runtime = 'nodejs';
 
 export async function GET() {
   const userOrResponse = await requireAiApiUser();
   if (isHttpResponse(userOrResponse)) return userOrResponse;
-  const preferences = await getAiAutomationPreferences(userOrResponse.id);
-  return NextResponse.json({ preferences });
+  const [preferences, telegramIdentity] = await Promise.all([
+    getAiAutomationPreferences(userOrResponse.id),
+    prisma.telegramIdentity.findFirst({
+      where: { userId: userOrResponse.id, status: 'ACTIVE', privateChatId: { not: null } },
+      select: { id: true },
+    }),
+  ]);
+  return NextResponse.json({ preferences, telegramLinked: Boolean(telegramIdentity) });
 }
 
 export async function PUT(request: NextRequest) {
