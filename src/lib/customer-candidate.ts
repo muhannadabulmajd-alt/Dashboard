@@ -4,7 +4,11 @@ export type InferredCustomerCandidate = {
   nameEn?: string;
   nameAr?: string;
   phone?: string;
+  email?: string;
+  governorate?: string;
   address1?: string;
+  street?: string;
+  notes?: string;
   segment: 'NEW';
 };
 
@@ -62,6 +66,10 @@ function candidateFromMessage(message: string): InferredCustomerCandidate | null
   const mobile = extractIraqiMobile(value);
   let name = labeledValue(lines, 'اسم العميل|اسم الزبون|العميل|الزبون|customer(?:\\s+name)?|name');
   let address1 = labeledValue(lines, 'عنوان العميل|عنوان الزبون|العنوان|customer\\s+address|address');
+  const email = labeledValue(lines, 'البريد(?:\\s+الإلكتروني)?|الايميل|الإيميل|e-?mail');
+  const governorate = labeledValue(lines, 'المحافظة|المدينة|governorate|city');
+  const street = labeledValue(lines, 'الشارع|الزقاق|street');
+  const notes = labeledValue(lines, 'الملاحظات|ملاحظات|ملاحظة|notes?');
 
   if (!name && mobile) {
     const phoneLineIndex = lines.findIndex((line) => extractIraqiMobile(line)?.phone === mobile.phone);
@@ -86,7 +94,11 @@ function candidateFromMessage(message: string): InferredCustomerCandidate | null
         : { nameEn: normalizedName }
       : {}),
     ...(mobile ? { phone: mobile.phone } : {}),
+    ...(email ? { email } : {}),
+    ...(governorate ? { governorate } : {}),
     ...(address1 ? { address1 } : {}),
+    ...(street ? { street } : {}),
+    ...(notes ? { notes } : {}),
     segment: 'NEW',
   };
 }
@@ -157,7 +169,11 @@ export function recoverCustomerCandidate(
       phone: recovered.phone || candidate.phone,
       nameAr: recovered.nameAr || candidate.nameAr,
       nameEn: recovered.nameEn || candidate.nameEn,
+      email: recovered.email || candidate.email,
+      governorate: recovered.governorate || candidate.governorate,
       address1: recovered.address1 || candidate.address1,
+      street: recovered.street || candidate.street,
+      notes: recovered.notes || candidate.notes,
       segment: 'NEW',
     };
   }

@@ -1350,7 +1350,11 @@ async function prepareOrder(raw: unknown, context: ToolContext): Promise<ToolExe
           nameEn: input.newCustomer.nameEn ?? undefined,
           nameAr: input.newCustomer.nameAr ?? undefined,
           phone: input.newCustomer.phone ?? undefined,
+          email: input.newCustomer.email ?? undefined,
+          governorate: input.newCustomer.governorate ?? undefined,
           address1: input.newCustomer.address1 ?? undefined,
+          street: input.newCustomer.street ?? undefined,
+          notes: input.newCustomer.notes ?? undefined,
         }, context.recentUserMessages)
     : null;
   const explicitNewCustomer = input.newCustomer
@@ -1359,12 +1363,16 @@ async function prepareOrder(raw: unknown, context: ToolContext): Promise<ToolExe
         nameEn: input.newCustomer.nameEn ?? recoveredExplicitCustomer?.nameEn,
         nameAr: input.newCustomer.nameAr ?? recoveredExplicitCustomer?.nameAr,
         phone: input.newCustomer.phone ?? recoveredExplicitCustomer?.phone,
+        email: input.newCustomer.email ?? recoveredExplicitCustomer?.email,
+        governorate: input.newCustomer.governorate ?? recoveredExplicitCustomer?.governorate,
         address1: input.newCustomer.address1 ?? recoveredExplicitCustomer?.address1,
+        street: input.newCustomer.street ?? recoveredExplicitCustomer?.street,
+        notes: input.newCustomer.notes ?? recoveredExplicitCustomer?.notes,
       }
     : null;
-  const explicitCustomerEnrichment = input.newCustomer
+  const explicitCustomerEnrichment = explicitNewCustomer
     ? ResolvedCustomerEnrichmentSchema.parse(Object.fromEntries(
-        Object.entries(input.newCustomer).filter(([, value]) => value !== null),
+        Object.entries(explicitNewCustomer).filter(([, value]) => value !== null && value !== undefined),
       ))
     : null;
   if (customerExternalId && explicitCustomerEnrichment && Object.keys(explicitCustomerEnrichment).length) {
