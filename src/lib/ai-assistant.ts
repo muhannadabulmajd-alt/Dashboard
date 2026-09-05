@@ -30,6 +30,11 @@ export type AiResultRow = {
   href?: string;
 };
 
+export type AiResultDownload = {
+  format: 'PDF' | 'XLSX' | 'CSV';
+  href: string;
+};
+
 export type AiResultCard = {
   title: string;
   answer?: string;
@@ -38,6 +43,8 @@ export type AiResultCard = {
   metrics?: AiResultMetric[];
   rows?: AiResultRow[];
   href?: string;
+  reportId?: string;
+  downloads?: AiResultDownload[];
 };
 
 export type AiClarification = {

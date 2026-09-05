@@ -353,6 +353,7 @@ enum AiAutomationKind {
 
 enum AiNotificationStatus {
   PENDING
+  PROCESSING
   SENT
   FAILED
   SKIPPED
@@ -393,6 +394,7 @@ model User {
   aiExecutionReceipts   AiExecutionReceipt[]
   aiDocuments           AiDocument[]
   aiAttachments         AiAttachment[]
+  aiReportSnapshots     AiReportSnapshot[]
   aiAutomationPrefs     AiAutomationPreference[]
   aiNotifications       AiNotificationLog[]
   telegramIdentity      TelegramIdentity?        @relation("TelegramIdentityUser")
@@ -1058,6 +1060,7 @@ model AiConversation {
   executionReceipts AiExecutionReceipt[]
   documents         AiDocument[]
   attachments       AiAttachment[]
+  reportSnapshots   AiReportSnapshot[]
 
   @@unique([id, userId])
   @@index([userId, lastMessageAt])
@@ -1079,9 +1082,10 @@ model AiMessage {
   requestId      String?
   createdAt      DateTime      @default(now())
 
-  conversation  AiConversation    @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  sourceActions AiPendingAction[] @relation("AiPendingActionSource")
-  attachments   AiAttachment[]
+  conversation    AiConversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sourceActions   AiPendingAction[]  @relation("AiPendingActionSource")
+  attachments     AiAttachment[]
+  reportSnapshots AiReportSnapshot[]
 
   @@index([conversationId, createdAt])
   @@index([requestId])
@@ -1257,6 +1261,27 @@ model AiCapabilitySetting {
   updatedAt      DateTime           @updatedAt
 }
 
+model AiReportSnapshot {
+  id              String   @id @default(cuid())
+  userId          String
+  conversationId  String?
+  sourceMessageId String?
+  locale          String   @default("en")
+  reportType      String
+  title           String
+  payload         Json
+  expiresAt       DateTime
+  createdAt       DateTime @default(now())
+
+  user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation  AiConversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  sourceMessage AiMessage?      @relation(fields: [sourceMessageId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([conversationId, createdAt])
+  @@index([expiresAt])
+}
+
 model AiAutomationPreference {
   id        String            @id @default(cuid())
   userId    String
@@ -1286,13 +1311,16 @@ model AiNotificationLog {
   idempotencyKey    String               @unique
   externalMessageId String?
   errorCode         String?
+  attempts          Int                  @default(0)
+  availableAt       DateTime             @default(now())
+  lastAttemptAt     DateTime?
   sentAt            DateTime?
   createdAt         DateTime             @default(now())
   updatedAt         DateTime             @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([status, createdAt])
+  @@index([status, availableAt])
   @@index([userId, createdAt])
 }
 

@@ -136,11 +136,32 @@ describe('Telegram Atlas AI transport contracts', () => {
     expect(rendered.keyboard?.flat()).toContainEqual(expect.objectContaining({ url: 'https://preview.example/en/invoice/order123' }));
   });
 
+  it('renders report exports as exact API links without a locale prefix', () => {
+    const rendered = renderAssistantEvents([{
+      type: 'result_card',
+      card: {
+        title: 'Customer report',
+        generatedAt: '2026-09-05T12:00:00.000Z',
+        reportId: 'report-1',
+        downloads: [
+          { format: 'PDF', href: '/api/ai-assistant/reports/report-1/pdf' },
+          { format: 'XLSX', href: '/api/ai-assistant/reports/report-1/xlsx' },
+        ],
+      },
+    }], { locale: 'en', origin: 'https://preview.example' });
+    expect(rendered.keyboard?.flat()).toContainEqual({
+      text: 'Download PDF',
+      url: 'https://preview.example/api/ai-assistant/reports/report-1/pdf',
+    });
+  });
+
   it('filters tools and writes by the linked Atlas role', () => {
     const salesTools = assistantToolsForRole('SALES_CRM').map((tool) => tool.name);
     expect(salesTools).toContain('prepare_create_order');
     expect(salesTools).toContain('product_buyers');
+    expect(salesTools).toContain('customer_insights');
     expect(salesTools).not.toContain('prepare_create_expense');
+    expect(salesTools).not.toContain('finance_overview');
     expect(canExecuteAssistantAction('SALES_CRM', 'CREATE_ORDER')).toBe(true);
     expect(canExecuteAssistantAction('SALES_CRM', 'CREATE_EXPENSE')).toBe(false);
     expect(canExecuteAssistantAction('VIEWER', 'CREATE_ORDER')).toBe(false);

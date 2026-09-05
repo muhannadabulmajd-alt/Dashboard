@@ -45,6 +45,42 @@ export const ExpenseSummarySchema = z.object({
   category: z.string().trim().nullable(),
 }).strict();
 
+export const FinanceOverviewSchema = z.object({
+  range: AssistantRangeSchema,
+  view: z.enum(['OVERVIEW', 'CASH_FLOW', 'BALANCE_SHEET', 'ACCOUNTS', 'PAYABLES', 'RECEIVABLES']),
+  limit: z.number().int().min(1).max(50),
+}).strict();
+
+export const CustomerInsightsSchema = z.object({
+  range: AssistantRangeSchema,
+  dimension: z.enum(['SUMMARY', 'CITY', 'SEGMENT', 'TOP_CUSTOMERS']),
+  limit: z.number().int().min(1).max(50),
+}).strict();
+
+export const DeliverySummarySchema = z.object({
+  range: AssistantRangeSchema,
+  dimension: z.enum(['COURIER', 'CITY']),
+  slaDays: z.number().int().min(1).max(30),
+  limit: z.number().int().min(1).max(50),
+}).strict();
+
+export const RoasterySummarySchema = z.object({
+  range: AssistantRangeSchema,
+  dimension: z.enum(['BATCH', 'ROAST_LEVEL', 'OPERATOR']),
+  limit: z.number().int().min(1).max(50),
+}).strict();
+
+export const InventoryRecommendationsSchema = z.object({
+  query: z.string().trim().nullable(),
+  horizonDays: z.number().int().min(1).max(90),
+  limit: z.number().int().min(1).max(50),
+}).strict();
+
+export const OperationalAlertsSchema = z.object({
+  expiryDays: z.number().int().min(1).max(180),
+  limit: z.number().int().min(1).max(50),
+}).strict();
+
 export const PrepareCustomerSchema = z.object({
   nameEn: z.string().trim().nullable(),
   nameAr: z.string().trim().nullable(),

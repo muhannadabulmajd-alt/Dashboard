@@ -9,6 +9,7 @@ import { getAiAssistantConfig } from '@/server/ai/config';
 import { aiDebugId } from '@/server/ai/hash';
 import { processAssistantMessage } from '@/server/ai/service';
 import { storeAiAttachment } from '@/server/ai/attachments';
+import { deliverAiReportsToTelegram } from '@/server/ai/reports';
 import {
   answerTelegramCallback,
   downloadTelegramFile,
@@ -410,6 +411,13 @@ export async function processTelegramUpdate(telegramUpdateId: string): Promise<v
         origin: receipt.origin,
         messageId: result.messageId,
       }),
+    });
+    await deliverAiReportsToTelegram({
+      events: result.events,
+      userId: user.id,
+      chatId: telegram.chatId,
+      locale,
+      origin: receipt.origin,
     });
     await markComplete(receipt.id, 'SUCCEEDED');
   } catch (error) {

@@ -203,6 +203,24 @@ function ResultCard({ card, locale }: { card: AiResultCard; locale: 'ar' | 'en' 
           })}
         </div>
       ) : null}
+      {card.downloads?.length ? (
+        <div className="flex flex-wrap gap-2 border-t border-border/70 px-4 py-2.5">
+          {card.downloads.map((download) => (
+            <a
+              key={download.format}
+              href={download.href}
+              className="inline-flex min-h-9 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-sm font-semibold text-roast hover:bg-linen/35"
+            >
+              <Download className="size-3.5" />
+              {download.format === 'PDF'
+                ? t('downloadPdf')
+                : download.format === 'XLSX'
+                  ? t('downloadExcel')
+                  : t('downloadCsv')}
+            </a>
+          ))}
+        </div>
+      ) : null}
       {card.href ? (
         <div className="border-t border-border/70 px-4 py-2.5">
           <Link href={card.href} className="text-sm font-semibold text-primary hover:text-amber">{t('viewInAtlas')}</Link>

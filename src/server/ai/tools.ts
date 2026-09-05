@@ -5,21 +5,31 @@ import type { CurrentUser } from '@/server/auth/session';
 import { normalizeAssistantText, type AiActionPreview, type AiClarification, type AiResultCard, type AiStreamEvent } from '@/lib/ai-assistant';
 import { formatMoney, formatNumber, formatPercent, formatQuantity, toMinor, type AppLocale } from '@/lib/money';
 import { parseBaghdadDateTime, resolveRange } from '@/lib/dates';
+import { enumLabel } from '@/lib/enums';
 import { DashboardFiltersSchema } from '@/lib/filters';
 import { DASHBOARD_TEMPLATES } from '@/lib/dashboard-builder';
 import { salesByDimension, stockRow, topProducts } from '@/lib/metrics';
+import * as Metrics from '@/lib/metrics';
+import { can } from '@/lib/rbac';
 import { inferCustomerCandidate, recoverCustomerCandidate } from '@/lib/customer-candidate';
 import { compatibleCustomerMatches } from '@/server/commands/customers';
+import { getCustomers, getOrderHistory } from '@/server/db/repositories/customers.repo';
+import { getShipments } from '@/server/db/repositories/fulfillment.repo';
 import { getInventoryItems } from '@/server/db/repositories/inventory.repo';
+import { getBatchRows } from '@/server/db/repositories/roastery.repo';
+import { getCatalogForAlerts, getOrderLines, getOrders } from '@/server/db/repositories/sales.repo';
 import { prisma } from '@/server/db/client';
 import { buildBranchScope } from '@/server/filters/where-builder';
-import { getProfitFacts } from '@/server/finance/facts';
+import { getPaymentFacts, getProfitFacts } from '@/server/finance/facts';
+import { getBalanceSheetSnapshot } from '@/server/finance/balance-sheet';
+import { getCashFlowReport, getPartyStatementsReport } from '@/server/finance/reports';
 import { getSpendRows, getSpendTotals } from '@/server/finance/spend';
 import { getInvoiceData } from '@/server/invoice/data';
 import { getListEntries, getListLabel, getOrderStatusRoleMap } from '@/server/lists/resolver';
 import { getOrderOperationalDefaults } from '@/server/records/order-defaults';
 import { findProductBuyers } from '@/server/customers/product-buyers';
 import { createPendingAction } from './pending';
+import { createAiReportCard } from './reports';
 import { actionPreconditionIssues, loadActionPreconditions } from './preconditions';
 import {
   matchCustomer,
@@ -31,7 +41,12 @@ import {
 } from './matching';
 import {
   ExpenseSummarySchema,
+  FinanceOverviewSchema,
+  CustomerInsightsSchema,
+  DeliverySummarySchema,
   InventorySummarySchema,
+  InventoryRecommendationsSchema,
+  OperationalAlertsSchema,
   PrepareCustomerSchema,
   PrepareExpenseSchema,
   PrepareOrderSchema,
@@ -50,6 +65,7 @@ import {
   PrepareTransferSchema,
   PreparePurchaseSchema,
   ProductBuyersSchema,
+  RoasterySummarySchema,
   SalesSummarySchema,
   SearchSchema,
 } from './schemas';
@@ -113,8 +129,9 @@ function generatedAt(now: Date): string {
   return now.toISOString();
 }
 
-function cardResult(card: AiResultCard): ToolExecution {
-  return { modelOutput: { status: 'ok', card }, events: [{ type: 'result_card', card }] };
+async function cardResult(card: AiResultCard, context: ToolContext, reportType: string): Promise<ToolExecution> {
+  const reportCard = await createAiReportCard(card, context, reportType);
+  return { modelOutput: { status: 'ok', card: reportCard }, events: [{ type: 'result_card', card: reportCard }] };
 }
 
 function clarificationResult(clarification: AiClarification): ToolExecution {
@@ -354,7 +371,7 @@ async function salesSummary(raw: unknown, context: ToolContext): Promise<ToolExe
     ],
     rows,
     href: '/sales',
-  });
+  }, context, 'sales-summary');
 }
 
 async function productBuyers(raw: unknown, context: ToolContext): Promise<ToolExecution> {
@@ -428,7 +445,7 @@ async function productBuyers(raw: unknown, context: ToolContext): Promise<ToolEx
       href: `/admin/records/customers/${buyer.customerId}`,
     })),
     href: `/customers/product-buyers?${params.toString()}`,
-  });
+  }, context, 'product-buyers');
 }
 
 async function searchOrders(raw: unknown, context: ToolContext): Promise<ToolExecution> {
@@ -492,7 +509,7 @@ async function searchOrders(raw: unknown, context: ToolContext): Promise<ToolExe
     generatedAt: generatedAt(context.now),
     rows: resultRows,
     href: `/admin/records/orders?q=${encodeURIComponent(input.query)}`,
-  });
+  }, context, 'order-search');
 }
 
 async function orderDetails(raw: unknown, context: ToolContext): Promise<ToolExecution> {
@@ -533,7 +550,7 @@ async function orderDetails(raw: unknown, context: ToolContext): Promise<ToolExe
       value: formatMoney(line.lineNet, data.order.currency, context.locale),
     })),
     href: `/admin/records/orders/${data.order.id}`,
-  });
+  }, context, 'order-details');
 }
 
 async function inventorySummary(raw: unknown, context: ToolContext): Promise<ToolExecution> {
@@ -571,7 +588,7 @@ async function inventorySummary(raw: unknown, context: ToolContext): Promise<Too
       href: `/admin/records/inventory/${row.item.id}`,
     })),
     href: '/inventory',
-  });
+  }, context, 'inventory-summary');
 }
 
 async function expenseSummary(raw: unknown, context: ToolContext): Promise<ToolExecution> {
@@ -614,7 +631,507 @@ async function expenseSummary(raw: unknown, context: ToolContext): Promise<ToolE
       href: row.sourceHref ?? undefined,
     })),
     href: `/finance/spend?bucket=${encodeURIComponent(bucket)}`,
+  }, context, 'spending-summary');
+}
+
+function financeBucketLabel(value: string, locale: AppLocale): string {
+  const labels: Record<string, [string, string]> = {
+    salesCollected: ['Sales collected', 'مبيعات محصلة'],
+    receivablesCollected: ['Receivables collected', 'ذمم مدينة محصلة'],
+    capitalContributions: ['Capital contributions', 'مساهمات رأس المال'],
+    otherIncome: ['Other income', 'إيرادات أخرى'],
+    supplierPayments: ['Supplier payments', 'مدفوعات الموردين'],
+    expensesPaid: ['Expenses paid', 'مصروفات مدفوعة'],
+    inventoryPurchasesPaid: ['Inventory purchases paid', 'مشتريات مخزون مدفوعة'],
+    fixedAssetPurchasesPaid: ['Fixed assets paid', 'أصول ثابتة مدفوعة'],
+    ownerWithdrawals: ['Owner withdrawals', 'مسحوبات المالك'],
+    otherPayments: ['Other payments', 'مدفوعات أخرى'],
+    transfersIn: ['Transfers in', 'تحويلات داخلة'],
+    transfersOut: ['Transfers out', 'تحويلات خارجة'],
+  };
+  const label = labels[value];
+  return label ? localized(locale, label[0], label[1]) : value;
+}
+
+async function financeOverview(raw: unknown, context: ToolContext): Promise<ToolExecution> {
+  const input = FinanceOverviewSchema.parse(raw);
+  const range = rangeFrom(input.range);
+  const filters = DashboardFiltersSchema.parse({
+    range: input.range.preset,
+    from: input.range.from ?? undefined,
+    to: input.range.to ?? undefined,
   });
+  const scope = buildBranchScope(context.user);
+  const period = periodLabel(range.start, range.end, context.locale);
+
+  if (input.view === 'OVERVIEW') {
+    const [profit, payment] = await Promise.all([
+      getProfitFacts(filters, scope, range),
+      getPaymentFacts(filters, scope, range),
+    ]);
+    return cardResult({
+      title: localized(context.locale, 'Finance overview', 'النظرة المالية العامة'),
+      answer: localized(
+        context.locale,
+        `Operating profit is ${formatMoney(profit.pnl.operatingProfit, 'IQD', context.locale)} and available cash is ${formatMoney(payment.cashAvailable, 'IQD', context.locale)}.`,
+        `بلغ الربح التشغيلي ${formatMoney(profit.pnl.operatingProfit, 'IQD', context.locale)} والنقد المتاح ${formatMoney(payment.cashAvailable, 'IQD', context.locale)}.`,
+      ),
+      period,
+      generatedAt: generatedAt(context.now),
+      metrics: [
+        { label: localized(context.locale, 'Net sales', 'صافي المبيعات'), value: formatMoney(profit.pnl.netSales, 'IQD', context.locale) },
+        { label: localized(context.locale, 'Gross profit', 'إجمالي الربح'), value: formatMoney(profit.pnl.grossProfit, 'IQD', context.locale) },
+        { label: localized(context.locale, 'Operating profit', 'الربح التشغيلي'), value: formatMoney(profit.pnl.operatingProfit, 'IQD', context.locale) },
+        { label: localized(context.locale, 'Available cash', 'النقد المتاح'), value: formatMoney(payment.cashAvailable, 'IQD', context.locale) },
+        { label: localized(context.locale, 'Receivables', 'الذمم المدينة'), value: formatMoney(payment.receivables, 'IQD', context.locale) },
+        { label: localized(context.locale, 'Payables', 'الذمم الدائنة'), value: formatMoney(payment.payables, 'IQD', context.locale) },
+      ],
+      href: '/finance',
+    }, context, 'finance-overview');
+  }
+
+  if (input.view === 'CASH_FLOW') {
+    const cashFlow = await getCashFlowReport(filters, scope, range);
+    return cardResult({
+      title: localized(context.locale, 'Cash flow', 'التدفق النقدي'),
+      answer: localized(
+        context.locale,
+        `Net cash movement was ${formatMoney(cashFlow.netMovement, 'IQD', context.locale)}.`,
+        `بلغ صافي الحركة النقدية ${formatMoney(cashFlow.netMovement, 'IQD', context.locale)}.`,
+      ),
+      period,
+      generatedAt: generatedAt(context.now),
+      metrics: [
+        { label: localized(context.locale, 'Cash in', 'النقد الداخل'), value: formatMoney(cashFlow.totalIn, 'IQD', context.locale) },
+        { label: localized(context.locale, 'Cash out', 'النقد الخارج'), value: formatMoney(cashFlow.totalOut, 'IQD', context.locale) },
+        { label: localized(context.locale, 'Net movement', 'صافي الحركة'), value: formatMoney(cashFlow.netMovement, 'IQD', context.locale) },
+      ],
+      rows: [...cashFlow.cashIn, ...cashFlow.cashOut].slice(0, input.limit).map((row) => ({
+        id: row.key,
+        title: financeBucketLabel(row.key, context.locale),
+        subtitle: localized(context.locale, `${row.count} record(s)`, `${formatNumber(row.count, 'ar')} سجل`),
+        value: formatMoney(row.amount, 'IQD', context.locale),
+      })),
+      href: '/finance/reports/cash-flow',
+    }, context, 'finance-cash-flow');
+  }
+
+  if (input.view === 'BALANCE_SHEET' || input.view === 'ACCOUNTS') {
+    const asOf = new Date(Math.min(range.end.getTime(), context.now.getTime()));
+    const balance = await getBalanceSheetSnapshot({ scope, filters, asOf });
+    const accountRows = balance.currencies.flatMap((currency) => currency.accounts.map((account) => ({
+      id: account.id,
+      title: account.name,
+      subtitle: currency.currency,
+      value: formatMoney(account.balance, currency.currency, context.locale),
+      href: `/finance/accounts/${account.id}`,
+    })));
+    return cardResult({
+      title: input.view === 'ACCOUNTS'
+        ? localized(context.locale, 'Account balances', 'أرصدة الحسابات')
+        : localized(context.locale, 'Balance sheet', 'الميزانية العمومية'),
+      answer: localized(
+        context.locale,
+        `Total assets are ${formatMoney(balance.combinedIqd.totalAssets, 'IQD', context.locale)} as of the selected date.`,
+        `بلغ إجمالي الأصول ${formatMoney(balance.combinedIqd.totalAssets, 'IQD', context.locale)} حتى التاريخ المحدد.`,
+      ),
+      period: new Intl.DateTimeFormat(context.locale === 'ar' ? 'ar-IQ' : 'en-GB', {
+        dateStyle: 'medium',
+        timeZone: 'Asia/Baghdad',
+      }).format(balance.asOf),
+      generatedAt: generatedAt(context.now),
+      metrics: [
+        { label: localized(context.locale, 'Cash and bank', 'النقد والبنوك'), value: formatMoney(balance.combinedIqd.cashBank, 'IQD', context.locale) },
+        { label: localized(context.locale, 'Receivables', 'الذمم المدينة'), value: formatMoney(balance.combinedIqd.receivables, 'IQD', context.locale) },
+        { label: localized(context.locale, 'Inventory', 'المخزون'), value: formatMoney(balance.combinedIqd.inventory, 'IQD', context.locale) },
+        { label: localized(context.locale, 'Fixed assets', 'الأصول الثابتة'), value: formatMoney(balance.combinedIqd.fixedAssets, 'IQD', context.locale) },
+        { label: localized(context.locale, 'Payables', 'الذمم الدائنة'), value: formatMoney(balance.combinedIqd.payables, 'IQD', context.locale) },
+        { label: localized(context.locale, 'Total equity', 'إجمالي حقوق الملكية'), value: formatMoney(balance.combinedIqd.totalEquity, 'IQD', context.locale) },
+      ],
+      rows: accountRows.slice(0, input.limit),
+      href: input.view === 'ACCOUNTS' ? '/finance/accounts' : '/finance/reports/balance-sheet',
+    }, context, input.view === 'ACCOUNTS' ? 'account-balances' : 'balance-sheet');
+  }
+
+  const statements = await getPartyStatementsReport(filters, scope, range);
+  const isPayable = input.view === 'PAYABLES';
+  const rows = isPayable ? statements.suppliers : statements.customers;
+  const total = isPayable ? statements.supplierClosingTotal : statements.customerClosingTotal;
+  return cardResult({
+    title: isPayable
+      ? localized(context.locale, 'Supplier payables', 'مستحقات الموردين')
+      : localized(context.locale, 'Customer receivables', 'مستحقات العملاء'),
+    answer: localized(
+      context.locale,
+      `${formatMoney(total, 'IQD', context.locale)} outstanding across ${formatNumber(rows.length, context.locale)} parties.`,
+      `المبلغ المستحق ${formatMoney(total, 'IQD', context.locale)} عبر ${formatNumber(rows.length, context.locale)} جهة.`,
+    ),
+    period,
+    generatedAt: generatedAt(context.now),
+    metrics: [
+      { label: localized(context.locale, 'Opening', 'الرصيد الافتتاحي'), value: formatMoney(rows.reduce((sum, row) => sum + row.opening, 0), 'IQD', context.locale) },
+      { label: localized(context.locale, 'Charges', 'الاستحقاقات'), value: formatMoney(rows.reduce((sum, row) => sum + row.charges, 0), 'IQD', context.locale) },
+      { label: localized(context.locale, 'Payments', 'المدفوعات'), value: formatMoney(rows.reduce((sum, row) => sum + row.payments, 0), 'IQD', context.locale) },
+      { label: localized(context.locale, 'Closing', 'الرصيد الختامي'), value: formatMoney(total, 'IQD', context.locale) },
+    ],
+    rows: rows.slice(0, input.limit).map((row) => ({
+      id: row.partyId,
+      title: row.partyName,
+      subtitle: row.lastActivity
+        ? new Intl.DateTimeFormat(context.locale === 'ar' ? 'ar-IQ' : 'en-GB', { dateStyle: 'medium', timeZone: 'Asia/Baghdad' }).format(row.lastActivity)
+        : localized(context.locale, 'No period activity', 'لا توجد حركة خلال الفترة'),
+      value: formatMoney(row.closing, 'IQD', context.locale),
+      href: `/finance/parties/${row.partyId}`,
+    })),
+    href: '/finance/reports/statements',
+  }, context, isPayable ? 'supplier-payables' : 'customer-receivables');
+}
+
+async function customerInsights(raw: unknown, context: ToolContext): Promise<ToolExecution> {
+  const input = CustomerInsightsSchema.parse(raw);
+  const range = rangeFrom(input.range);
+  const filters = DashboardFiltersSchema.parse({
+    range: input.range.preset,
+    from: input.range.from ?? undefined,
+    to: input.range.to ?? undefined,
+  });
+  const scope = buildBranchScope(context.user);
+  const [orders, customers, history] = await Promise.all([
+    getOrders(filters, scope, range),
+    getCustomers(scope),
+    getOrderHistory(scope),
+  ]);
+  const firstOrderById = new Map(customers.map((customer) => [customer.id, customer.firstOrderAt] as const));
+  const newReturning = Metrics.classifyNewReturning(orders, firstOrderById, range.start, range.end);
+  const conversion = Metrics.firstToSecondConversion(history, range.start, range.end, 30);
+  let rows: AiResultCard['rows'] = [];
+  if (input.dimension === 'CITY') {
+    rows = Metrics.customersByCity(customers).slice(0, input.limit).map((row) => ({
+      id: row.governorate,
+      title: enumLabel(row.governorate, context.locale),
+      value: formatNumber(row.count, context.locale),
+      href: `/customers?governorate=${encodeURIComponent(row.governorate)}`,
+    }));
+  } else if (input.dimension === 'SEGMENT') {
+    rows = Metrics.frequencySegmentCounts(customers).slice(0, input.limit).map((row) => ({
+      id: row.segment,
+      title: enumLabel(row.segment, context.locale),
+      value: formatNumber(row.count, context.locale),
+      href: `/customers?segment=${encodeURIComponent(row.segment)}`,
+    }));
+  } else if (input.dimension === 'TOP_CUSTOMERS') {
+    const totals = new Map<string, { orders: number; sales: number }>();
+    for (const order of orders) {
+      if (!order.customerId || !Metrics.isSalesOrder(order)) continue;
+      const row = totals.get(order.customerId) ?? { orders: 0, sales: 0 };
+      row.orders += 1;
+      row.sales += Metrics.netSales([order]);
+      totals.set(order.customerId, row);
+    }
+    const ranked = [...totals.entries()].sort((a, b) => b[1].sales - a[1].sales).slice(0, input.limit);
+    const customerRows = await prisma.customer.findMany({
+      where: { id: { in: ranked.map(([id]) => id) } },
+      select: { id: true, externalId: true, nameEn: true, nameAr: true, phone: true },
+    });
+    const byId = new Map(customerRows.map((customer) => [customer.id, customer]));
+    rows = ranked.flatMap(([id, value]) => {
+      const customer = byId.get(id);
+      if (!customer) return [];
+      return [{
+        id,
+        title: (context.locale === 'ar' ? customer.nameAr || customer.nameEn : customer.nameEn || customer.nameAr)
+          || customer.externalId
+          || localized(context.locale, 'Unnamed customer', 'عميل بلا اسم'),
+        subtitle: [customer.phone, localized(context.locale, `${value.orders} order(s)`, `${formatNumber(value.orders, 'ar')} طلب`)].filter(Boolean).join(' · '),
+        value: formatMoney(value.sales, 'IQD', context.locale),
+        href: `/admin/records/customers/${id}`,
+      }];
+    });
+  }
+  return cardResult({
+    title: localized(context.locale, 'Customer insights', 'تحليل العملاء'),
+    answer: localized(
+      context.locale,
+      `${formatNumber(newReturning.total, context.locale)} customers purchased in the selected period; ${formatNumber(newReturning.returning, context.locale)} were returning customers.`,
+      `اشترى ${formatNumber(newReturning.total, context.locale)} عميل خلال الفترة المحددة، منهم ${formatNumber(newReturning.returning, context.locale)} عميل عائد.`,
+    ),
+    period: periodLabel(range.start, range.end, context.locale),
+    generatedAt: generatedAt(context.now),
+    metrics: [
+      { label: localized(context.locale, 'Active customers', 'العملاء النشطون'), value: formatNumber(newReturning.total, context.locale) },
+      { label: localized(context.locale, 'New customers', 'العملاء الجدد'), value: formatNumber(newReturning.newCount, context.locale) },
+      { label: localized(context.locale, 'Returning customers', 'العملاء العائدون'), value: formatNumber(newReturning.returning, context.locale) },
+      { label: localized(context.locale, 'Repeat rate', 'معدل التكرار'), value: formatPercent(Metrics.repeatPurchaseRate(newReturning), context.locale) },
+      { label: localized(context.locale, 'First-to-second conversion', 'تحويل الشراء الأول إلى الثاني'), value: formatPercent(conversion, context.locale) },
+    ],
+    rows,
+    href: '/customers',
+  }, context, `customer-insights-${input.dimension.toLowerCase()}`);
+}
+
+async function deliverySummary(raw: unknown, context: ToolContext): Promise<ToolExecution> {
+  const input = DeliverySummarySchema.parse(raw);
+  const range = rangeFrom(input.range);
+  const filters = DashboardFiltersSchema.parse({
+    range: input.range.preset,
+    from: input.range.from ?? undefined,
+    to: input.range.to ?? undefined,
+  });
+  const scope = buildBranchScope(context.user);
+  const [shipments, orders] = await Promise.all([
+    getShipments(filters, scope, range),
+    getOrders(filters, scope, range),
+  ]);
+  const rows = input.dimension === 'CITY'
+    ? Metrics.cityDeliveryPerformance(shipments).slice(0, input.limit).map((row) => ({
+        id: row.governorate,
+        title: enumLabel(row.governorate, context.locale),
+        subtitle: localized(context.locale, `${formatNumber(row.avgDays, context.locale, 1)} days average`, `متوسط ${formatNumber(row.avgDays, context.locale, 1)} يوم`),
+        value: formatPercent(row.slaPct, context.locale),
+        href: `/fulfillment?governorate=${encodeURIComponent(row.governorate)}`,
+      }))
+    : Metrics.courierComparison(shipments).slice(0, input.limit).map((row) => ({
+        id: row.courier,
+        title: row.courier,
+        subtitle: localized(
+          context.locale,
+          `${row.delivered} delivered · ${row.failed} failed · ${formatNumber(row.avgDays, context.locale, 1)} days`,
+          `${formatNumber(row.delivered, 'ar')} مستلم · ${formatNumber(row.failed, 'ar')} فاشل · ${formatNumber(row.avgDays, 'ar', 1)} يوم`,
+        ),
+        value: formatPercent(row.slaPct, context.locale),
+        href: `/fulfillment?courier=${encodeURIComponent(row.courier)}`,
+      }));
+  return cardResult({
+    title: localized(context.locale, 'Delivery performance', 'أداء التوصيل'),
+    answer: localized(
+      context.locale,
+      `${formatNumber(shipments.length, context.locale)} shipments with ${formatPercent(Metrics.deliverySlaPct(shipments, input.slaDays), context.locale)} delivered within ${input.slaDays} day(s).`,
+      `${formatNumber(shipments.length, context.locale)} شحنة، نُفذت ${formatPercent(Metrics.deliverySlaPct(shipments, input.slaDays), context.locale)} منها خلال ${formatNumber(input.slaDays, 'ar')} يوم.`,
+    ),
+    period: periodLabel(range.start, range.end, context.locale),
+    generatedAt: generatedAt(context.now),
+    metrics: [
+      { label: localized(context.locale, 'Shipments', 'الشحنات'), value: formatNumber(shipments.length, context.locale) },
+      { label: localized(context.locale, 'Delivery SLA', 'التسليم ضمن المدة'), value: formatPercent(Metrics.deliverySlaPct(shipments, input.slaDays), context.locale) },
+      { label: localized(context.locale, 'Average delivery', 'متوسط مدة التوصيل'), value: localized(context.locale, `${formatNumber(Metrics.avgDeliveryDays(shipments), context.locale, 1)} days`, `${formatNumber(Metrics.avgDeliveryDays(shipments), 'ar', 1)} يوم`) },
+      { label: localized(context.locale, 'Failed or returned', 'فاشل أو مرتجع'), value: formatNumber(Metrics.failedDeliveryCount(shipments), context.locale), hint: formatPercent(Metrics.failedDeliveryRate(shipments), context.locale) },
+      { label: localized(context.locale, 'Order return rate', 'معدل إرجاع الطلبات'), value: formatPercent(Metrics.returnRate(orders), context.locale) },
+      { label: localized(context.locale, 'Average shipping cost', 'متوسط كلفة الشحن'), value: formatMoney(Math.round(Metrics.avgShippingCost(shipments)), 'IQD', context.locale) },
+    ],
+    rows,
+    href: '/fulfillment',
+  }, context, `delivery-${input.dimension.toLowerCase()}`);
+}
+
+async function roasterySummary(raw: unknown, context: ToolContext): Promise<ToolExecution> {
+  const input = RoasterySummarySchema.parse(raw);
+  const range = rangeFrom(input.range);
+  const filters = DashboardFiltersSchema.parse({
+    range: input.range.preset,
+    from: input.range.from ?? undefined,
+    to: input.range.to ?? undefined,
+  });
+  const batches = await getBatchRows(filters, buildBranchScope(context.user), range);
+  const roasted = batches
+    .filter((batch) => batch.roastedOutputGrams != null && batch.roastLevel != null && batch.roastDate != null)
+    .map((batch) => ({
+      greenInputGrams: batch.greenInputGrams,
+      roastedOutputGrams: batch.roastedOutputGrams as number,
+      roastLevel: batch.roastLevel as string,
+      roastDate: batch.roastDate as Date,
+    }));
+  const green = batches.reduce((sum, batch) => sum + batch.greenInputGrams, 0);
+  const output = roasted.reduce((sum, batch) => sum + batch.roastedOutputGrams, 0);
+  const kg = (grams: number) => `${formatNumber(grams / 1_000, context.locale, 3)} kg`;
+  let rows: AiResultCard['rows'];
+  if (input.dimension === 'ROAST_LEVEL') {
+    rows = Metrics.roastLevelMix(roasted).slice(0, input.limit).map((row) => ({
+      id: row.roastLevel,
+      title: enumLabel(row.roastLevel, context.locale),
+      subtitle: formatPercent(row.pct, context.locale),
+      value: kg(row.outputGrams),
+    }));
+  } else if (input.dimension === 'OPERATOR') {
+    rows = Metrics.operatorActivity(batches.filter((batch) => batch.roastedOutputGrams != null).map((batch) => ({
+      operatorName: batch.operatorName,
+      greenInputGrams: batch.greenInputGrams,
+      roastedOutputGrams: batch.roastedOutputGrams as number,
+    }))).slice(0, input.limit).map((row) => ({
+      id: row.operator,
+      title: row.operator,
+      subtitle: localized(context.locale, `${row.batches} batch(es)`, `${formatNumber(row.batches, 'ar')} دفعة`),
+      value: `${kg(row.outputGrams)} · ${formatPercent(row.shrinkagePct, context.locale)}`,
+    }));
+  } else {
+    rows = batches.slice(0, input.limit).map((batch) => ({
+      id: batch.batchNumber,
+      title: batch.batchNumber,
+      subtitle: [batch.origin, batch.roastLevel ? enumLabel(batch.roastLevel, context.locale) : null, batch.operatorName].filter(Boolean).join(' · '),
+      value: batch.roastedOutputGrams == null ? localized(context.locale, 'Pending roast', 'بانتظار التحميص') : kg(batch.roastedOutputGrams),
+      href: `/admin/records/batches?q=${encodeURIComponent(batch.batchNumber)}`,
+    }));
+  }
+  return cardResult({
+    title: localized(context.locale, 'Roastery summary', 'ملخص المحمصة'),
+    answer: localized(
+      context.locale,
+      `${formatNumber(batches.length, context.locale)} batches used ${kg(green)} of green coffee and produced ${kg(output)}.`,
+      `${formatNumber(batches.length, context.locale)} دفعة استخدمت ${kg(green)} من البن الأخضر وأنتجت ${kg(output)}.`,
+    ),
+    period: periodLabel(range.start, range.end, context.locale),
+    generatedAt: generatedAt(context.now),
+    metrics: [
+      { label: localized(context.locale, 'Batches', 'الدفعات'), value: formatNumber(batches.length, context.locale) },
+      { label: localized(context.locale, 'Green input', 'مدخلات البن الأخضر'), value: kg(green) },
+      { label: localized(context.locale, 'Roasted output', 'الناتج المحمص'), value: kg(output) },
+      { label: localized(context.locale, 'Average shrinkage', 'متوسط الفاقد'), value: formatPercent(Metrics.avgShrinkage(roasted), context.locale) },
+      { label: localized(context.locale, 'Average QC', 'متوسط الجودة'), value: formatNumber(Metrics.avgQcScore(batches), context.locale, 1) },
+    ],
+    rows,
+    href: '/roastery',
+  }, context, `roastery-${input.dimension.toLowerCase()}`);
+}
+
+async function inventoryRecommendations(raw: unknown, context: ToolContext): Promise<ToolExecution> {
+  const input = InventoryRecommendationsSchema.parse(raw);
+  const filters = DashboardFiltersSchema.parse({ range: 'all' });
+  const range = resolveRange({ range: 'all' }, context.now);
+  const query = input.query?.toLocaleLowerCase('ar-IQ') ?? null;
+  const rows = (await getInventoryItems(filters, buildBranchScope(context.user), range))
+    .map(stockRow)
+    .filter((row) => !query || [row.item.nameEn, row.item.nameAr, row.item.category].some((value) => value.toLocaleLowerCase('ar-IQ').includes(query)))
+    .map((row) => {
+      const dailyUsage = row.item.avgDailyUsage ?? 0;
+      const target = Math.max(row.item.reorderPoint ?? 0, dailyUsage * input.horizonDays);
+      const recommended = Math.max(0, Math.ceil((target - row.current) * 1_000) / 1_000);
+      return { ...row, dailyUsage, target, recommended, estimatedCost: recommended * (row.item.unitCost ?? 0) };
+    })
+    .filter((row) => row.recommended > 0)
+    .sort((a, b) => Number(b.current <= 0) - Number(a.current <= 0) || b.estimatedCost - a.estimatedCost);
+  return cardResult({
+    title: localized(context.locale, 'Inventory recommendations', 'توصيات المخزون'),
+    answer: rows.length
+      ? localized(
+          context.locale,
+          `${formatNumber(rows.length, context.locale)} items need replenishment for the ${input.horizonDays}-day planning horizon. This is a read-only recommendation.`,
+          `${formatNumber(rows.length, context.locale)} مادة تحتاج إلى إعادة تجهيز لأفق تخطيط مدته ${formatNumber(input.horizonDays, 'ar')} يوماً. هذه توصية للقراءة فقط.`,
+        )
+      : localized(context.locale, 'No replenishment is indicated by the configured usage and reorder data.', 'لا توجد حاجة لإعادة التجهيز وفق بيانات الاستخدام وحدود الطلب المهيأة.'),
+    generatedAt: generatedAt(context.now),
+    metrics: [
+      { label: localized(context.locale, 'Items to replenish', 'مواد تحتاج تجهيزاً'), value: formatNumber(rows.length, context.locale) },
+      { label: localized(context.locale, 'Stockouts', 'مواد نافدة'), value: formatNumber(rows.filter((row) => row.current <= 0).length, context.locale) },
+      { label: localized(context.locale, 'Estimated replenishment cost', 'كلفة التجهيز التقديرية'), value: formatMoney(Math.round(rows.reduce((sum, row) => sum + row.estimatedCost, 0)), 'IQD', context.locale) },
+      { label: localized(context.locale, 'Planning horizon', 'أفق التخطيط'), value: localized(context.locale, `${input.horizonDays} days`, `${formatNumber(input.horizonDays, 'ar')} يوم`) },
+    ],
+    rows: rows.slice(0, input.limit).map((row) => ({
+      id: row.item.id,
+      title: context.locale === 'ar' ? row.item.nameAr : row.item.nameEn,
+      subtitle: localized(
+        context.locale,
+        `On hand ${formatQuantity(row.current, context.locale)} ${row.item.unit} · daily use ${formatQuantity(row.dailyUsage, context.locale)}`,
+        `المتوفر ${formatQuantity(row.current, 'ar')} ${row.item.unit} · الاستخدام اليومي ${formatQuantity(row.dailyUsage, 'ar')}`,
+      ),
+      value: localized(
+        context.locale,
+        `Recommend ${formatQuantity(row.recommended, context.locale)} ${row.item.unit}`,
+        `المقترح ${formatQuantity(row.recommended, 'ar')} ${row.item.unit}`,
+      ),
+      href: `/admin/records/inventory/${row.item.id}`,
+    })),
+    href: '/inventory',
+  }, context, 'inventory-recommendations');
+}
+
+async function operationalAlerts(raw: unknown, context: ToolContext): Promise<ToolExecution> {
+  const input = OperationalAlertsSchema.parse(raw);
+  const scope = buildBranchScope(context.user);
+  const allFilters = DashboardFiltersSchema.parse({ range: 'all' });
+  const allRange = resolveRange({ range: 'all' }, context.now);
+  const inventoryAllowed = can(context.user.role, 'view:inventory');
+  const financeAllowed = can(context.user.role, 'view:financial');
+  const fulfillmentAllowed = can(context.user.role, 'view:fulfillment');
+  const [items, catalog, shipments] = await Promise.all([
+    inventoryAllowed ? getInventoryItems(allFilters, scope, allRange) : Promise.resolve([]),
+    financeAllowed ? getCatalogForAlerts() : Promise.resolve([]),
+    fulfillmentAllowed
+      ? getShipments(DashboardFiltersSchema.parse({ range: '7d' }), scope, resolveRange({ range: '7d' }, context.now))
+      : Promise.resolve([]),
+  ]);
+  const expiryByItem = new Map<string, Metrics.ExpiryAlertInput>();
+  for (const expiry of Metrics.nearExpiry(items, input.expiryDays, context.now)) {
+    const current = expiryByItem.get(expiry.item.id);
+    if (!current || expiry.daysToExpiry < current.daysToExpiry) {
+      expiryByItem.set(expiry.item.id, {
+        id: expiry.item.id,
+        nameEn: expiry.item.nameEn,
+        nameAr: expiry.item.nameAr,
+        daysToExpiry: expiry.daysToExpiry,
+      });
+    }
+  }
+  const alerts = Metrics.buildAlerts({
+    stock: items.map((item) => ({
+      id: item.id,
+      nameEn: item.nameEn,
+      nameAr: item.nameAr,
+      unit: item.unit,
+      current: Metrics.currentStock(item.movements),
+      reorderPoint: item.reorderPoint,
+    })),
+    expiring: [...expiryByItem.values()],
+    products: catalog,
+  });
+  const failedCouriers = Metrics.courierComparison(shipments).filter((row) => row.failed > 0);
+  const counts = Metrics.alertCounts(alerts);
+  const kindLabels: Record<Metrics.AlertKind, [string, string]> = {
+    stockout: ['Stockout', 'نفاد مخزون'],
+    reorder: ['Reorder level', 'حد إعادة الطلب'],
+    expiry: ['Expiry', 'انتهاء صلاحية'],
+    belowCost: ['Below cost', 'أقل من الكلفة'],
+    lowMargin: ['Low margin', 'هامش منخفض'],
+  };
+  const formatAlertValue = (alert: Metrics.AlertItem) => {
+    if (alert.kind === 'expiry') return localized(context.locale, `${formatNumber(alert.value, context.locale)} days`, `${formatNumber(alert.value, 'ar')} يوم`);
+    if (alert.kind === 'belowCost' || alert.kind === 'lowMargin') return formatPercent(alert.value, context.locale);
+    return `${formatQuantity(alert.value, context.locale)} ${alert.unit ?? ''}`.trim();
+  };
+  const rows: AiResultCard['rows'] = alerts.slice(0, input.limit).map((alert) => ({
+    id: `${alert.kind}-${alert.refId}`,
+    title: context.locale === 'ar' ? alert.name.ar : alert.name.en,
+    subtitle: localized(context.locale, kindLabels[alert.kind][0], kindLabels[alert.kind][1]),
+    value: formatAlertValue(alert),
+    href: alert.kind === 'belowCost' || alert.kind === 'lowMargin'
+      ? '/admin/records/products'
+      : `/admin/records/inventory/${alert.refId}`,
+  }));
+  for (const courier of failedCouriers) {
+    if (rows.length >= input.limit) break;
+    rows.push({
+      id: `delivery-${courier.courier}`,
+      title: courier.courier,
+      subtitle: localized(context.locale, 'Failed or returned deliveries in the last 7 days', 'عمليات توصيل فاشلة أو مرتجعة خلال آخر 7 أيام'),
+      value: formatNumber(courier.failed, context.locale),
+      href: `/fulfillment?courier=${encodeURIComponent(courier.courier)}`,
+    });
+  }
+  return cardResult({
+    title: localized(context.locale, 'Operational alerts', 'التنبيهات التشغيلية'),
+    answer: localized(
+      context.locale,
+      `${formatNumber(counts.critical, context.locale)} critical and ${formatNumber(counts.warning + failedCouriers.length, context.locale)} warning signals are visible within your permissions.`,
+      `يوجد ${formatNumber(counts.critical, context.locale)} تنبيه حرج و${formatNumber(counts.warning + failedCouriers.length, context.locale)} إشارة تحذير ضمن صلاحياتك.`,
+    ),
+    generatedAt: generatedAt(context.now),
+    metrics: [
+      { label: localized(context.locale, 'Critical', 'حرج'), value: formatNumber(counts.critical, context.locale) },
+      { label: localized(context.locale, 'Warnings', 'تحذيرات'), value: formatNumber(counts.warning + failedCouriers.length, context.locale) },
+      { label: localized(context.locale, 'Stock and margin signals', 'إشارات المخزون والهامش'), value: formatNumber(alerts.length, context.locale) },
+      { label: localized(context.locale, 'Courier failure signals', 'إشارات فشل شركات التوصيل'), value: formatNumber(failedCouriers.length, context.locale) },
+    ],
+    rows,
+    href: '/',
+  }, context, 'operational-alerts');
 }
 
 async function searchCustomers(raw: unknown, context: ToolContext): Promise<ToolExecution> {
@@ -632,7 +1149,7 @@ async function searchCustomers(raw: unknown, context: ToolContext): Promise<Tool
       href: `/admin/records/customers/${row.id}`,
     })),
     href: `/admin/records/customers?q=${encodeURIComponent(input.query)}`,
-  });
+  }, context, 'customer-search');
 }
 
 async function prepareCustomer(raw: unknown, context: ToolContext): Promise<ToolExecution> {
@@ -2272,6 +2789,12 @@ const TOOL_HANDLERS: Record<string, (raw: unknown, context: ToolContext) => Prom
   order_details: orderDetails,
   inventory_summary: inventorySummary,
   expense_summary: expenseSummary,
+  finance_overview: financeOverview,
+  customer_insights: customerInsights,
+  delivery_summary: deliverySummary,
+  roastery_summary: roasterySummary,
+  inventory_recommendations: inventoryRecommendations,
+  operational_alerts: operationalAlerts,
   search_customers: searchCustomers,
   prepare_create_customer: prepareCustomer,
   prepare_create_order: prepareOrder,

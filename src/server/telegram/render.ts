@@ -113,6 +113,12 @@ export function renderAssistantEvents(
       if (card.href) {
         keyboard.push([{ text: input.locale === 'ar' ? 'فتح التفاصيل' : 'Open details', url: atlasUrl(input.origin, input.locale, card.href) }]);
       }
+      if (card.downloads?.length) {
+        keyboard.push(card.downloads.slice(0, 3).map((download) => ({
+          text: `${input.locale === 'ar' ? 'تنزيل' : 'Download'} ${download.format}`,
+          url: new URL(download.href, input.origin).toString(),
+        })));
+      }
       sections.push(lines.join('\n'));
     }
 

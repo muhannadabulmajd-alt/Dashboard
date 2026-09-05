@@ -21,6 +21,16 @@
           "initialDelaySeconds": 0
         }
       ]
+    },
+    "src/app/api/queues/ai-reports/route.ts": {
+      "experimentalTriggers": [
+        {
+          "type": "queue/v2beta",
+          "topic": "ai-report-delivery",
+          "retryAfterSeconds": 60,
+          "initialDelaySeconds": 0
+        }
+      ]
     }
   },
   "crons": [

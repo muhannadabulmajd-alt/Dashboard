@@ -105,6 +105,8 @@
     "openOrder": "Open order",
     "openInvoice": "Open invoice",
     "downloadPdf": "Download PDF",
+    "downloadExcel": "Download Excel",
+    "downloadCsv": "Download CSV",
     "documentPending": "PDF preparing",
     "stopWait": "Working...",
     "confirm": "Confirm and execute",

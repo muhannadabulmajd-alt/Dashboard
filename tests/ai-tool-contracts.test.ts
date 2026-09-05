@@ -6,6 +6,12 @@ import {
   PrepareRefundSchema,
   PrepareTransferSchema,
   ProductBuyersSchema,
+  FinanceOverviewSchema,
+  CustomerInsightsSchema,
+  DeliverySummarySchema,
+  RoasterySummarySchema,
+  InventoryRecommendationsSchema,
+  OperationalAlertsSchema,
 } from '@/server/ai/schemas';
 import {
   ResolvedInventoryAdjustmentActionSchema,
@@ -151,7 +157,7 @@ describe('AI write tool validation', () => {
   });
 
   it('publishes only strict allowlisted function schemas', () => {
-    expect(AI_ASSISTANT_TOOLS).toHaveLength(22);
+    expect(AI_ASSISTANT_TOOLS).toHaveLength(28);
     expect(new Set(AI_ASSISTANT_TOOLS.map((tool) => tool.name)).size).toBe(AI_ASSISTANT_TOOLS.length);
     for (const tool of AI_ASSISTANT_TOOLS) {
       expect(tool.strict).toBe(true);
@@ -160,6 +166,20 @@ describe('AI write tool validation', () => {
     expect(AI_ASSISTANT_TOOLS.some((tool) => tool.name.includes('delete'))).toBe(false);
     expect(AI_ASSISTANT_TOOLS.some((tool) => tool.name.includes('sql'))).toBe(false);
     expect(AI_ASSISTANT_TOOLS.some((tool) => tool.name === 'product_buyers')).toBe(true);
+    expect(AI_ASSISTANT_TOOLS.some((tool) => tool.name === 'finance_overview')).toBe(true);
+    expect(AI_ASSISTANT_TOOLS.some((tool) => tool.name === 'inventory_recommendations')).toBe(true);
+  });
+
+  it('bounds governed cross-module analytics without accepting arbitrary query fields', () => {
+    const range = { preset: 'this_month' as const, from: null, to: null };
+    expect(FinanceOverviewSchema.parse({ range, view: 'ACCOUNTS', limit: 25 }).view).toBe('ACCOUNTS');
+    expect(CustomerInsightsSchema.parse({ range, dimension: 'TOP_CUSTOMERS', limit: 25 }).dimension).toBe('TOP_CUSTOMERS');
+    expect(DeliverySummarySchema.parse({ range, dimension: 'COURIER', slaDays: 3, limit: 25 }).slaDays).toBe(3);
+    expect(RoasterySummarySchema.parse({ range, dimension: 'BATCH', limit: 25 }).dimension).toBe('BATCH');
+    expect(InventoryRecommendationsSchema.parse({ query: null, horizonDays: 30, limit: 25 }).horizonDays).toBe(30);
+    expect(OperationalAlertsSchema.parse({ expiryDays: 21, limit: 25 }).expiryDays).toBe(21);
+    expect(() => FinanceOverviewSchema.parse({ range, view: 'ACCOUNTS', limit: 25, sql: 'select *' })).toThrow();
+    expect(() => InventoryRecommendationsSchema.parse({ query: null, horizonDays: 365, limit: 25 })).toThrow();
   });
 
   it('requires distinct accounts for a governed transfer', () => {

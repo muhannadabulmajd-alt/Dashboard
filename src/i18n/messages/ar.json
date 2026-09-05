@@ -105,6 +105,8 @@
     "openOrder": "فتح الطلب",
     "openInvoice": "فتح الفاتورة",
     "downloadPdf": "تنزيل PDF",
+    "downloadExcel": "تنزيل Excel",
+    "downloadCsv": "تنزيل CSV",
     "documentPending": "جاري تجهيز PDF",
     "stopWait": "جاري العمل...",
     "confirm": "تأكيد وتنفيذ",

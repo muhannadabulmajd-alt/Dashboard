@@ -140,6 +140,60 @@ export const AI_ASSISTANT_TOOLS: FunctionTool[] = [
     }),
   ),
   tool(
+    'finance_overview',
+    'Read canonical Atlas finance data for a period: profit and loss, cash flow, balance sheet, account balances, supplier payables, or customer receivables.',
+    object({
+      range,
+      view: enumSchema(['OVERVIEW', 'CASH_FLOW', 'BALANCE_SHEET', 'ACCOUNTS', 'PAYABLES', 'RECEIVABLES']),
+      limit: { type: 'integer', minimum: 1, maximum: 50 },
+    }),
+  ),
+  tool(
+    'customer_insights',
+    'Read governed customer behavior for a Baghdad-time period, including new versus returning customers, repeat rate, geography, segments, and top customers.',
+    object({
+      range,
+      dimension: enumSchema(['SUMMARY', 'CITY', 'SEGMENT', 'TOP_CUSTOMERS']),
+      limit: { type: 'integer', minimum: 1, maximum: 50 },
+    }),
+  ),
+  tool(
+    'delivery_summary',
+    'Read fulfillment performance for a Baghdad-time period by courier or city, including delivery speed, SLA, failures, returns, and cost.',
+    object({
+      range,
+      dimension: enumSchema(['COURIER', 'CITY']),
+      slaDays: { type: 'integer', minimum: 1, maximum: 30 },
+      limit: { type: 'integer', minimum: 1, maximum: 50 },
+    }),
+  ),
+  tool(
+    'roastery_summary',
+    'Read roasting production for a Baghdad-time period by batch, roast level, or operator, including input, output, shrinkage, and quality score.',
+    object({
+      range,
+      dimension: enumSchema(['BATCH', 'ROAST_LEVEL', 'OPERATOR']),
+      limit: { type: 'integer', minimum: 1, maximum: 50 },
+    }),
+  ),
+  tool(
+    'inventory_recommendations',
+    'Calculate read-only replenishment recommendations from current stock, configured reorder points, and configured average daily usage. Never creates a purchase.',
+    object({
+      query: nullableString,
+      horizonDays: { type: 'integer', minimum: 1, maximum: 90 },
+      limit: { type: 'integer', minimum: 1, maximum: 50 },
+    }),
+  ),
+  tool(
+    'operational_alerts',
+    'Read current role-authorized Atlas alerts for stockouts, reorder levels, expiring inventory, unsafe product margins, and failed deliveries. This is advisory and never writes.',
+    object({
+      expiryDays: { type: 'integer', minimum: 1, maximum: 180 },
+      limit: { type: 'integer', minimum: 1, maximum: 50 },
+    }),
+  ),
+  tool(
     'search_customers',
     'Find customers by exact or partial name, Iraqi phone number, or permanent customer ID.',
     object({ query: string, limit: { type: 'integer', minimum: 1, maximum: 25 } }),
