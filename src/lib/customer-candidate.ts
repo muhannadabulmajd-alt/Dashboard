@@ -14,6 +14,15 @@ export type InferredCustomerCandidate = {
 
 type CustomerCandidateSeed = Partial<Omit<InferredCustomerCandidate, 'segment'>>;
 
+function compactCandidate(input: CustomerCandidateSeed): InferredCustomerCandidate {
+  return {
+    ...Object.fromEntries(
+      Object.entries(input).filter(([, value]) => value !== undefined),
+    ),
+    segment: 'NEW',
+  } as InferredCustomerCandidate;
+}
+
 function asciiDigits(value: string): string {
   return value
     .replace(/[\u0660-\u0669]/g, (digit) => String(digit.charCodeAt(0) - 0x0660))
@@ -154,16 +163,15 @@ export function recoverCustomerCandidate(
   recentUserMessages: string[],
 ): InferredCustomerCandidate | null {
   if (!seed) return null;
-  let recovered: InferredCustomerCandidate = {
+  let recovered = compactCandidate({
     ...seed,
     ...(seed.phone ? { phone: extractIraqiMobile(asciiDigits(seed.phone))?.phone ?? seed.phone } : {}),
-    segment: 'NEW',
-  };
+  });
 
   for (const message of [...recentUserMessages].reverse()) {
     const candidate = candidateFromMessage(message);
     if (!candidate || !sameCandidate(recovered, candidate)) continue;
-    recovered = {
+    recovered = compactCandidate({
       ...candidate,
       ...recovered,
       phone: recovered.phone || candidate.phone,
@@ -174,8 +182,7 @@ export function recoverCustomerCandidate(
       address1: recovered.address1 || candidate.address1,
       street: recovered.street || candidate.street,
       notes: recovered.notes || candidate.notes,
-      segment: 'NEW',
-    };
+    });
   }
 
   return recovered;
