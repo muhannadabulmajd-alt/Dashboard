@@ -4,6 +4,7 @@ import {
   assistantActionCommand,
   assistantCreditUnavailableMessage,
   assistantErrorMessage,
+  normalizeAssistantText,
   type AiStreamEvent,
 } from '@/lib/ai-assistant';
 import type { CurrentUser } from '@/server/auth/session';
@@ -84,22 +85,34 @@ export async function processAssistantMessage(input: AssistantMessageInput): Pro
     content: input.message,
   });
 
-  const actionCommand = assistantActionCommand(input.message);
-  if (actionCommand) {
-    const pendingAction = await prisma.aiPendingAction.findFirst({
+  let actionCommand = assistantActionCommand(input.message);
+  const pendingAction = await prisma.aiPendingAction.findFirst({
       where: {
         conversationId: conversation.id,
         userId: input.user.id,
         status: { in: ['PENDING', 'EXECUTING'] },
       },
       orderBy: { createdAt: 'desc' },
-      select: { id: true },
-    });
+      select: { id: true, risk: true, confirmationChallenge: true, confirmationRequestedAt: true },
+  });
+  const submittedHighRiskChallenge = Boolean(
+    pendingAction?.risk === 'HIGH'
+    && pendingAction.confirmationRequestedAt
+    && pendingAction.confirmationChallenge
+    && normalizeAssistantText(input.message) === normalizeAssistantText(pendingAction.confirmationChallenge),
+  );
+  if (!actionCommand && submittedHighRiskChallenge) actionCommand = 'confirm';
+  if (actionCommand) {
     if (pendingAction) {
       const debugId = aiDebugId('ai-action');
       try {
         const result = actionCommand === 'confirm'
-          ? await confirmPendingAction({ actionId: pendingAction.id, user: input.user, locale: input.locale })
+          ? await confirmPendingAction({
+              actionId: pendingAction.id,
+              user: input.user,
+              locale: input.locale,
+              confirmationText: submittedHighRiskChallenge ? input.message : undefined,
+            })
           : await cancelPendingAction({ actionId: pendingAction.id, user: input.user, locale: input.locale });
         await emit({
           type: 'action_result',
@@ -108,6 +121,11 @@ export async function processAssistantMessage(input: AssistantMessageInput): Pro
           message: result.message,
           href: result.href,
           invoiceHref: result.invoiceHref,
+          documentHref: result.documentHref,
+          documentStatus: result.documentStatus,
+          committed: result.committed,
+          requiresSecondConfirmation: result.requiresSecondConfirmation,
+          confirmationChallenge: result.confirmationChallenge,
         });
         await emit({ type: 'completion', conversationId: conversation.id });
         return { conversationId: conversation.id, events, failed: false };

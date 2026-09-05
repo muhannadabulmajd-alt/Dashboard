@@ -2,6 +2,7 @@
 
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
+import { z } from 'zod';
 import { prisma } from '@/server/db/client';
 import { getCurrentUser } from '@/server/auth/session';
 import { getUsdToIqd } from '@/server/settings';
@@ -25,9 +26,14 @@ import {
   classificationStatusForTreatment,
   spendTreatmentForItemType,
 } from '@/lib/spend-treatment';
-import { isMeasurementUnit } from '@/lib/units';
+import { isMeasurementUnit, MEASUREMENT_UNITS } from '@/lib/units';
 import { syncActiveCost } from '@/server/inventory/fifo';
 import { normalizeIraqiPhone } from '@/lib/phone';
+import {
+  PartyCommandSchema,
+  resolveOrCreatePartyInTransaction,
+  type PartyCommandInput,
+} from '@/server/commands/parties';
 import { syncAllocatedAssetTotals } from '@/server/finance/asset-allocations';
 import {
   captureLayerBaseCosts,
@@ -62,6 +68,68 @@ type LedgerLineType = (typeof LINE_TYPES)[number];
 
 const PURCHASE_PAYMENT_MODES = ['PAID', 'CREDIT', 'PARTIAL'] as const;
 type PurchasePaymentMode = (typeof PURCHASE_PAYMENT_MODES)[number];
+
+const CentralRecordLineSchema = z.object({
+  token: z.string().trim().min(1).optional(),
+  itemType: z.enum(LINE_TYPES),
+  itemName: z.string().trim().min(1),
+  categoryType: z.enum(EXPENSE_CATEGORY_TYPES).nullish(),
+  assetKey: z.string().trim().nullish(),
+  assetCategory: z.string().trim().nullish(),
+  inventoryItemId: z.string().trim().nullish(),
+  inventoryItemMode: z.enum(['existing', 'new']).default('existing'),
+  newItemNameEn: z.string().trim().default(''),
+  newItemNameAr: z.string().trim().default(''),
+  newItemCategory: z.enum(INVENTORY_CATEGORIES).nullish(),
+  unit: z.enum(MEASUREMENT_UNITS),
+  quantity: z.coerce.number().positive(),
+  unitCost: z.coerce.number().positive(),
+  discount: z.coerce.number().nonnegative().default(0),
+  extra: z.coerce.number().nonnegative().default(0),
+  branchId: z.string().trim().nullish(),
+  notes: z.string().trim().nullish(),
+}).strict();
+
+const CentralRecordCommandInputSchema = z.object({
+  locale: z.enum(['en', 'ar']).default('ar'),
+  recordKind: z.enum(RECORD_KINDS),
+  date: z.coerce.date(),
+  amount: z.coerce.number().positive().optional(),
+  currency: z.enum(CURRENCIES).default('IQD'),
+  rate: z.coerce.number().positive().nullish(),
+  accountId: z.string().trim().nullish(),
+  toAccountId: z.string().trim().nullish(),
+  partyId: z.string().trim().nullish(),
+  newParty: PartyCommandSchema.optional(),
+  categoryType: z.enum(EXPENSE_CATEGORY_TYPES).nullish(),
+  branchId: z.string().trim().nullish(),
+  description: z.string().trim().nullish(),
+  reference: z.string().trim().nullish(),
+  attachmentUrl: z.string().trim().nullish(),
+  dueDate: z.coerce.date().nullish(),
+  quantity: z.coerce.number().positive().nullish(),
+  unit: z.enum(MEASUREMENT_UNITS).nullish(),
+  inventoryItemMode: z.enum(['existing', 'new']).optional(),
+  inventoryItemId: z.string().trim().nullish(),
+  newItemNameEn: z.string().trim().nullish(),
+  newItemNameAr: z.string().trim().nullish(),
+  newItemCategory: z.enum(INVENTORY_CATEGORIES).nullish(),
+  expiryDate: z.coerce.date().nullish(),
+  assetName: z.string().trim().nullish(),
+  assetCategory: z.string().trim().nullish(),
+  assetKey: z.string().trim().nullish(),
+  paymentMode: z.enum(PURCHASE_PAYMENT_MODES).optional(),
+  paidAmount: z.coerce.number().nonnegative().nullish(),
+  paymentMethod: z.enum(PAYMENT_METHODS).nullish(),
+  paymentDate: z.coerce.date().nullish(),
+  lines: z.array(CentralRecordLineSchema).max(50).optional(),
+}).strict().superRefine((value, ctx) => {
+  if (!value.lines?.length && !value.amount) {
+    ctx.addIssue({ code: 'custom', path: ['amount'], message: 'Amount is required.' });
+  }
+});
+
+export type CentralRecordCommandInput = z.input<typeof CentralRecordCommandInputSchema>;
 
 type MoneyShape = {
   amount: number;
@@ -529,12 +597,112 @@ export async function quickCreateCustomer(fd: FormData): Promise<QuickCreateResu
   return { ok: true, id: result.id, label: result.name };
 }
 
+function setCentralCommandField(fd: FormData, key: string, value: unknown): void {
+  if (value === null || value === undefined || value === '') return;
+  fd.set(key, value instanceof Date ? value.toISOString() : String(value));
+}
+
+/**
+ * Typed adapter shared by trusted server callers such as web AI and Telegram.
+ * The existing FormData action remains the browser boundary so current forms
+ * retain their behavior while every channel enters the same transaction code.
+ */
+export async function createCentralRecordFromInput(
+  rawInput: CentralRecordCommandInput,
+  options: {
+    actorContext?: TrustedCommandContext;
+    beforeExecute?: CommandPreconditionHook;
+    onCommitted?: CommandCommitHook<{ recordId: string }>;
+  } = {},
+): Promise<ActionState> {
+  const parsed = CentralRecordCommandInputSchema.safeParse(rawInput);
+  if (!parsed.success) {
+    return {
+      error: 'invalid',
+      formError: 'invalid',
+      fieldErrors: Object.fromEntries(
+        parsed.error.issues.map((issue) => [issue.path.join('.') || 'form', 'invalid']),
+      ),
+      stage: 'validation',
+    };
+  }
+
+  const input = parsed.data;
+  const fd = new FormData();
+  const fields: Array<[string, unknown]> = [
+    ['locale', input.locale],
+    ['recordKind', input.recordKind],
+    ['date', input.date],
+    ['amount', input.amount],
+    ['currency', input.currency],
+    ['rate', input.rate],
+    ['accountId', input.accountId],
+    ['toAccountId', input.toAccountId],
+    ['partyId', input.partyId],
+    ['categoryType', input.categoryType],
+    ['branchId', input.branchId],
+    ['description', input.description],
+    ['reference', input.reference],
+    ['attachmentUrl', input.attachmentUrl],
+    ['dueDate', input.dueDate],
+    ['quantity', input.quantity],
+    ['unit', input.unit],
+    ['inventoryItemMode', input.inventoryItemMode],
+    ['inventoryItemId', input.inventoryItemId],
+    ['newItemNameEn', input.newItemNameEn],
+    ['newItemNameAr', input.newItemNameAr],
+    ['newItemCategory', input.newItemCategory],
+    ['expiryDate', input.expiryDate],
+    ['assetName', input.assetName],
+    ['assetCategory', input.assetCategory],
+    ['assetKey', input.assetKey],
+    ['paymentMode', input.paymentMode],
+    ['paidAmount', input.paidAmount],
+    ['paymentMethod', input.paymentMethod],
+    ['paymentDate', input.paymentDate],
+  ];
+  for (const [key, value] of fields) setCentralCommandField(fd, key, value);
+
+  if (input.lines?.length) {
+    const tokens = input.lines.map((line, index) => line.token || `ai-${index + 1}`);
+    setCentralCommandField(fd, 'lineIds', tokens.join(','));
+    input.lines.forEach((line, index) => {
+      const prefix = `line_${tokens[index]}_`;
+      const lineFields: Array<[string, unknown]> = [
+        ['type', line.itemType],
+        ['itemName', line.itemName],
+        ['categoryType', line.categoryType],
+        ['assetKey', line.assetKey],
+        ['assetCategory', line.assetCategory],
+        ['inventoryItemId', line.inventoryItemId],
+        ['inventoryItemMode', line.inventoryItemMode],
+        ['newItemNameEn', line.newItemNameEn],
+        ['newItemNameAr', line.newItemNameAr],
+        ['newItemCategory', line.newItemCategory],
+        ['unit', line.unit],
+        ['quantity', line.quantity],
+        ['unitCost', line.unitCost],
+        ['discount', line.discount],
+        ['extra', line.extra],
+        ['branchId', line.branchId],
+        ['notes', line.notes],
+      ];
+      for (const [key, value] of lineFields) {
+        setCentralCommandField(fd, `${prefix}${key}`, value);
+      }
+    });
+  }
+
+  return createCentralRecordCommand(fd, { ...options, newParty: input.newParty });
+}
+
 export async function createCentralRecordCommand(
   fd: FormData,
   options: {
     actorContext?: TrustedCommandContext;
     beforeExecute?: CommandPreconditionHook;
     onCommitted?: CommandCommitHook<{ recordId: string }>;
+    newParty?: PartyCommandInput;
   } = {},
 ): Promise<ActionState> {
   const user = await resolveCommandActor('manage:finance', options.actorContext);
@@ -572,6 +740,14 @@ export async function createCentralRecordCommand(
   try {
     await prisma.$transaction(async (tx) => {
       await options.beforeExecute?.(tx);
+      if (!optField(fd, 'partyId') && options.newParty) {
+        const party = await resolveOrCreatePartyInTransaction(
+          tx,
+          options.newParty,
+          { actorId: user.id, source: options.actorContext ? 'ai-assistant-finance' : 'central-record-panel' },
+        );
+        fd.set('partyId', party.id);
+      }
       if (isMultiLinePurchase && linePayload) {
       const paymentMethod = parsePaymentMethod(fd);
       const entry = await tx.financeEntry.create({

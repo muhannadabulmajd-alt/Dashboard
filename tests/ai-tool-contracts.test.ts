@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { PrepareOrderSchema, PreparePurchaseSchema, ProductBuyersSchema } from '@/server/ai/schemas';
-import { ResolvedOrderActionSchema } from '@/server/ai/action-data';
+import {
+  PrepareInventoryAdjustmentSchema,
+  PrepareOrderSchema,
+  PreparePurchaseSchema,
+  PrepareRefundSchema,
+  ProductBuyersSchema,
+} from '@/server/ai/schemas';
+import {
+  ResolvedInventoryAdjustmentActionSchema,
+  ResolvedOrderActionSchema,
+  ResolvedRefundActionSchema,
+} from '@/server/ai/action-data';
 import { AI_ASSISTANT_TOOLS } from '@/server/ai/tool-definitions';
 import { actionPreconditionIssues } from '@/server/ai/preconditions';
 import { QuickOrderDraftSchema } from '@/lib/ai-quick-order';
@@ -81,7 +91,7 @@ describe('AI write tool validation', () => {
   });
 
   it('publishes only strict allowlisted function schemas', () => {
-    expect(AI_ASSISTANT_TOOLS).toHaveLength(12);
+    expect(AI_ASSISTANT_TOOLS).toHaveLength(21);
     expect(new Set(AI_ASSISTANT_TOOLS.map((tool) => tool.name)).size).toBe(AI_ASSISTANT_TOOLS.length);
     for (const tool of AI_ASSISTANT_TOOLS) {
       expect(tool.strict).toBe(true);
@@ -90,6 +100,55 @@ describe('AI write tool validation', () => {
     expect(AI_ASSISTANT_TOOLS.some((tool) => tool.name.includes('delete'))).toBe(false);
     expect(AI_ASSISTANT_TOOLS.some((tool) => tool.name.includes('sql'))).toBe(false);
     expect(AI_ASSISTANT_TOOLS.some((tool) => tool.name === 'product_buyers')).toBe(true);
+  });
+
+  it('validates governed operations without accepting raw query fields', () => {
+    const adjustment = {
+      inventoryItemQuery: 'Green coffee Brazil',
+      targetQuantity: 12.375,
+      occurredAt: null,
+      reason: 'Verified physical count',
+    };
+    expect(PrepareInventoryAdjustmentSchema.parse(adjustment)).toEqual(adjustment);
+    expect(ResolvedInventoryAdjustmentActionSchema.parse({
+      inventoryItemId: 'item-1',
+      inventoryItemName: 'Green coffee Brazil',
+      targetQuantity: 12.375,
+      occurredAt: '2026-09-05T09:00:00.000Z',
+      reason: adjustment.reason,
+    }).targetQuantity).toBe(12.375);
+    expect(() => ResolvedInventoryAdjustmentActionSchema.parse({
+      inventoryItemId: 'item-1',
+      inventoryItemName: 'Green coffee Brazil',
+      targetQuantity: 12.3755,
+      occurredAt: '2026-09-05T09:00:00.000Z',
+      reason: adjustment.reason,
+    })).toThrow();
+    expect(() => PrepareInventoryAdjustmentSchema.parse({ ...adjustment, sql: 'update inventory' })).toThrow();
+  });
+
+  it('requires complete high-risk refund data at execution time', () => {
+    const extracted = {
+      orderQuery: 'LHB-ORD-260905-WEB-0001',
+      amount: 10_000,
+      accountQuery: 'Cash',
+      paymentMethod: 'CASH' as const,
+      date: null,
+      reason: 'Customer returned the order',
+    };
+    expect(PrepareRefundSchema.parse(extracted)).toEqual(extracted);
+    const resolved = ResolvedRefundActionSchema.parse({
+      orderId: 'order-1',
+      orderNumber: extracted.orderQuery,
+      amount: extracted.amount,
+      accountId: 'account-1',
+      accountName: 'Cash',
+      paymentMethod: extracted.paymentMethod,
+      date: '2026-09-05T09:00:00.000Z',
+      reason: extracted.reason,
+    });
+    expect(resolved.orderNumber).toBe(extracted.orderQuery);
+    expect(() => ResolvedRefundActionSchema.parse({ ...resolved, reason: '' })).toThrow();
   });
 
   it('requires a bounded product-buyer query and rejects raw query fields', () => {

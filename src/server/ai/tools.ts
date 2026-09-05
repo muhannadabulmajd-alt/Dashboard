@@ -2,10 +2,11 @@ import 'server-only';
 import type { AiPendingActionType, Prisma } from '@prisma/client';
 import { z } from 'zod';
 import type { CurrentUser } from '@/server/auth/session';
-import type { AiActionPreview, AiClarification, AiResultCard, AiStreamEvent } from '@/lib/ai-assistant';
+import { normalizeAssistantText, type AiActionPreview, type AiClarification, type AiResultCard, type AiStreamEvent } from '@/lib/ai-assistant';
 import { formatMoney, formatNumber, formatPercent, formatQuantity, toMinor, type AppLocale } from '@/lib/money';
 import { parseBaghdadDateTime, resolveRange } from '@/lib/dates';
 import { DashboardFiltersSchema } from '@/lib/filters';
+import { DASHBOARD_TEMPLATES } from '@/lib/dashboard-builder';
 import { salesByDimension, stockRow, topProducts } from '@/lib/metrics';
 import { inferCustomerCandidate, recoverCustomerCandidate } from '@/lib/customer-candidate';
 import { getInventoryItems } from '@/server/db/repositories/inventory.repo';
@@ -14,7 +15,7 @@ import { buildBranchScope } from '@/server/filters/where-builder';
 import { getProfitFacts } from '@/server/finance/facts';
 import { getSpendRows, getSpendTotals } from '@/server/finance/spend';
 import { getInvoiceData } from '@/server/invoice/data';
-import { getListEntries, getListLabel } from '@/server/lists/resolver';
+import { getListEntries, getListLabel, getOrderStatusRoleMap } from '@/server/lists/resolver';
 import { getOrderOperationalDefaults } from '@/server/records/order-defaults';
 import { findProductBuyers } from '@/server/customers/product-buyers';
 import { createPendingAction } from './pending';
@@ -34,6 +35,15 @@ import {
   PrepareExpenseSchema,
   PrepareOrderSchema,
   PrepareOrderStatusSchema,
+  PrepareCustomerUpdateSchema,
+  PrepareDashboardDraftSchema,
+  PrepareInventoryAdjustmentSchema,
+  PreparePartyUpdateSchema,
+  PreparePaymentSchema,
+  PrepareRefundSchema,
+  PrepareReversalSchema,
+  PrepareRoastBatchSchema,
+  PrepareSpendReclassificationSchema,
   PreparePurchaseSchema,
   ProductBuyersSchema,
   SalesSummarySchema,
@@ -41,10 +51,20 @@ import {
 } from './schemas';
 import {
   ResolvedCustomerActionSchema,
+  ResolvedCustomerUpdateActionSchema,
+  ResolvedDashboardDraftActionSchema,
   ResolvedExpenseActionSchema,
+  ResolvedInventoryAdjustmentActionSchema,
   ResolvedOrderActionSchema,
   ResolvedOrderStatusActionSchema,
+  ResolvedPartyActionSchema,
+  ResolvedPartyUpdateActionSchema,
+  ResolvedPaymentActionSchema,
   ResolvedPurchaseActionSchema,
+  ResolvedRefundActionSchema,
+  ResolvedReversalActionSchema,
+  ResolvedRoastBatchActionSchema,
+  ResolvedSpendReclassificationActionSchema,
 } from './action-data';
 import { assertAssistantToolAllowed } from './access';
 
@@ -145,6 +165,15 @@ function toInputJson(value: unknown): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 }
 
+function highRiskChallenge(type: AiPendingActionType, validatedData: unknown): string | undefined {
+  if (!['RECORD_REFUND', 'REVERSE_RECORD', 'RECLASSIFY_SPEND'].includes(type)) return undefined;
+  if (!validatedData || typeof validatedData !== 'object') throw new Error('high_risk_challenge_missing');
+  const value = validatedData as { orderNumber?: unknown; recordNumber?: unknown };
+  const challenge = String(value.orderNumber ?? value.recordNumber ?? '').trim();
+  if (!challenge) throw new Error('high_risk_challenge_missing');
+  return challenge;
+}
+
 async function actionResult(input: {
   context: ToolContext;
   type: AiPendingActionType;
@@ -210,11 +239,14 @@ async function actionResult(input: {
         : field);
     }
   }
+  const confirmationChallenge = highRiskChallenge(input.type, input.validatedData);
   const action = await createPendingAction({
     conversationId: input.context.conversationId,
     userId: input.context.user.id,
     sourceMessageId: input.context.sourceMessageId,
     type: input.type,
+    risk: confirmationChallenge ? 'HIGH' : 'MEDIUM',
+    confirmationChallenge,
     extractedData: toInputJson(input.extractedData),
     validatedData: toInputJson(input.validatedData),
     preconditions,
@@ -664,6 +696,7 @@ async function prepareOrder(raw: unknown, context: ToolContext): Promise<ToolExe
   if (!channel.ok) return channel.result;
   if (!governorate.ok) return governorate.result;
   if (!status.ok) return status.result;
+  const statusRole = (await getOrderStatusRoleMap()).get(status.code) ?? 'UNKNOWN';
 
   let customerExternalId: string | null = null;
   let customerLabel = localized(context.locale, 'Walk-in / no customer', 'بيع مباشر / بدون عميل');
@@ -781,27 +814,23 @@ async function prepareOrder(raw: unknown, context: ToolContext): Promise<ToolExe
     previewLines.push(`${line.quantity} x ${context.locale === 'ar' ? match.value.nameAr : match.value.nameEn} · ${match.value.sizeLabel} · ${match.value.sku}`);
   }
 
+  let financeMode = input.financeMode;
+  const directAutomaticPayment = financeMode === 'AUTO'
+    && statusRole === 'SALE'
+    && channel.code !== 'ONLINE_STORE'
+    && input.fulfillmentMethod !== 'COURIER';
+  const accountQuery = input.financeAccountQuery || (
+    directAutomaticPayment ? context.user.defaultFinanceAccountId ?? null : null
+  );
   let financeAccountId: string | null = null;
-  if ((input.financeMode === 'PAID' || input.financeMode === 'PARTIAL') && input.financeAccountQuery) {
-    const match = await matchFinanceAccount(input.financeAccountQuery);
+  if ((financeMode === 'PAID' || financeMode === 'PARTIAL' || directAutomaticPayment) && accountQuery) {
+    const match = await matchFinanceAccount(accountQuery);
     if (match.kind === 'none') return noMatch(context.locale, 'financeAccountQuery', localized(context.locale, 'finance account', 'حساب مالي'));
     if (match.kind === 'ambiguous') return ambiguousMatch(context.locale, 'financeAccountQuery', match.candidates, (row) => `${String(row.name)} · ${String(row.currency)}`, (row) => String(row.id));
     financeAccountId = match.value.id;
   }
-  if ((input.financeMode === 'PAID' || input.financeMode === 'PARTIAL') && !financeAccountId) {
-    financeAccountId = (
-      await prisma.financeAccount.findFirst({
-        where: {
-          externalKey: 'CASH_ON_HANDS',
-          isActive: true,
-          currency: 'IQD',
-        },
-        select: { id: true },
-      })
-    )?.id ?? null;
-  }
   let financeProviderId: string | null = null;
-  if (input.financeMode === 'PROVIDER' && input.financeProviderQuery) {
+  if (financeMode === 'PROVIDER' && input.financeProviderQuery) {
     const match = await matchParty(input.financeProviderQuery);
     if (match.kind === 'none') return noMatch(context.locale, 'financeProviderQuery', localized(context.locale, 'payment provider', 'مزود الدفع'));
     if (match.kind === 'ambiguous') return ambiguousMatch(context.locale, 'financeProviderQuery', match.candidates, (row) => `${String(row.name)} · ${String(row.type)}`, (row) => String(row.id));
@@ -813,18 +842,19 @@ async function prepareOrder(raw: unknown, context: ToolContext): Promise<ToolExe
     }
     financeProviderId = match.value.id;
   }
-  if ((input.financeMode === 'PAID' || input.financeMode === 'PARTIAL') && !financeAccountId) {
+  if ((financeMode === 'PAID' || financeMode === 'PARTIAL' || directAutomaticPayment) && !financeAccountId) {
     return missingResult(context.locale, [localized(context.locale, 'payment account', 'حساب الدفع')]);
   }
-  if (input.financeMode === 'PROVIDER' && !financeProviderId) {
+  if (financeMode === 'PROVIDER' && !financeProviderId) {
     return missingResult(context.locale, [localized(context.locale, 'payment provider', 'مزود الدفع')]);
   }
+  if (directAutomaticPayment) financeMode = 'PAID';
   const placedAt = dateValue(input.placedAt) as Date;
   const paymentDate = dateValue(input.financePaymentDate) ?? (
-    input.financeMode === 'PAID' || input.financeMode === 'PARTIAL' ? placedAt : null
+    financeMode === 'PAID' || financeMode === 'PARTIAL' ? placedAt : null
   );
   const dueDate = dateValue(input.financeDueDate) ?? (
-    input.financeMode === 'CREDIT' || input.financeMode === 'PARTIAL' ? placedAt : null
+    financeMode === 'CREDIT' || financeMode === 'PARTIAL' ? placedAt : null
   );
   const validated = ResolvedOrderActionSchema.parse({
     customerExternalId,
@@ -839,7 +869,7 @@ async function prepareOrder(raw: unknown, context: ToolContext): Promise<ToolExe
     orderDiscount: input.orderDiscount,
     extraCharges: input.extraCharges,
     notes: input.notes,
-    financeMode: input.financeMode,
+    financeMode,
     financeAccountId,
     financeProviderId,
     financePaidAmount: input.financePaidAmount,
@@ -894,6 +924,10 @@ type OptionalResolution<T> =
   | { ok: true; value: T | null }
   | { ok: false; result: ToolExecution };
 
+type PartyResolution =
+  | { ok: true; value: ResolvedParty | null; newParty: z.infer<typeof ResolvedPartyActionSchema> | null }
+  | { ok: false; result: ToolExecution };
+
 type ResolvedParty = {
   id: string;
   name: string;
@@ -916,14 +950,25 @@ async function resolveOptionalParty(
   locale: AppLocale,
   field: string,
   type?: 'SUPPLIER' | 'CUSTOMER',
-): Promise<OptionalResolution<ResolvedParty>> {
-  if (!query) return { ok: true, value: null };
+  createIfMissing = false,
+): Promise<PartyResolution> {
+  if (!query) return { ok: true, value: null, newParty: null };
   const match = await matchParty(query, type);
-  if (match.kind === 'exact') return { ok: true, value: match.value };
+  if (match.kind === 'exact') return { ok: true, value: match.value, newParty: null };
   if (match.kind === 'ambiguous') {
     return {
       ok: false,
       result: ambiguousMatch(locale, field, match.candidates, (row) => `${String(row.name)} · ${String(row.type)}`, (row) => String(row.id)),
+    };
+  }
+  if (createIfMissing) {
+    return {
+      ok: true,
+      value: null,
+      newParty: ResolvedPartyActionSchema.parse({
+        name: query,
+        type: type ?? 'OTHER',
+      }),
     };
   }
   return { ok: false, result: noMatch(locale, field, localized(locale, 'party', 'جهة')) };
@@ -949,6 +994,116 @@ async function resolveOptionalBranch(
   return { ok: false, result: noMatch(locale, 'branchQuery', localized(locale, 'branch', 'فرع')) };
 }
 
+type FinanceEntryMatch = {
+  id: string;
+  recordKey: string | null;
+  reference: string | null;
+  description: string | null;
+  type: string;
+  amount: number;
+  currency: 'IQD' | 'USD';
+  obligation: boolean;
+  obligationKind: string | null;
+  branchId: string | null;
+  archivedAt: Date | null;
+  reversedAt: Date | null;
+  reversalOfId: string | null;
+  ledgerLines: Array<{
+    id: string;
+    lineNo: number;
+    itemName: string;
+    spendTreatment: string;
+    lineTotal: number;
+    inventoryItemId: string | null;
+  }>;
+  settlements: Array<{ amount: number }>;
+};
+
+async function matchFinanceEntry(
+  query: string,
+  context: ToolContext,
+  options: { obligationOnly?: boolean } = {},
+): Promise<{ kind: 'exact'; value: FinanceEntryMatch } | { kind: 'ambiguous'; candidates: FinanceEntryMatch[] } | { kind: 'none'; candidates: [] }> {
+  const scope = buildBranchScope(context.user);
+  const rows = await prisma.financeEntry.findMany({
+    where: {
+      ...(scope.branchId ? { branchId: scope.branchId } : {}),
+      ...(options.obligationOnly ? { obligation: true } : {}),
+      OR: [
+        { id: query },
+        { recordKey: { contains: query, mode: 'insensitive' } },
+        { reference: { contains: query, mode: 'insensitive' } },
+        { description: { contains: query, mode: 'insensitive' } },
+      ],
+    },
+    select: {
+      id: true,
+      recordKey: true,
+      reference: true,
+      description: true,
+      type: true,
+      amount: true,
+      currency: true,
+      obligation: true,
+      obligationKind: true,
+      branchId: true,
+      archivedAt: true,
+      reversedAt: true,
+      reversalOfId: true,
+      ledgerLines: {
+        select: {
+          id: true,
+          lineNo: true,
+          itemName: true,
+          spendTreatment: true,
+          lineTotal: true,
+          inventoryItemId: true,
+        },
+        orderBy: { lineNo: 'asc' },
+      },
+      settlements: {
+        where: { archivedAt: null, reversedAt: null, reversalOfId: null },
+        select: { amount: true },
+      },
+    },
+    orderBy: { date: 'desc' },
+    take: 12,
+  });
+  const normalized = normalizeAssistantText(query);
+  const exact = rows.filter((row) => row.id === query
+    || normalizeAssistantText(row.recordKey ?? '') === normalized
+    || normalizeAssistantText(row.reference ?? '') === normalized);
+  if (exact.length === 1) return { kind: 'exact', value: exact[0] };
+  const candidates = exact.length > 1 ? exact : rows;
+  return candidates.length ? { kind: 'ambiguous', candidates } : { kind: 'none', candidates: [] };
+}
+
+function financeEntryLabel(row: FinanceEntryMatch): string {
+  return `${row.recordKey || row.reference || row.id} · ${row.type}`;
+}
+
+async function resolveFinanceAccount(
+  query: string | null,
+  context: ToolContext,
+): Promise<{ ok: true; value: { id: string; name: string; currency: string } } | { ok: false; result: ToolExecution }> {
+  const requested = query || context.user.defaultFinanceAccountId || null;
+  if (!requested) {
+    return {
+      ok: false,
+      result: missingResult(context.locale, [localized(context.locale, 'payment account', 'حساب الدفع')]),
+    };
+  }
+  const account = await matchFinanceAccount(requested);
+  if (account.kind === 'none') return { ok: false, result: noMatch(context.locale, 'accountQuery', localized(context.locale, 'finance account', 'حساب مالي')) };
+  if (account.kind === 'ambiguous') {
+    return {
+      ok: false,
+      result: ambiguousMatch(context.locale, 'accountQuery', account.candidates, (row) => `${String(row.name)} · ${String(row.currency)}`, (row) => String(row.id)),
+    };
+  }
+  return { ok: true, value: account.value };
+}
+
 async function prepareExpense(raw: unknown, context: ToolContext): Promise<ToolExecution> {
   const input = PrepareExpenseSchema.parse(raw);
   const missing: string[] = [];
@@ -963,7 +1118,7 @@ async function prepareExpense(raw: unknown, context: ToolContext): Promise<ToolE
   const accountMatch = await matchFinanceAccount(input.accountQuery as string);
   if (accountMatch.kind === 'none') return noMatch(context.locale, 'accountQuery', localized(context.locale, 'finance account', 'حساب مالي'));
   if (accountMatch.kind === 'ambiguous') return ambiguousMatch(context.locale, 'accountQuery', accountMatch.candidates, (row) => `${String(row.name)} · ${String(row.currency)}`, (row) => String(row.id));
-  const party = await resolveOptionalParty(input.partyQuery, context.locale, 'partyQuery');
+  const party = await resolveOptionalParty(input.partyQuery, context.locale, 'partyQuery', undefined, true);
   if (!party.ok) return party.result;
   const branch = await resolveOptionalBranch(input.branchQuery, context.locale);
   if (!branch.ok) return branch.result;
@@ -975,6 +1130,7 @@ async function prepareExpense(raw: unknown, context: ToolContext): Promise<ToolE
     accountId: accountMatch.value.id,
     categoryType: input.categoryType,
     partyId: party.value?.id ?? null,
+    newParty: party.newParty,
     description: input.description,
     reference: input.reference,
     branchId: branch.value?.id ?? null,
@@ -1015,9 +1171,9 @@ async function preparePurchase(raw: unknown, context: ToolContext): Promise<Tool
   if (input.paidMode === 'PARTIAL' && !input.paidAmount) missing.push(localized(context.locale, 'paid amount', 'المبلغ المدفوع'));
   if (missing.length) return missingResult(context.locale, missing);
 
-  const supplier = await resolveOptionalParty(input.supplierQuery, context.locale, 'supplierQuery', 'SUPPLIER');
+  const supplier = await resolveOptionalParty(input.supplierQuery, context.locale, 'supplierQuery', 'SUPPLIER', true);
   if (!supplier.ok) return supplier.result;
-  if (!supplier.value) return noMatch(context.locale, 'supplierQuery', localized(context.locale, 'supplier', 'مورد'));
+  if (!supplier.value && !supplier.newParty) return noMatch(context.locale, 'supplierQuery', localized(context.locale, 'supplier', 'مورد'));
   let inventoryItemId: string | null = null;
   if (input.inventoryItemQuery) {
     const item = await matchInventoryItem(input.inventoryItemQuery);
@@ -1050,7 +1206,8 @@ async function preparePurchase(raw: unknown, context: ToolContext): Promise<Tool
     newItemCategory: input.newItemCategory,
     assetName: input.assetName,
     assetCategory: input.assetCategory,
-    supplierId: supplier.value.id,
+    supplierId: supplier.value?.id ?? null,
+    newSupplier: supplier.newParty,
     paidMode: input.paidMode,
     paidAmount: input.paidAmount,
     accountId,
@@ -1070,12 +1227,16 @@ async function preparePurchase(raw: unknown, context: ToolContext): Promise<Tool
     extractedData: input,
     validatedData: validated,
     title: localized(context.locale, validated.purchaseType === 'ASSET' ? 'Record asset purchase' : 'Record inventory purchase', validated.purchaseType === 'ASSET' ? 'تسجيل شراء أصل' : 'تسجيل شراء مخزون'),
-    summary: localized(context.locale, `Record ${itemName} from ${supplier.value.name}.`, `تسجيل ${itemName} من ${supplier.value.name}.`),
+    summary: localized(context.locale, `Record ${itemName} from ${supplier.value?.name ?? supplier.newParty?.name}.`, `تسجيل ${itemName} من ${supplier.value?.name ?? supplier.newParty?.name}.`),
     fields: [
       { label: localized(context.locale, 'Item', 'المادة'), value: itemName },
       { label: localized(context.locale, 'Quantity', 'الكمية'), value: `${formatQuantity(validated.quantity, context.locale)} ${validated.unit}` },
       { label: localized(context.locale, 'Total', 'الإجمالي'), value: formatMoney(toMinor(validated.totalAmount, validated.currency), validated.currency, context.locale) },
-      { label: localized(context.locale, 'Supplier', 'المورد'), value: supplier.value.name },
+      { label: localized(context.locale, 'Supplier', 'المورد'), value: supplier.value?.name ?? supplier.newParty?.name ?? '—' },
+      ...(supplier.newParty ? [{
+        label: localized(context.locale, 'Supplier setup', 'إعداد المورد'),
+        value: localized(context.locale, 'Create new supplier with this purchase', 'إنشاء مورد جديد مع عملية الشراء'),
+      }] : []),
       { label: localized(context.locale, 'Payment', 'الدفع'), value: `${validated.paidMode}${validated.accountId ? ` · ${accountName}` : ''}` },
     ],
   });
@@ -1101,16 +1262,25 @@ async function prepareOrderStatus(raw: unknown, context: ToolContext): Promise<T
       choices: statuses.map((row) => ({ id: row.code, value: row.code, label: context.locale === 'ar' ? row.labelAr : row.labelEn })),
     });
   }
+  let completionMode = input.completionMode;
+  const directAutomaticPayment = completionMode === 'AUTO'
+    && status.metricRole === 'SALE'
+    && matched.value.channel !== 'ONLINE_STORE'
+    && matched.value.fulfillmentMethod !== 'COURIER';
+  const accountQuery = input.accountQuery || (
+    directAutomaticPayment ? context.user.defaultFinanceAccountId ?? null : null
+  );
   let accountId: string | null = null;
-  if (input.accountQuery) {
-    const account = await matchFinanceAccount(input.accountQuery);
+  if (accountQuery) {
+    const account = await matchFinanceAccount(accountQuery);
     if (account.kind === 'none') return noMatch(context.locale, 'accountQuery', localized(context.locale, 'finance account', 'حساب مالي'));
     if (account.kind === 'ambiguous') return ambiguousMatch(context.locale, 'accountQuery', account.candidates, (row) => `${String(row.name)} · ${String(row.currency)}`, (row) => String(row.id));
     accountId = account.value.id;
   }
-  if (input.completionMode === 'DIRECT' && !accountId) return missingResult(context.locale, [localized(context.locale, 'payment account', 'حساب الدفع')]);
+  if ((completionMode === 'DIRECT' || directAutomaticPayment) && !accountId) return missingResult(context.locale, [localized(context.locale, 'payment account', 'حساب الدفع')]);
+  if (directAutomaticPayment) completionMode = 'DIRECT';
   let providerKey: string | null = null;
-  if (input.completionMode === 'PROVIDER') {
+  if (completionMode === 'PROVIDER') {
     if (!input.providerKey) return missingResult(context.locale, [localized(context.locale, 'payment provider', 'مزود الدفع')]);
     const provider = await matchParty(input.providerKey);
     if (provider.kind === 'none') return noMatch(context.locale, 'providerKey', localized(context.locale, 'payment provider', 'مزود دفع'));
@@ -1125,13 +1295,12 @@ async function prepareOrderStatus(raw: unknown, context: ToolContext): Promise<T
     }
     providerKey = provider.value.externalKey;
   }
-  const date = dateValue(input.date);
-  if (input.completionMode === 'DIRECT' && !date) return missingResult(context.locale, [localized(context.locale, 'payment date', 'تاريخ الدفع')]);
+  const date = dateValue(input.date) ?? (completionMode === 'DIRECT' ? context.now : null);
   const validated = ResolvedOrderStatusActionSchema.parse({
     orderId: matched.value.id,
     orderNumber: matched.value.orderNumber,
     status: status.code,
-    completionMode: input.completionMode,
+    completionMode,
     accountId,
     providerKey,
     paymentMethod: input.paymentMethod,
@@ -1153,6 +1322,629 @@ async function prepareOrderStatus(raw: unknown, context: ToolContext): Promise<T
   });
 }
 
+function changePreviewValue(before: unknown, after: unknown): string {
+  const render = (value: unknown) => {
+    if (value === null || value === undefined || value === '') return '—';
+    if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+    return String(value);
+  };
+  return `${render(before)} → ${render(after)}`;
+}
+
+async function prepareCustomerUpdate(raw: unknown, context: ToolContext): Promise<ToolExecution> {
+  const input = PrepareCustomerUpdateSchema.parse(raw);
+  const missing: string[] = [];
+  if (!input.customerQuery) missing.push(localized(context.locale, 'customer', 'العميل'));
+  if (!input.reason || input.reason.length < 3) missing.push(localized(context.locale, 'update reason', 'سبب التحديث'));
+  if (missing.length) return missingResult(context.locale, missing);
+
+  const matched = await matchCustomer(input.customerQuery as string);
+  if (matched.kind === 'none') return noMatch(context.locale, 'customerQuery', localized(context.locale, 'customer', 'عميل'));
+  if (matched.kind === 'ambiguous') {
+    return ambiguousMatch(
+      context.locale,
+      'customerQuery',
+      matched.candidates,
+      (row) => `${String(row.nameEn || row.nameAr || row.externalId || row.id)} · ${String(row.phone ?? '')}`,
+      (row) => String(row.externalId ?? row.id),
+    );
+  }
+  const customer = await prisma.customer.findUnique({
+    where: { id: matched.value.id },
+    select: {
+      id: true,
+      externalId: true,
+      nameEn: true,
+      nameAr: true,
+      phone: true,
+      email: true,
+      governorate: true,
+      address1: true,
+      street: true,
+      notes: true,
+      campaignSource: true,
+      segment: true,
+    },
+  });
+  if (!customer) return noMatch(context.locale, 'customerQuery', localized(context.locale, 'customer', 'عميل'));
+
+  const changes: Record<string, unknown> = {};
+  const preview: AiActionPreview['fields'] = [];
+  const addChange = (key: string, labelEn: string, labelAr: string, before: unknown, after: unknown) => {
+    if (after === null) return;
+    changes[key] = after;
+    preview.push({ label: localized(context.locale, labelEn, labelAr), value: changePreviewValue(before, after) });
+  };
+  addChange('nameEn', 'English name', 'الاسم بالإنجليزية', customer.nameEn, input.nameEn);
+  addChange('nameAr', 'Arabic name', 'الاسم بالعربية', customer.nameAr, input.nameAr);
+  addChange('phone', 'Phone', 'الهاتف', customer.phone, input.phone);
+  addChange('email', 'Email', 'البريد الإلكتروني', customer.email, input.email);
+  if (input.governorate !== null) {
+    let governorate = input.governorate;
+    if (governorate) {
+      const resolved = await resolveManagedChoice('governorate', governorate, context.locale, 'governorate');
+      if (!resolved.ok) return resolved.result;
+      governorate = resolved.code;
+    }
+    addChange('governorate', 'Governorate', 'المحافظة', customer.governorate, governorate);
+  }
+  addChange('address1', 'Address', 'العنوان', customer.address1, input.address1);
+  addChange('street', 'Street / landmark', 'الشارع / أقرب نقطة', customer.street, input.street);
+  addChange('notes', 'Notes', 'الملاحظات', customer.notes, input.notes);
+  addChange('campaignSource', 'Campaign source', 'مصدر الحملة', customer.campaignSource, input.campaignSource);
+  addChange('segment', 'Segment', 'الشريحة', customer.segment, input.segment);
+  if (!Object.keys(changes).length) {
+    return missingResult(context.locale, [localized(context.locale, 'at least one customer field to change', 'حقل عميل واحد على الأقل للتعديل')]);
+  }
+  const validated = ResolvedCustomerUpdateActionSchema.parse({
+    customerId: customer.id,
+    externalId: customer.externalId,
+    ...changes,
+    reason: input.reason,
+  });
+  const label = context.locale === 'ar'
+    ? customer.nameAr || customer.nameEn || customer.externalId || customer.id
+    : customer.nameEn || customer.nameAr || customer.externalId || customer.id;
+  return actionResult({
+    context,
+    type: 'UPDATE_CUSTOMER',
+    extractedData: input,
+    validatedData: validated,
+    title: localized(context.locale, 'Update customer', 'تحديث العميل'),
+    summary: localized(context.locale, `Update ${label}.`, `تحديث ${label}.`),
+    fields: [
+      { label: localized(context.locale, 'Customer', 'العميل'), value: label },
+      ...preview,
+      { label: localized(context.locale, 'Reason', 'السبب'), value: validated.reason },
+    ],
+  });
+}
+
+async function preparePartyUpdate(raw: unknown, context: ToolContext): Promise<ToolExecution> {
+  const input = PreparePartyUpdateSchema.parse(raw);
+  const missing: string[] = [];
+  if (!input.partyQuery) missing.push(localized(context.locale, 'party', 'الجهة'));
+  if (!input.reason || input.reason.length < 3) missing.push(localized(context.locale, 'update reason', 'سبب التحديث'));
+  if (missing.length) return missingResult(context.locale, missing);
+
+  const matched = await matchParty(input.partyQuery as string);
+  if (matched.kind === 'none') return noMatch(context.locale, 'partyQuery', localized(context.locale, 'party', 'جهة'));
+  if (matched.kind === 'ambiguous') {
+    return ambiguousMatch(
+      context.locale,
+      'partyQuery',
+      matched.candidates,
+      (row) => `${String(row.name)} · ${String(row.type)} · ${String(row.phone ?? '')}`,
+      (row) => String(row.id),
+    );
+  }
+  const party = await prisma.party.findUnique({
+    where: { id: matched.value.id },
+    select: {
+      id: true,
+      name: true,
+      type: true,
+      phone: true,
+      email: true,
+      address: true,
+      notes: true,
+      netFeesFromRemittance: true,
+      collectsOrderPayments: true,
+    },
+  });
+  if (!party) return noMatch(context.locale, 'partyQuery', localized(context.locale, 'party', 'جهة'));
+
+  const changes: Record<string, unknown> = {};
+  const preview: AiActionPreview['fields'] = [];
+  const addChange = (key: string, labelEn: string, labelAr: string, before: unknown, after: unknown) => {
+    if (after === null) return;
+    changes[key] = after;
+    preview.push({ label: localized(context.locale, labelEn, labelAr), value: changePreviewValue(before, after) });
+  };
+  addChange('name', 'Name', 'الاسم', party.name, input.name);
+  addChange('type', 'Type', 'النوع', party.type, input.type);
+  addChange('phone', 'Phone', 'الهاتف', party.phone, input.phone);
+  addChange('email', 'Email', 'البريد الإلكتروني', party.email, input.email);
+  addChange('address', 'Address', 'العنوان', party.address, input.address);
+  addChange('notes', 'Notes', 'الملاحظات', party.notes, input.notes);
+  addChange('netFeesFromRemittance', 'Net fees from remittance', 'خصم الرسوم من التحويل', party.netFeesFromRemittance, input.netFeesFromRemittance);
+  addChange('collectsOrderPayments', 'Collects order payments', 'تحصيل مدفوعات الطلبات', party.collectsOrderPayments, input.collectsOrderPayments);
+  if (!Object.keys(changes).length) {
+    return missingResult(context.locale, [localized(context.locale, 'at least one party field to change', 'حقل جهة واحد على الأقل للتعديل')]);
+  }
+  const validated = ResolvedPartyUpdateActionSchema.parse({
+    partyId: party.id,
+    partyName: party.name,
+    ...changes,
+    reason: input.reason,
+  });
+  return actionResult({
+    context,
+    type: 'UPDATE_PARTY',
+    extractedData: input,
+    validatedData: validated,
+    title: localized(context.locale, 'Update party', 'تحديث الجهة'),
+    summary: localized(context.locale, `Update ${party.name}.`, `تحديث ${party.name}.`),
+    fields: [
+      { label: localized(context.locale, 'Party', 'الجهة'), value: party.name },
+      ...preview,
+      { label: localized(context.locale, 'Reason', 'السبب'), value: validated.reason },
+    ],
+  });
+}
+
+async function prepareInventoryAdjustment(raw: unknown, context: ToolContext): Promise<ToolExecution> {
+  const input = PrepareInventoryAdjustmentSchema.parse(raw);
+  const missing: string[] = [];
+  if (!input.inventoryItemQuery) missing.push(localized(context.locale, 'inventory item', 'مادة المخزون'));
+  if (input.targetQuantity === null) missing.push(localized(context.locale, 'target quantity', 'الكمية الفعلية المستهدفة'));
+  if (!input.reason || input.reason.length < 3) missing.push(localized(context.locale, 'adjustment reason', 'سبب التعديل'));
+  if (input.occurredAt && !dateValue(input.occurredAt)) missing.push(localized(context.locale, 'valid adjustment date', 'تاريخ تعديل صحيح'));
+  if (missing.length) return missingResult(context.locale, missing);
+
+  const matched = await matchInventoryItem(input.inventoryItemQuery as string, buildBranchScope(context.user));
+  if (matched.kind === 'none') return noMatch(context.locale, 'inventoryItemQuery', localized(context.locale, 'inventory item', 'مادة مخزون'));
+  if (matched.kind === 'ambiguous') {
+    return ambiguousMatch(
+      context.locale,
+      'inventoryItemQuery',
+      matched.candidates,
+      (row) => `${String(context.locale === 'ar' ? row.nameAr : row.nameEn)} · ${String(row.category)} · ${String(row.unit)}`,
+      (row) => String(row.id),
+    );
+  }
+  const current = await prisma.stockMovement.aggregate({
+    where: {
+      inventoryItemId: matched.value.id,
+      OR: [
+        { financeEntryId: null },
+        { financeEntry: { archivedAt: null, reversedAt: null, reversalOfId: null } },
+      ],
+    },
+    _sum: { quantity: true },
+  });
+  const currentQuantity = Number(current._sum.quantity ?? 0);
+  const itemName = context.locale === 'ar' ? matched.value.nameAr : matched.value.nameEn;
+  const occurredAt = dateValue(input.occurredAt) ?? context.now;
+  const validated = ResolvedInventoryAdjustmentActionSchema.parse({
+    inventoryItemId: matched.value.id,
+    inventoryItemName: itemName,
+    targetQuantity: input.targetQuantity,
+    occurredAt: occurredAt.toISOString(),
+    reason: input.reason,
+  });
+  const delta = validated.targetQuantity - currentQuantity;
+  return actionResult({
+    context,
+    type: 'ADJUST_INVENTORY',
+    extractedData: input,
+    validatedData: validated,
+    title: localized(context.locale, 'Adjust inventory', 'تعديل المخزون'),
+    summary: localized(context.locale, `Set ${itemName} to the verified physical quantity.`, `ضبط ${itemName} على الكمية الفعلية المؤكدة.`),
+    fields: [
+      { label: localized(context.locale, 'Inventory item', 'مادة المخزون'), value: itemName },
+      { label: localized(context.locale, 'Current quantity', 'الكمية الحالية'), value: `${formatQuantity(currentQuantity, context.locale)} ${matched.value.unit}` },
+      { label: localized(context.locale, 'Target quantity', 'الكمية المستهدفة'), value: `${formatQuantity(validated.targetQuantity, context.locale)} ${matched.value.unit}` },
+      { label: localized(context.locale, 'Difference', 'الفرق'), value: `${delta > 0 ? '+' : ''}${formatQuantity(delta, context.locale)} ${matched.value.unit}` },
+      { label: localized(context.locale, 'Date', 'التاريخ'), value: validated.occurredAt.slice(0, 10) },
+      { label: localized(context.locale, 'Reason', 'السبب'), value: validated.reason },
+    ],
+  });
+}
+
+async function resolveInventoryForAction(
+  query: string | null,
+  field: string,
+  context: ToolContext,
+): Promise<OptionalResolution<{ id: string; name: string; unit: string; category: string }>> {
+  if (!query) return { ok: true, value: null };
+  const matched = await matchInventoryItem(query, buildBranchScope(context.user));
+  if (matched.kind === 'none') return { ok: false, result: noMatch(context.locale, field, localized(context.locale, 'inventory item', 'مادة مخزون')) };
+  if (matched.kind === 'ambiguous') {
+    return {
+      ok: false,
+      result: ambiguousMatch(
+        context.locale,
+        field,
+        matched.candidates,
+        (row) => `${String(context.locale === 'ar' ? row.nameAr : row.nameEn)} · ${String(row.category)} · ${String(row.unit)}`,
+        (row) => String(row.id),
+      ),
+    };
+  }
+  return {
+    ok: true,
+    value: {
+      id: matched.value.id,
+      name: context.locale === 'ar' ? matched.value.nameAr : matched.value.nameEn,
+      unit: matched.value.unit,
+      category: matched.value.category,
+    },
+  };
+}
+
+async function prepareRoastBatch(raw: unknown, context: ToolContext): Promise<ToolExecution> {
+  const input = PrepareRoastBatchSchema.parse(raw);
+  const missing: string[] = [];
+  if (!input.batchNumber) missing.push(localized(context.locale, 'batch number', 'رقم الدفعة'));
+  if (!input.origin) missing.push(localized(context.locale, 'coffee origin', 'منشأ القهوة'));
+  if (input.greenInputGrams === null) missing.push(localized(context.locale, 'green input grams', 'وزن البن الأخضر بالغرام'));
+  if (input.roastDate && !dateValue(input.roastDate)) missing.push(localized(context.locale, 'valid roast date', 'تاريخ تحميص صحيح'));
+  if (missing.length) return missingResult(context.locale, missing);
+
+  const green = await resolveInventoryForAction(input.greenInventoryItemQuery, 'greenInventoryItemQuery', context);
+  if (!green.ok) return green.result;
+  const roasted = await resolveInventoryForAction(input.roastedInventoryItemQuery, 'roastedInventoryItemQuery', context);
+  if (!roasted.ok) return roasted.result;
+  const branch = await resolveOptionalBranch(input.branchQuery, context.locale);
+  if (!branch.ok) return branch.result;
+  const roastDate = dateValue(input.roastDate) ?? context.now;
+  const validated = ResolvedRoastBatchActionSchema.parse({
+    batchNumber: input.batchNumber,
+    origin: input.origin,
+    roastDate: roastDate.toISOString(),
+    roastLevel: input.roastLevel,
+    greenInputGrams: input.greenInputGrams,
+    roastedOutputGrams: input.roastedOutputGrams,
+    qcScore: input.qcScore,
+    qcNotes: input.qcNotes,
+    greenInventoryItemId: green.value?.id ?? null,
+    roastedInventoryItemId: roasted.value?.id ?? null,
+    branchId: branch.value?.id ?? null,
+  });
+  return actionResult({
+    context,
+    type: 'CREATE_ROAST_BATCH',
+    extractedData: input,
+    validatedData: validated,
+    title: localized(context.locale, 'Create roast batch', 'إنشاء دفعة تحميص'),
+    summary: localized(context.locale, `Create roast batch ${validated.batchNumber}.`, `إنشاء دفعة التحميص ${validated.batchNumber}.`),
+    fields: [
+      { label: localized(context.locale, 'Batch', 'الدفعة'), value: validated.batchNumber },
+      { label: localized(context.locale, 'Origin', 'المنشأ'), value: validated.origin },
+      { label: localized(context.locale, 'Roast date', 'تاريخ التحميص'), value: validated.roastDate?.slice(0, 10) ?? '—' },
+      { label: localized(context.locale, 'Green input', 'مدخل البن الأخضر'), value: `${formatQuantity(validated.greenInputGrams, context.locale)} g${green.value ? ` · ${green.value.name}` : ''}` },
+      ...(validated.roastedOutputGrams !== null ? [{
+        label: localized(context.locale, 'Roasted output', 'الناتج المحمص'),
+        value: `${formatQuantity(validated.roastedOutputGrams, context.locale)} g${roasted.value ? ` · ${roasted.value.name}` : ''}`,
+      }] : []),
+      ...(validated.roastLevel ? [{ label: localized(context.locale, 'Roast level', 'درجة التحميص'), value: validated.roastLevel }] : []),
+      ...(branch.value ? [{ label: localized(context.locale, 'Branch', 'الفرع'), value: context.locale === 'ar' ? branch.value.nameAr : branch.value.nameEn }] : []),
+    ],
+  });
+}
+
+async function preparePayment(raw: unknown, context: ToolContext): Promise<ToolExecution> {
+  const input = PreparePaymentSchema.parse(raw);
+  const missing: string[] = [];
+  if (!input.targetType) missing.push(localized(context.locale, 'payment target type', 'نوع السجل المطلوب دفعه'));
+  if (!input.targetQuery) missing.push(localized(context.locale, 'order or finance record', 'الطلب أو السجل المالي'));
+  if (input.amount === null) missing.push(localized(context.locale, 'payment amount', 'مبلغ الدفع'));
+  if (input.date && !dateValue(input.date)) missing.push(localized(context.locale, 'valid payment date', 'تاريخ دفع صحيح'));
+  if (missing.length) return missingResult(context.locale, missing);
+  const account = await resolveFinanceAccount(input.accountQuery, context);
+  if (!account.ok) return account.result;
+
+  let targetId: string;
+  let targetNumber: string;
+  let currency: 'IQD' | 'USD';
+  let outstanding: number;
+  if (input.targetType === 'ORDER') {
+    const order = await matchOrder(input.targetQuery as string, buildBranchScope(context.user));
+    if (order.kind === 'none') return noMatch(context.locale, 'targetQuery', localized(context.locale, 'order', 'طلب'));
+    if (order.kind === 'ambiguous') {
+      return ambiguousMatch(context.locale, 'targetQuery', order.candidates, (row) => `${String(row.orderNumber)} · ${String(row.status)}`, (row) => String(row.orderNumber));
+    }
+    const invoice = await getInvoiceData(order.value.id);
+    if (!invoice) return noMatch(context.locale, 'targetQuery', localized(context.locale, 'order', 'طلب'));
+    targetId = invoice.order.id;
+    targetNumber = invoice.order.orderNumber;
+    currency = invoice.order.currency;
+    outstanding = invoice.payment.remaining;
+  } else {
+    const entry = await matchFinanceEntry(input.targetQuery as string, context, { obligationOnly: true });
+    if (entry.kind === 'none') return noMatch(context.locale, 'targetQuery', localized(context.locale, 'outstanding finance record', 'سجل مالي مستحق'));
+    if (entry.kind === 'ambiguous') {
+      return ambiguousMatch(context.locale, 'targetQuery', entry.candidates, financeEntryLabel, (row) => String(row.recordKey || row.reference || row.id));
+    }
+    targetId = entry.value.id;
+    targetNumber = entry.value.recordKey || entry.value.reference || entry.value.id;
+    currency = entry.value.currency;
+    outstanding = Math.max(0, entry.value.amount - entry.value.settlements.reduce((sum, settlement) => sum + settlement.amount, 0));
+  }
+  const validated = ResolvedPaymentActionSchema.parse({
+    targetType: input.targetType,
+    targetId,
+    targetNumber,
+    amount: input.amount,
+    accountId: account.value.id,
+    accountName: account.value.name,
+    paymentMethod: input.paymentMethod,
+    date: (dateValue(input.date) ?? context.now).toISOString(),
+  });
+  return actionResult({
+    context,
+    type: 'RECORD_PAYMENT',
+    extractedData: input,
+    validatedData: validated,
+    title: localized(context.locale, 'Record payment', 'تسجيل دفعة'),
+    summary: localized(context.locale, `Record a payment for ${targetNumber}.`, `تسجيل دفعة للسجل ${targetNumber}.`),
+    fields: [
+      { label: localized(context.locale, 'Record', 'السجل'), value: targetNumber },
+      { label: localized(context.locale, 'Amount', 'المبلغ'), value: formatMoney(toMinor(validated.amount, currency), currency, context.locale) },
+      { label: localized(context.locale, 'Outstanding before payment', 'المتبقي قبل الدفع'), value: formatMoney(outstanding, currency, context.locale) },
+      { label: localized(context.locale, 'Account', 'الحساب'), value: account.value.name },
+      { label: localized(context.locale, 'Date', 'التاريخ'), value: validated.date.slice(0, 10) },
+    ],
+  });
+}
+
+async function prepareRefund(raw: unknown, context: ToolContext): Promise<ToolExecution> {
+  const input = PrepareRefundSchema.parse(raw);
+  const missing: string[] = [];
+  if (!input.orderQuery) missing.push(localized(context.locale, 'order', 'الطلب'));
+  if (input.amount === null) missing.push(localized(context.locale, 'refund amount', 'مبلغ الاسترداد'));
+  if (!input.reason || input.reason.length < 3) missing.push(localized(context.locale, 'refund reason', 'سبب الاسترداد'));
+  if (input.date && !dateValue(input.date)) missing.push(localized(context.locale, 'valid refund date', 'تاريخ استرداد صحيح'));
+  if (missing.length) return missingResult(context.locale, missing);
+  const account = await resolveFinanceAccount(input.accountQuery, context);
+  if (!account.ok) return account.result;
+  const order = await matchOrder(input.orderQuery as string, buildBranchScope(context.user));
+  if (order.kind === 'none') return noMatch(context.locale, 'orderQuery', localized(context.locale, 'order', 'طلب'));
+  if (order.kind === 'ambiguous') {
+    return ambiguousMatch(context.locale, 'orderQuery', order.candidates, (row) => `${String(row.orderNumber)} · ${String(row.status)}`, (row) => String(row.orderNumber));
+  }
+  const invoice = await getInvoiceData(order.value.id);
+  if (!invoice) return noMatch(context.locale, 'orderQuery', localized(context.locale, 'order', 'طلب'));
+  const originalTotal = Math.max(
+    0,
+    invoice.order.grossAmount - invoice.order.discountAmount + invoice.order.deliveryFee + invoice.order.extraCharges,
+  );
+  const refundable = Math.min(
+    invoice.payment.paidRaw,
+    Math.max(0, originalTotal - invoice.order.refundAmount),
+  );
+  const validated = ResolvedRefundActionSchema.parse({
+    orderId: invoice.order.id,
+    orderNumber: invoice.order.orderNumber,
+    amount: input.amount,
+    accountId: account.value.id,
+    accountName: account.value.name,
+    paymentMethod: input.paymentMethod,
+    date: (dateValue(input.date) ?? context.now).toISOString(),
+    reason: input.reason,
+  });
+  return actionResult({
+    context,
+    type: 'RECORD_REFUND',
+    extractedData: input,
+    validatedData: validated,
+    title: localized(context.locale, 'Record order refund', 'تسجيل استرداد طلب'),
+    summary: localized(context.locale, `Refund ${invoice.order.orderNumber}.`, `استرداد للطلب ${invoice.order.orderNumber}.`),
+    fields: [
+      { label: localized(context.locale, 'Order', 'الطلب'), value: invoice.order.orderNumber },
+      { label: localized(context.locale, 'Refund amount', 'مبلغ الاسترداد'), value: formatMoney(toMinor(validated.amount, invoice.order.currency), invoice.order.currency, context.locale) },
+      { label: localized(context.locale, 'Refundable balance', 'الرصيد القابل للاسترداد'), value: formatMoney(refundable, invoice.order.currency, context.locale) },
+      { label: localized(context.locale, 'Account', 'الحساب'), value: account.value.name },
+      { label: localized(context.locale, 'Reason', 'السبب'), value: validated.reason },
+      { label: localized(context.locale, 'Final confirmation', 'التأكيد النهائي'), value: invoice.order.orderNumber },
+    ],
+    warnings: [localized(
+      context.locale,
+      `A second confirmation with ${invoice.order.orderNumber} is required.`,
+      `يتطلب هذا الإجراء تأكيداً ثانياً برقم ${invoice.order.orderNumber}.`,
+    )],
+  });
+}
+
+async function prepareReversal(raw: unknown, context: ToolContext): Promise<ToolExecution> {
+  const input = PrepareReversalSchema.parse(raw);
+  const missing: string[] = [];
+  if (!input.recordQuery) missing.push(localized(context.locale, 'finance record', 'السجل المالي'));
+  if (!input.reason || input.reason.length < 3) missing.push(localized(context.locale, 'reversal reason', 'سبب العكس'));
+  if (missing.length) return missingResult(context.locale, missing);
+  const entry = await matchFinanceEntry(input.recordQuery as string, context);
+  if (entry.kind === 'none') return noMatch(context.locale, 'recordQuery', localized(context.locale, 'finance record', 'سجل مالي'));
+  if (entry.kind === 'ambiguous') {
+    return ambiguousMatch(context.locale, 'recordQuery', entry.candidates, financeEntryLabel, (row) => String(row.recordKey || row.reference || row.id));
+  }
+  const recordNumber = entry.value.recordKey || entry.value.reference || entry.value.id;
+  const validated = ResolvedReversalActionSchema.parse({
+    financeEntryId: entry.value.id,
+    recordNumber,
+    reason: input.reason,
+  });
+  return actionResult({
+    context,
+    type: 'REVERSE_RECORD',
+    extractedData: input,
+    validatedData: validated,
+    title: localized(context.locale, 'Reverse finance record', 'عكس سجل مالي'),
+    summary: localized(context.locale, `Reverse ${recordNumber}.`, `عكس السجل ${recordNumber}.`),
+    fields: [
+      { label: localized(context.locale, 'Record', 'السجل'), value: recordNumber },
+      { label: localized(context.locale, 'Type', 'النوع'), value: entry.value.type },
+      { label: localized(context.locale, 'Amount', 'المبلغ'), value: formatMoney(entry.value.amount, entry.value.currency, context.locale) },
+      { label: localized(context.locale, 'Reason', 'السبب'), value: validated.reason },
+      { label: localized(context.locale, 'Final confirmation', 'التأكيد النهائي'), value: recordNumber },
+    ],
+    warnings: [localized(
+      context.locale,
+      `A second confirmation with ${recordNumber} is required.`,
+      `يتطلب هذا الإجراء تأكيداً ثانياً برقم ${recordNumber}.`,
+    )],
+  });
+}
+
+type FixedAssetMatch = { id: string; name: string; category: string };
+
+async function resolveFixedAsset(
+  query: string | null,
+  context: ToolContext,
+): Promise<OptionalResolution<FixedAssetMatch>> {
+  if (!query) return { ok: true, value: null };
+  const scope = buildBranchScope(context.user);
+  const rows = await prisma.fixedAsset.findMany({
+    where: {
+      isActive: true,
+      archivedAt: null,
+      ...(scope.branchId ? { branchId: scope.branchId } : {}),
+      OR: [{ id: query }, { name: { contains: query, mode: 'insensitive' } }],
+    },
+    select: { id: true, name: true, category: true },
+    orderBy: { name: 'asc' },
+    take: 8,
+  });
+  const normalized = normalizeAssistantText(query);
+  const exact = rows.filter((row) => row.id === query || normalizeAssistantText(row.name) === normalized);
+  if (exact.length === 1) return { ok: true, value: exact[0] };
+  const candidates = exact.length > 1 ? exact : rows;
+  if (!candidates.length) return { ok: false, result: noMatch(context.locale, 'fixedAssetQuery', localized(context.locale, 'fixed asset', 'أصل ثابت')) };
+  return {
+    ok: false,
+    result: ambiguousMatch(context.locale, 'fixedAssetQuery', candidates, (row) => `${String(row.name)} · ${String(row.category)}`, (row) => String(row.id)),
+  };
+}
+
+async function prepareSpendReclassification(raw: unknown, context: ToolContext): Promise<ToolExecution> {
+  const input = PrepareSpendReclassificationSchema.parse(raw);
+  const missing: string[] = [];
+  if (!input.recordQuery) missing.push(localized(context.locale, 'finance record', 'السجل المالي'));
+  if (!input.spendTreatment) missing.push(localized(context.locale, 'new spending treatment', 'معالجة الإنفاق الجديدة'));
+  if (!input.classificationNote || input.classificationNote.length < 3) missing.push(localized(context.locale, 'classification reason', 'سبب التصنيف'));
+  if (missing.length) return missingResult(context.locale, missing);
+  const entry = await matchFinanceEntry(input.recordQuery as string, context);
+  if (entry.kind === 'none') return noMatch(context.locale, 'recordQuery', localized(context.locale, 'finance record', 'سجل مالي'));
+  if (entry.kind === 'ambiguous') {
+    return ambiguousMatch(context.locale, 'recordQuery', entry.candidates, financeEntryLabel, (row) => String(row.recordKey || row.reference || row.id));
+  }
+  if (!entry.value.ledgerLines.length) {
+    return noMatch(context.locale, 'lineQuery', localized(context.locale, 'spending line', 'بند إنفاق'));
+  }
+  let line: FinanceEntryMatch['ledgerLines'][number] | null = null;
+  if (input.lineQuery) {
+    const normalized = normalizeAssistantText(input.lineQuery);
+    const lineMatches = entry.value.ledgerLines.filter((candidate) => candidate.id === input.lineQuery
+      || String(candidate.lineNo) === input.lineQuery
+      || normalizeAssistantText(candidate.itemName) === normalized);
+    if (lineMatches.length === 1) line = lineMatches[0];
+    else {
+      const candidates = lineMatches.length ? lineMatches : entry.value.ledgerLines;
+      return ambiguousMatch(
+        context.locale,
+        'lineQuery',
+        candidates,
+        (candidate) => `${String(candidate.lineNo)} · ${String(candidate.itemName)} · ${String(candidate.spendTreatment)}`,
+        (candidate) => String(candidate.id),
+      );
+    }
+  } else if (entry.value.ledgerLines.length === 1) {
+    line = entry.value.ledgerLines[0];
+  } else {
+    return clarificationResult({
+      field: 'lineQuery',
+      message: localized(context.locale, 'Choose the spending line to reclassify.', 'اختر بند الإنفاق المطلوب إعادة تصنيفه.'),
+      choices: matchChoices(
+        entry.value.ledgerLines,
+        (candidate) => `${String(candidate.lineNo)} · ${String(candidate.itemName)} · ${String(candidate.spendTreatment)}`,
+        (candidate) => String(candidate.id),
+      ),
+    });
+  }
+  const asset = await resolveFixedAsset(input.fixedAssetQuery, context);
+  if (!asset.ok) return asset.result;
+  let inventory: OptionalResolution<{ id: string; name: string; unit: string; category: string }> = { ok: true, value: null };
+  if (input.spendTreatment === 'INVENTORY') {
+    if (!input.inventoryItemQuery) return missingResult(context.locale, [localized(context.locale, 'inventory item', 'مادة المخزون')]);
+    inventory = await resolveInventoryForAction(input.inventoryItemQuery, 'inventoryItemQuery', context);
+    if (!inventory.ok) return inventory.result;
+  }
+  const recordNumber = entry.value.recordKey || entry.value.reference || entry.value.id;
+  const validated = ResolvedSpendReclassificationActionSchema.parse({
+    entryId: entry.value.id,
+    recordNumber,
+    lineId: line.id,
+    lineName: line.itemName,
+    spendTreatment: input.spendTreatment,
+    classificationNote: input.classificationNote,
+    fixedAssetId: input.spendTreatment === 'CAPEX' ? asset.value?.id ?? null : null,
+    inventoryItemId: input.spendTreatment === 'INVENTORY' && inventory.ok ? inventory.value?.id ?? null : null,
+  });
+  return actionResult({
+    context,
+    type: 'RECLASSIFY_SPEND',
+    extractedData: input,
+    validatedData: validated,
+    title: localized(context.locale, 'Reclassify spending', 'إعادة تصنيف الإنفاق'),
+    summary: localized(context.locale, `Reclassify ${line.itemName} in ${recordNumber}.`, `إعادة تصنيف ${line.itemName} في السجل ${recordNumber}.`),
+    fields: [
+      { label: localized(context.locale, 'Record', 'السجل'), value: recordNumber },
+      { label: localized(context.locale, 'Line', 'البند'), value: `${line.lineNo} · ${line.itemName}` },
+      { label: localized(context.locale, 'Current treatment', 'المعالجة الحالية'), value: line.spendTreatment },
+      { label: localized(context.locale, 'New treatment', 'المعالجة الجديدة'), value: validated.spendTreatment },
+      ...(asset.value ? [{ label: localized(context.locale, 'Fixed asset', 'الأصل الثابت'), value: asset.value.name }] : []),
+      ...(inventory.ok && inventory.value ? [{ label: localized(context.locale, 'Inventory item', 'مادة المخزون'), value: inventory.value.name }] : []),
+      { label: localized(context.locale, 'Reason', 'السبب'), value: validated.classificationNote },
+      { label: localized(context.locale, 'Final confirmation', 'التأكيد النهائي'), value: recordNumber },
+    ],
+    warnings: [localized(
+      context.locale,
+      `A second confirmation with ${recordNumber} is required.`,
+      `يتطلب هذا الإجراء تأكيداً ثانياً برقم ${recordNumber}.`,
+    )],
+  });
+}
+
+async function prepareDashboardDraft(raw: unknown, context: ToolContext): Promise<ToolExecution> {
+  const input = PrepareDashboardDraftSchema.parse(raw);
+  const missing: string[] = [];
+  if (!input.name) missing.push(localized(context.locale, 'dashboard name', 'اسم اللوحة'));
+  if (!input.template) missing.push(localized(context.locale, 'dashboard template', 'قالب اللوحة'));
+  if (missing.length) return missingResult(context.locale, missing);
+  const template = DASHBOARD_TEMPLATES.find((candidate) => candidate.key === input.template);
+  if (!template) return missingResult(context.locale, [localized(context.locale, 'valid dashboard template', 'قالب لوحة صحيح')]);
+  const description = input.description || (context.locale === 'ar' ? template.descriptionAr : template.descriptionEn);
+  const validated = ResolvedDashboardDraftActionSchema.parse({
+    name: input.name,
+    description,
+    config: JSON.parse(JSON.stringify(template.config)),
+  });
+  return actionResult({
+    context,
+    type: 'CREATE_DASHBOARD_DRAFT',
+    extractedData: input,
+    validatedData: validated,
+    title: localized(context.locale, 'Create dashboard draft', 'إنشاء مسودة لوحة'),
+    summary: localized(context.locale, `Create the private dashboard draft ${validated.name}.`, `إنشاء مسودة اللوحة الخاصة ${validated.name}.`),
+    fields: [
+      { label: localized(context.locale, 'Name', 'الاسم'), value: validated.name },
+      { label: localized(context.locale, 'Template', 'القالب'), value: context.locale === 'ar' ? template.nameAr : template.nameEn },
+      { label: localized(context.locale, 'Widgets', 'العناصر'), value: formatNumber(validated.config.widgets.length, context.locale) },
+      { label: localized(context.locale, 'Visibility', 'الظهور'), value: localized(context.locale, 'Private draft', 'مسودة خاصة') },
+    ],
+  });
+}
+
 const TOOL_HANDLERS: Record<string, (raw: unknown, context: ToolContext) => Promise<ToolExecution>> = {
   sales_summary: salesSummary,
   product_buyers: productBuyers,
@@ -1166,6 +1958,15 @@ const TOOL_HANDLERS: Record<string, (raw: unknown, context: ToolContext) => Prom
   prepare_create_expense: prepareExpense,
   prepare_create_purchase: preparePurchase,
   prepare_update_order_status: prepareOrderStatus,
+  prepare_update_customer: prepareCustomerUpdate,
+  prepare_update_party: preparePartyUpdate,
+  prepare_adjust_inventory: prepareInventoryAdjustment,
+  prepare_create_roast_batch: prepareRoastBatch,
+  prepare_record_payment: preparePayment,
+  prepare_record_refund: prepareRefund,
+  prepare_reverse_finance_record: prepareReversal,
+  prepare_reclassify_spend: prepareSpendReclassification,
+  prepare_dashboard_draft: prepareDashboardDraft,
 };
 
 export async function executeAssistantTool(name: string, raw: unknown, context: ToolContext): Promise<ToolExecution> {

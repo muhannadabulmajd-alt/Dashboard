@@ -8,11 +8,9 @@ import { cancelPendingAction, confirmPendingAction } from '@/server/ai/actions';
 import { getAiAssistantConfig } from '@/server/ai/config';
 import { aiDebugId } from '@/server/ai/hash';
 import { processAssistantMessage } from '@/server/ai/service';
-import { renderInvoicePdf } from '@/server/invoice/pdf';
 import {
   answerTelegramCallback,
   editTelegramMessage,
-  sendTelegramDocument,
   sendTelegramMessage,
   sendTelegramTyping,
 } from './api';
@@ -26,7 +24,7 @@ import {
 } from './render';
 import { supportedTelegramUpdate, telegramLocale, TelegramUpdateSchema, type SupportedTelegramUpdate } from './schemas';
 
-function currentUser(record: { id: string; email: string; name: string; role: CurrentUser['role']; branchId: string | null }): CurrentUser {
+function currentUser(record: { id: string; email: string; name: string; role: CurrentUser['role']; branchId: string | null; defaultFinanceAccountId?: string | null }): CurrentUser {
   return record;
 }
 
@@ -76,7 +74,7 @@ async function updateIdentity(input: SupportedTelegramUpdate) {
     },
     include: {
       user: {
-        select: { id: true, email: true, name: true, role: true, branchId: true, isActive: true },
+        select: { id: true, email: true, name: true, role: true, branchId: true, defaultFinanceAccountId: true, isActive: true },
       },
     },
   });
@@ -127,49 +125,6 @@ async function deliverReply(input: {
       keyboard: index === chunks.length - 1 ? input.rendered.keyboard : undefined,
     });
   }
-}
-
-async function deliverCreatedOrderInvoice(input: {
-  chatId: string;
-  orderId: string;
-  userId: string;
-  locale: 'ar' | 'en';
-}): Promise<void> {
-  const delivered = await prisma.auditLog.findFirst({
-    where: {
-      action: 'TELEGRAM_INVOICE_PDF_SENT',
-      entity: 'Order',
-      entityId: input.orderId,
-    },
-    select: { id: true },
-  });
-  if (delivered) return;
-
-  const pdf = await renderInvoicePdf(input.orderId, input.locale);
-  if (!pdf) throw new Error('invoice_pdf_not_found');
-
-  const sent = await sendTelegramDocument({
-    chatId: input.chatId,
-    document: pdf.bytes,
-    filename: pdf.filename,
-    caption: input.locale === 'ar'
-      ? `تم إنشاء الطلب بنجاح. فاتورة ${pdf.orderNumber}`
-      : `Order recorded successfully. Invoice ${pdf.orderNumber}`,
-  });
-
-  await prisma.auditLog.create({
-    data: {
-      userId: input.userId,
-      action: 'TELEGRAM_INVOICE_PDF_SENT',
-      entity: 'Order',
-      entityId: input.orderId,
-      metadata: {
-        orderNumber: pdf.orderNumber,
-        telegramChatId: input.chatId,
-        telegramMessageId: sent.message_id,
-      },
-    },
-  });
 }
 
 function storedEvents(message: { content: string | null; payload: Prisma.JsonValue | null }): AiStreamEvent[] {
@@ -324,9 +279,22 @@ export async function processTelegramUpdate(telegramUpdateId: string): Promise<v
     const callback = parseTelegramCallback(telegram.callbackData);
     if (callback?.type === 'action') {
       const chatId = telegram.chatId;
-      const result = callback.command === 'confirm'
-        ? await confirmPendingAction({ actionId: callback.actionId, user, locale })
-        : await cancelPendingAction({ actionId: callback.actionId, user, locale });
+      const confirmationChallenge = callback.command === 'high-confirm'
+        ? await prisma.aiPendingAction.findFirst({
+            where: { id: callback.actionId, userId: user.id, status: 'PENDING' },
+            select: { confirmationChallenge: true },
+          })
+        : null;
+      const result = callback.command === 'cancel'
+        ? await cancelPendingAction({ actionId: callback.actionId, user, locale })
+        : await confirmPendingAction({
+            actionId: callback.actionId,
+            user,
+            locale,
+            confirmationText: callback.command === 'high-confirm'
+              ? confirmationChallenge?.confirmationChallenge ?? undefined
+              : undefined,
+          });
       const events: AiStreamEvent[] = [{
         type: 'action_result',
         actionId: result.actionId,
@@ -334,6 +302,11 @@ export async function processTelegramUpdate(telegramUpdateId: string): Promise<v
         message: result.message,
         href: result.href,
         invoiceHref: result.invoiceHref,
+        documentHref: result.documentHref,
+        documentStatus: result.documentStatus,
+        committed: result.committed,
+        requiresSecondConfirmation: result.requiresSecondConfirmation,
+        confirmationChallenge: result.confirmationChallenge,
       }];
       await deliverReply({
         updateRecordId: receipt.id,
@@ -343,36 +316,6 @@ export async function processTelegramUpdate(telegramUpdateId: string): Promise<v
         locale,
         rendered: renderAssistantEvents(events, { locale, origin: receipt.origin }),
       });
-      if (callback.command === 'confirm' && result.status === 'EXECUTED' && result.invoiceHref && result.recordId) {
-        await deliverCreatedOrderInvoice({
-          chatId,
-          orderId: result.recordId,
-          userId: user.id,
-          locale,
-        }).catch(async (error) => {
-          const errorCode = error instanceof Error ? error.message.slice(0, 120) : 'invoice_pdf_delivery_failed';
-          console.error('Telegram invoice PDF delivery failed', {
-            actionId: result.actionId,
-            orderId: result.recordId,
-            errorCode,
-          });
-          await prisma.auditLog.create({
-            data: {
-              userId: user.id,
-              action: 'TELEGRAM_INVOICE_PDF_FAILED',
-              entity: 'Order',
-              entityId: result.recordId,
-              metadata: { pendingActionId: result.actionId, errorCode },
-            },
-          }).catch(() => undefined);
-          await sendTelegramMessage({
-            chatId,
-            text: locale === 'ar'
-              ? 'تم حفظ الطلب، لكن تعذر إرسال ملف الفاتورة الآن. اضغط تأكيد مرة أخرى لإعادة المحاولة.'
-              : 'The order was saved, but the invoice PDF could not be sent. Press Confirm again to retry.',
-          }).catch(() => undefined);
-        });
-      }
       await markComplete(receipt.id, 'SUCCEEDED');
       return;
     }

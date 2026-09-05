@@ -39,6 +39,7 @@ export type InvoicePaymentSnapshot = {
   total: number;
   paid: number;
   paidRaw: number;
+  refunded: number;
   remaining: number;
   status: InvoicePaymentStatus;
   route: InvoicePaymentRoute;
@@ -114,6 +115,10 @@ export function invoicePaymentSnapshot(
   const customerDirectPayments = directPayments.filter(
     (entry) => entry.party?.collectsOrderPayments !== true,
   );
+  const refunds = active.filter(
+    (entry) => entry.orderId === order.id && entry.type === 'PAYMENT_OUT' && !entry.settlesId,
+  );
+  const refunded = refunds.reduce((sum, entry) => sum + entry.amount, 0);
   const providerDirectTotal = providerDirectPayments.reduce((sum, entry) => sum + entry.amount, 0);
   const providerCustomerSettlementTotal = providerCustomerSettlements.reduce(
     (sum, entry) => sum + entry.amount,
@@ -146,7 +151,7 @@ export function invoicePaymentSnapshot(
   );
   const paidFromSettlements = customerSettlementTotal;
   const paidDirectly = customerDirectPayments.reduce((sum, entry) => sum + entry.amount, 0);
-  const paidRaw = paidDirectly + paidFromSettlements + providerCollected;
+  const paidRaw = Math.max(0, paidDirectly + paidFromSettlements + providerCollected - refunded);
   const paid = Math.min(total, paidRaw);
   const terminal = order.status === 'CANCELLED' || order.status === 'RETURNED' || order.status === 'REFUNDED';
   const remaining = terminal ? 0 : Math.max(0, total - paid);
@@ -166,6 +171,7 @@ export function invoicePaymentSnapshot(
     total,
     paid,
     paidRaw,
+    refunded,
     remaining,
     status: invoicePaymentStatus(order.status, total, paid, orderReceivables.length > 0),
     route:

@@ -126,10 +126,10 @@ export async function matchParty(query: string, type?: 'SUPPLIER' | 'CUSTOMER') 
     : { kind: 'none', candidates: [] } as const;
 }
 
-export async function matchInventoryItem(query: string) {
+export async function matchInventoryItem(query: string, scope: { branchId?: string } = {}) {
   const normalized = normalizeAssistantText(query);
   const rows = await prisma.inventoryItem.findMany({
-    where: { isActive: true },
+    where: { isActive: true, ...(scope.branchId ? { branchId: scope.branchId } : {}) },
     select: { id: true, nameEn: true, nameAr: true, category: true, unit: true, branchId: true },
     orderBy: { nameEn: 'asc' },
   });

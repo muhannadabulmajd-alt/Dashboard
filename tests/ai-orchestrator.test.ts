@@ -74,6 +74,7 @@ describe('AI Responses API orchestration', () => {
       action: {
         id: 'action_1',
         type: 'CREATE_CUSTOMER',
+        risk: 'MEDIUM',
         title: 'Create customer',
         summary: 'Review this customer before saving.',
         fields: [{ label: 'Name', value: 'Saba Al-Bayati' }],

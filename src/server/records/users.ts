@@ -14,6 +14,7 @@ const schema = z.object({
   name: z.string().min(2),
   role: z.enum(ROLES),
   branchId: z.string().optional(),
+  defaultFinanceAccountId: z.string().optional(),
 });
 
 async function activeOwnerCount(): Promise<number> {
@@ -27,6 +28,7 @@ export async function updateUser(id: string, _prev: ActionState, fd: FormData): 
     name: reqField(fd, 'name'),
     role: reqField(fd, 'role'),
     branchId: optField(fd, 'branchId'),
+    defaultFinanceAccountId: optField(fd, 'defaultFinanceAccountId'),
   });
   if (!r.success) return { error: 'invalid' };
   const locale = reqField(fd, 'locale') || 'ar';
@@ -39,9 +41,21 @@ export async function updateUser(id: string, _prev: ActionState, fd: FormData): 
   if (target.role === 'OWNER' && r.data.role !== 'OWNER' && (await activeOwnerCount()) <= 1)
     return { error: 'lastOwner' };
 
+  if (r.data.defaultFinanceAccountId) {
+    const account = await prisma.financeAccount.findFirst({
+      where: { id: r.data.defaultFinanceAccountId, isActive: true, currency: 'IQD', type: { not: 'PAYMENT_GATEWAY' } },
+      select: { id: true },
+    });
+    if (!account) return { error: 'invalid' };
+  }
   await prisma.user.update({
     where: { id },
-    data: { name: r.data.name, role: r.data.role, branchId: r.data.branchId ?? null },
+    data: {
+      name: r.data.name,
+      role: r.data.role,
+      branchId: r.data.branchId ?? null,
+      defaultFinanceAccountId: r.data.defaultFinanceAccountId ?? null,
+    },
   });
   await audit(actor.id, 'UPDATE_USER', 'User', { id, role: r.data.role });
   revalidatePath(LIST, 'page');

@@ -68,6 +68,7 @@ describe('Telegram Atlas AI transport contracts', () => {
     expect(parseTelegramCallback('q:sales')).toEqual({ type: 'quick', key: 'sales' });
     expect(parseTelegramCallback('c:cm123:2')).toEqual({ type: 'choice', messageId: 'cm123', index: 2 });
     expect(parseTelegramCallback('a:action123:c')).toEqual({ type: 'action', actionId: 'action123', command: 'confirm' });
+    expect(parseTelegramCallback('a:action123:h')).toEqual({ type: 'action', actionId: 'action123', command: 'high-confirm' });
     expect(parseTelegramCallback('a:action123:x')).toEqual({ type: 'action', actionId: 'action123', command: 'cancel' });
     expect(parseTelegramCallback('bad')).toBeNull();
   });
@@ -86,6 +87,7 @@ describe('Telegram Atlas AI transport contracts', () => {
         action: {
           id: 'action123',
           type: 'CREATE_ORDER',
+          risk: 'MEDIUM',
           title: 'Create order',
           summary: 'Order for Saba',
           fields: [{ label: 'Total', value: 'IQD 27,000' }],

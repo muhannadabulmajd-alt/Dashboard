@@ -238,10 +238,21 @@ enum AiPendingActionType {
   CREATE_EXPENSE
   CREATE_PURCHASE
   UPDATE_ORDER_STATUS
+  UPDATE_CUSTOMER
+  UPDATE_PARTY
+  ADJUST_INVENTORY
+  CREATE_ROAST_BATCH
+  RECORD_PAYMENT
+  RECORD_REFUND
+  REVERSE_RECORD
+  RECLASSIFY_SPEND
+  CREATE_DASHBOARD_DRAFT
+  MULTI_ACTION_BUNDLE
 }
 
 enum AiPendingActionRisk {
   MEDIUM
+  HIGH
 }
 
 enum AiPendingActionStatus {
@@ -275,6 +286,77 @@ enum TelegramUpdateStatus {
   IGNORED
 }
 
+enum AiExecutionStatus {
+  COMMITTED
+  DOCUMENT_PENDING
+  COMPLETED
+  FAILED
+}
+
+enum AiDocumentKind {
+  INVOICE
+  PAYMENT_RECEIPT
+  REFUND_RECEIPT
+  FINANCE_VOUCHER
+  INVENTORY_MOVEMENT
+  PRODUCTION_MOVEMENT
+  RECORD_SUMMARY
+  CHANGE_CONFIRMATION
+  REPORT
+}
+
+enum AiDocumentStatus {
+  PENDING
+  GENERATING
+  READY
+  FAILED
+}
+
+enum AiDeliveryChannel {
+  WEB
+  TELEGRAM
+}
+
+enum AiDeliveryStatus {
+  PENDING
+  PROCESSING
+  DELIVERED
+  FAILED
+}
+
+enum AiAttachmentKind {
+  RECEIPT_IMAGE
+  DOCUMENT
+  AUDIO
+}
+
+enum AiAttachmentStatus {
+  UPLOADED
+  PROCESSING
+  READY
+  REJECTED
+}
+
+enum AiCapabilityStatus {
+  ENABLED
+  DISABLED
+  PAUSED
+}
+
+enum AiAutomationKind {
+  DAILY_SUMMARY
+  ANOMALY_ALERT
+  REORDER_RECOMMENDATION
+  DEMAND_FORECAST
+}
+
+enum AiNotificationStatus {
+  PENDING
+  SENT
+  FAILED
+  SKIPPED
+}
+
 // ---------------------------------------------------------------------------
 // Identity & access
 // ---------------------------------------------------------------------------
@@ -287,12 +369,14 @@ model User {
   role           Role      @default(VIEWER)
   isActive       Boolean   @default(true)
   branchId       String?
+  defaultFinanceAccountId String?
   createdById    String?
   lastLoginAt    DateTime?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
   branch              Branch?              @relation(fields: [branchId], references: [id])
+  defaultFinanceAccount FinanceAccount?     @relation("UserDefaultFinanceAccount", fields: [defaultFinanceAccountId], references: [id], onDelete: SetNull)
   createdBy           User?                @relation("UserCreatedBy", fields: [createdById], references: [id])
   createdUsers        User[]               @relation("UserCreatedBy")
   operatedBatches     RoastBatch[]         @relation("BatchOperator")
@@ -305,11 +389,17 @@ model User {
   aiPendingActions    AiPendingAction[]
   aiRequestLogs       AiRequestLog[]
   aiRateLimitBuckets  AiRateLimitBucket[]
+  aiExecutionReceipts AiExecutionReceipt[]
+  aiDocuments         AiDocument[]
+  aiAttachments       AiAttachment[]
+  aiAutomationPrefs   AiAutomationPreference[]
+  aiNotifications     AiNotificationLog[]
   telegramIdentity    TelegramIdentity?    @relation("TelegramIdentityUser")
   linkedTelegramUsers TelegramIdentity[]   @relation("TelegramIdentityLinkedBy")
 
   @@index([role])
   @@index([branchId])
+  @@index([defaultFinanceAccountId])
 }
 
 model Dashboard {
@@ -964,6 +1054,9 @@ model AiConversation {
   messages       AiMessage[]
   pendingActions AiPendingAction[]
   requestLogs    AiRequestLog[]
+  executionReceipts AiExecutionReceipt[]
+  documents       AiDocument[]
+  attachments     AiAttachment[]
 
   @@unique([id, userId])
   @@index([userId, lastMessageAt])
@@ -987,6 +1080,7 @@ model AiMessage {
 
   conversation  AiConversation    @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   sourceActions AiPendingAction[] @relation("AiPendingActionSource")
+  attachments   AiAttachment[]
 
   @@index([conversationId, createdAt])
   @@index([requestId])
@@ -1006,6 +1100,8 @@ model AiPendingAction {
   preconditionHash String
   executionKey     String                @unique
   status           AiPendingActionStatus @default(PENDING)
+  confirmationChallenge String?
+  confirmationRequestedAt DateTime?
   expiresAt        DateTime
   executedAt       DateTime?
   recordType       String?
@@ -1019,11 +1115,184 @@ model AiPendingAction {
   conversation  AiConversation @relation(fields: [conversationId, userId], references: [id, userId], onDelete: Cascade)
   user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   sourceMessage AiMessage?     @relation("AiPendingActionSource", fields: [sourceMessageId], references: [id], onDelete: SetNull)
+  executionReceipt AiExecutionReceipt?
+  attachments      AiAttachment[]
 
   @@index([conversationId, status])
   @@index([userId, status])
   @@index([sourceMessageId])
   @@index([expiresAt])
+}
+
+model AiExecutionReceipt {
+  id              String            @id @default(cuid())
+  executionKey    String            @unique
+  pendingActionId String            @unique
+  conversationId  String
+  userId          String
+  channel         AiDeliveryChannel
+  actionType      AiPendingActionType
+  inputHash       String
+  status          AiExecutionStatus @default(COMMITTED)
+  recordType      String
+  recordId        String
+  result          Json
+  linkedRecords   Json?
+  auditLogId      String?
+  errorCode       String?
+  committedAt     DateTime          @default(now())
+  completedAt     DateTime?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  pendingAction AiPendingAction @relation(fields: [pendingActionId], references: [id], onDelete: Cascade)
+  conversation  AiConversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  documents     AiDocument[]
+  deliveries    AiDeliveryOutbox[]
+
+  @@index([conversationId, committedAt])
+  @@index([userId, committedAt])
+  @@index([recordType, recordId])
+  @@index([status, updatedAt])
+}
+
+model AiDocument {
+  id             String           @id @default(cuid())
+  receiptId      String
+  conversationId String?
+  userId         String
+  kind           AiDocumentKind
+  locale         String           @default("en")
+  recordType     String
+  recordId       String
+  status         AiDocumentStatus @default(PENDING)
+  fileName       String?
+  mimeType       String           @default("application/pdf")
+  byteSize       Int?
+  checksum       String?
+  content        Bytes?
+  attempts       Int              @default(0)
+  errorCode      String?
+  generatedAt    DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  receipt      AiExecutionReceipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  conversation AiConversation?    @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deliveries   AiDeliveryOutbox[]
+
+  @@unique([receiptId, kind, locale])
+  @@index([userId, createdAt])
+  @@index([recordType, recordId])
+  @@index([status, updatedAt])
+}
+
+model AiDeliveryOutbox {
+  id                String           @id @default(cuid())
+  receiptId         String
+  documentId        String
+  channel           AiDeliveryChannel
+  destination       String
+  status            AiDeliveryStatus @default(PENDING)
+  attempts          Int              @default(0)
+  availableAt       DateTime         @default(now())
+  lastAttemptAt     DateTime?
+  deliveredAt       DateTime?
+  externalMessageId String?
+  errorCode         String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  receipt  AiExecutionReceipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  document AiDocument         @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, channel, destination])
+  @@index([status, availableAt])
+  @@index([receiptId])
+}
+
+model AiAttachment {
+  id              String             @id @default(cuid())
+  userId          String
+  conversationId  String?
+  sourceMessageId String?
+  pendingActionId String?
+  channel         AiDeliveryChannel
+  kind            AiAttachmentKind
+  status          AiAttachmentStatus @default(UPLOADED)
+  fileName        String
+  mimeType        String
+  byteSize        Int
+  checksum        String
+  content         Bytes
+  telegramFileId  String?
+  extractedText   String?
+  errorCode       String?
+  expiresAt       DateTime
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation  AiConversation?  @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  sourceMessage AiMessage?       @relation(fields: [sourceMessageId], references: [id], onDelete: SetNull)
+  pendingAction AiPendingAction? @relation(fields: [pendingActionId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, checksum])
+  @@index([conversationId, createdAt])
+  @@index([pendingActionId])
+  @@index([expiresAt])
+}
+
+model AiCapabilitySetting {
+  capability     String             @id
+  status         AiCapabilityStatus @default(ENABLED)
+  failureCount   Int                @default(0)
+  failureLimit   Int                @default(1)
+  disabledReason String?
+  lastFailureAt  DateTime?
+  updatedById    String?
+  updatedAt      DateTime           @updatedAt
+}
+
+model AiAutomationPreference {
+  id        String           @id @default(cuid())
+  userId    String
+  kind      AiAutomationKind
+  enabled   Boolean          @default(false)
+  locale    String           @default("en")
+  channel   AiDeliveryChannel @default(WEB)
+  settings  Json?
+  nextRunAt DateTime?
+  lastRunAt DateTime?
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, kind, channel])
+  @@index([enabled, nextRunAt])
+}
+
+model AiNotificationLog {
+  id                String               @id @default(cuid())
+  userId            String
+  kind              String
+  channel           AiDeliveryChannel
+  status            AiNotificationStatus @default(PENDING)
+  payload           Json
+  idempotencyKey    String               @unique
+  externalMessageId String?
+  errorCode         String?
+  sentAt            DateTime?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+  @@index([userId, createdAt])
 }
 
 model AiRequestLog {
@@ -1263,6 +1532,7 @@ model FinanceAccount {
   transfers           FinanceEntry[]       @relation("TransferTo")
   providerSettlements ProviderSettlement[]
   settlementParties   Party[]              @relation("PartyDefaultSettlementAccount")
+  defaultForUsers     User[]               @relation("UserDefaultFinanceAccount")
 
   @@index([type])
 }

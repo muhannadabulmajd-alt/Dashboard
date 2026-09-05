@@ -9,6 +9,6 @@ export async function enqueueTelegramUpdate(telegramUpdateId: string): Promise<v
   await send<TelegramQueuePayload>(
     TELEGRAM_QUEUE_TOPIC,
     { telegramUpdateId },
-    { idempotencyKey: `telegram:${telegramUpdateId}`, retentionSeconds: 7 * 24 * 60 * 60 },
+    { idempotencyKey: `telegram:${telegramUpdateId}`, retentionSeconds: 24 * 60 * 60 },
   );
 }

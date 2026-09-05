@@ -6,6 +6,8 @@ import {
   EXPENSE_CATEGORY_TYPES,
   FULFILLMENT_METHODS,
   INVENTORY_CATEGORIES,
+  PARTY_TYPES,
+  PAYMENT_METHODS,
 } from '@/lib/enums';
 import { MEASUREMENT_UNITS } from '@/lib/units';
 
@@ -15,6 +17,7 @@ type Schema = Record<string, unknown>;
 const string: Schema = { type: 'string' };
 const nullableString: Schema = { type: ['string', 'null'] };
 const nullableNumber: Schema = { type: ['number', 'null'] };
+const nullableBoolean: Schema = { type: ['boolean', 'null'] };
 const nonnegativeInteger: Schema = { type: 'integer', minimum: 0 };
 
 function object(properties: Record<string, Schema>): Schema {
@@ -203,6 +206,124 @@ export const AI_ASSISTANT_TOOLS: FunctionTool[] = [
       providerKey: nullableString,
       paymentMethod: nullableString,
       date: nullableString,
+    }),
+  ),
+  tool(
+    'prepare_update_customer',
+    'Prepare a governed customer update. Preserve every supplied field and never merge differently named customers just because they share a phone number.',
+    object({
+      customerQuery: nullableString,
+      nameEn: nullableString,
+      nameAr: nullableString,
+      phone: nullableString,
+      email: nullableString,
+      governorate: nullableString,
+      address1: nullableString,
+      street: nullableString,
+      notes: nullableString,
+      campaignSource: nullableString,
+      segment: enumSchema(CUSTOMER_SEGMENTS, true),
+      reason: nullableString,
+    }),
+  ),
+  tool(
+    'prepare_update_party',
+    'Prepare a governed supplier, customer-party, shareholder, service provider, employee, or other party update.',
+    object({
+      partyQuery: nullableString,
+      name: nullableString,
+      type: enumSchema(PARTY_TYPES, true),
+      phone: nullableString,
+      email: nullableString,
+      address: nullableString,
+      notes: nullableString,
+      netFeesFromRemittance: nullableBoolean,
+      collectsOrderPayments: nullableBoolean,
+      reason: nullableString,
+    }),
+  ),
+  tool(
+    'prepare_adjust_inventory',
+    'Prepare a physical inventory adjustment to an exact target quantity with up to three decimal places. The preview must show current quantity, target quantity, and difference.',
+    object({
+      inventoryItemQuery: nullableString,
+      targetQuantity: nullableNumber,
+      occurredAt: nullableString,
+      reason: nullableString,
+    }),
+  ),
+  tool(
+    'prepare_create_roast_batch',
+    'Prepare a roasting batch with optional green-input and roasted-output inventory movements.',
+    object({
+      batchNumber: nullableString,
+      origin: nullableString,
+      roastDate: nullableString,
+      roastLevel: nullableString,
+      greenInputGrams: nullableNumber,
+      roastedOutputGrams: nullableNumber,
+      qcScore: nullableNumber,
+      qcNotes: nullableString,
+      greenInventoryItemQuery: nullableString,
+      roastedInventoryItemQuery: nullableString,
+      branchQuery: nullableString,
+    }),
+  ),
+  tool(
+    'prepare_record_payment',
+    'Prepare a payment against an Atlas order or an outstanding payable/receivable. A real active finance account is always required; use the user default only when configured.',
+    object({
+      targetType: enumSchema(['ORDER', 'FINANCE_ENTRY'], true),
+      targetQuery: nullableString,
+      amount: nullableNumber,
+      accountQuery: nullableString,
+      paymentMethod: enumSchema(PAYMENT_METHODS, true),
+      date: nullableString,
+    }),
+  ),
+  tool(
+    'prepare_record_refund',
+    'Prepare a refund for an order. This is a high-risk reversible financial correction and requires a second confirmation with the order number.',
+    object({
+      orderQuery: nullableString,
+      amount: nullableNumber,
+      accountQuery: nullableString,
+      paymentMethod: enumSchema(PAYMENT_METHODS, true),
+      date: nullableString,
+      reason: nullableString,
+    }),
+  ),
+  tool(
+    'prepare_reverse_finance_record',
+    'Prepare reversal of one eligible Atlas finance record. This is high risk and requires a second confirmation with its record number.',
+    object({ recordQuery: nullableString, reason: nullableString }),
+  ),
+  tool(
+    'prepare_reclassify_spend',
+    'Prepare reclassification of one spending line as CAPEX, INVENTORY, OPEX, or REVIEW. This is high risk and requires a second confirmation with its finance record number.',
+    object({
+      recordQuery: nullableString,
+      lineQuery: nullableString,
+      spendTreatment: enumSchema(['CAPEX', 'INVENTORY', 'OPEX', 'REVIEW'], true),
+      classificationNote: nullableString,
+      fixedAssetQuery: nullableString,
+      inventoryItemQuery: nullableString,
+    }),
+  ),
+  tool(
+    'prepare_dashboard_draft',
+    'Prepare a private dashboard draft from a trusted Atlas metric template. Never invent metric IDs.',
+    object({
+      name: nullableString,
+      description: nullableString,
+      template: enumSchema([
+        'owner-overview',
+        'sales-dashboard',
+        'inventory-dashboard',
+        'delivery-dashboard',
+        'financial-dashboard',
+        'customer-dashboard',
+      ], true),
     }),
   ),
 ];

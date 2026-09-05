@@ -6,6 +6,8 @@ import {
   EXPENSE_CATEGORY_TYPES,
   FULFILLMENT_METHODS,
   INVENTORY_CATEGORIES,
+  PARTY_TYPES,
+  PAYMENT_METHODS,
 } from '@/lib/enums';
 import { MEASUREMENT_UNITS } from '@/lib/units';
 
@@ -131,4 +133,98 @@ export const PrepareOrderStatusSchema = z.object({
   providerKey: z.string().trim().nullable(),
   paymentMethod: z.string().trim().nullable(),
   date: z.string().nullable(),
+}).strict();
+
+export const PrepareCustomerUpdateSchema = z.object({
+  customerQuery: z.string().trim().nullable(),
+  nameEn: z.string().trim().nullable(),
+  nameAr: z.string().trim().nullable(),
+  phone: z.string().trim().nullable(),
+  email: z.string().trim().nullable(),
+  governorate: z.string().trim().nullable(),
+  address1: z.string().trim().nullable(),
+  street: z.string().trim().nullable(),
+  notes: z.string().trim().nullable(),
+  campaignSource: z.string().trim().nullable(),
+  segment: z.enum(CUSTOMER_SEGMENTS).nullable(),
+  reason: z.string().trim().nullable(),
+}).strict();
+
+export const PreparePartyUpdateSchema = z.object({
+  partyQuery: z.string().trim().nullable(),
+  name: z.string().trim().nullable(),
+  type: z.enum(PARTY_TYPES).nullable(),
+  phone: z.string().trim().nullable(),
+  email: z.string().trim().nullable(),
+  address: z.string().trim().nullable(),
+  notes: z.string().trim().nullable(),
+  netFeesFromRemittance: z.boolean().nullable(),
+  collectsOrderPayments: z.boolean().nullable(),
+  reason: z.string().trim().nullable(),
+}).strict();
+
+export const PrepareInventoryAdjustmentSchema = z.object({
+  inventoryItemQuery: z.string().trim().nullable(),
+  targetQuantity: z.number().nonnegative().nullable(),
+  occurredAt: z.string().nullable(),
+  reason: z.string().trim().nullable(),
+}).strict();
+
+export const PrepareRoastBatchSchema = z.object({
+  batchNumber: z.string().trim().nullable(),
+  origin: z.string().trim().nullable(),
+  roastDate: z.string().nullable(),
+  roastLevel: z.string().trim().nullable(),
+  greenInputGrams: z.number().positive().nullable(),
+  roastedOutputGrams: z.number().positive().nullable(),
+  qcScore: z.number().nullable(),
+  qcNotes: z.string().trim().nullable(),
+  greenInventoryItemQuery: z.string().trim().nullable(),
+  roastedInventoryItemQuery: z.string().trim().nullable(),
+  branchQuery: z.string().trim().nullable(),
+}).strict();
+
+export const PreparePaymentSchema = z.object({
+  targetType: z.enum(['ORDER', 'FINANCE_ENTRY']).nullable(),
+  targetQuery: z.string().trim().nullable(),
+  amount: z.number().positive().nullable(),
+  accountQuery: z.string().trim().nullable(),
+  paymentMethod: z.enum(PAYMENT_METHODS).nullable(),
+  date: z.string().nullable(),
+}).strict();
+
+export const PrepareRefundSchema = z.object({
+  orderQuery: z.string().trim().nullable(),
+  amount: z.number().positive().nullable(),
+  accountQuery: z.string().trim().nullable(),
+  paymentMethod: z.enum(PAYMENT_METHODS).nullable(),
+  date: z.string().nullable(),
+  reason: z.string().trim().nullable(),
+}).strict();
+
+export const PrepareReversalSchema = z.object({
+  recordQuery: z.string().trim().nullable(),
+  reason: z.string().trim().nullable(),
+}).strict();
+
+export const PrepareSpendReclassificationSchema = z.object({
+  recordQuery: z.string().trim().nullable(),
+  lineQuery: z.string().trim().nullable(),
+  spendTreatment: z.enum(['CAPEX', 'INVENTORY', 'OPEX', 'REVIEW']).nullable(),
+  classificationNote: z.string().trim().nullable(),
+  fixedAssetQuery: z.string().trim().nullable(),
+  inventoryItemQuery: z.string().trim().nullable(),
+}).strict();
+
+export const PrepareDashboardDraftSchema = z.object({
+  name: z.string().trim().nullable(),
+  description: z.string().trim().nullable(),
+  template: z.enum([
+    'owner-overview',
+    'sales-dashboard',
+    'inventory-dashboard',
+    'delivery-dashboard',
+    'financial-dashboard',
+    'customer-dashboard',
+  ]).nullable(),
 }).strict();

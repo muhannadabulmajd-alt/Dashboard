@@ -8,6 +8,7 @@ import {
   Check,
   ChevronRight,
   Clock3,
+  Download,
   FileSearch,
   History,
   LoaderCircle,
@@ -64,6 +65,11 @@ type ActionResult = {
   message: string;
   href?: string;
   invoiceHref?: string;
+  documentHref?: string;
+  documentStatus?: 'READY' | 'PENDING';
+  committed?: boolean;
+  requiresSecondConfirmation?: boolean;
+  confirmationChallenge?: string;
 };
 
 const QUICK_ACTIONS = [
@@ -112,6 +118,9 @@ function payloadEvents(payload: unknown): AiStreamEvent[] {
       message: value.actionResult.message,
       href: value.actionResult.href,
       invoiceHref: value.actionResult.invoiceHref,
+      documentHref: value.actionResult.documentHref,
+      documentStatus: value.actionResult.documentStatus,
+      committed: value.actionResult.committed,
     }];
   }
   return [];
@@ -237,9 +246,10 @@ function ActionPreviewCard({
   action: AiActionPreview;
   locale: 'ar' | 'en';
   busy: boolean;
-  onAction: (action: AiActionPreview, operation: 'confirm' | 'cancel') => void;
+  onAction: (action: AiActionPreview, operation: 'confirm' | 'cancel', confirmationText?: string) => void;
 }) {
   const t = useTranslations('aiAssistant');
+  const [confirmationText, setConfirmationText] = useState('');
   const terminal = ['EXECUTING', 'EXECUTED', 'CANCELLED', 'FAILED', 'EXPIRED', 'STALE'].includes(action.status);
   const terminalLabels: Record<string, string> = {
     EXECUTING: t('processing'),
@@ -281,15 +291,29 @@ function ActionPreviewCard({
               <Clock3 className="size-3.5" />
               {t('expiresAt', { date: dateLabel(action.expiresAt, locale) })}
             </p>
+            {action.confirmationChallenge ? (
+              <label className="mb-3 block text-sm font-semibold text-roast">
+                <span className="mb-1.5 block">{t('highRiskPrompt', { record: action.confirmationChallenge })}</span>
+                <input
+                  type="text"
+                  value={confirmationText}
+                  onChange={(event) => setConfirmationText(event.target.value)}
+                  placeholder={action.confirmationChallenge}
+                  autoComplete="off"
+                  dir="ltr"
+                  className="min-h-11 w-full rounded-lg border border-border bg-background px-3 font-mono text-sm outline-none focus:border-amber/60 focus:ring-2 focus:ring-amber/10"
+                />
+              </label>
+            ) : null}
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <button
                 type="button"
-                disabled={busy}
-                onClick={() => onAction(action, 'confirm')}
+                disabled={busy || Boolean(action.confirmationChallenge && !confirmationText.trim())}
+                onClick={() => onAction(action, 'confirm', action.confirmationChallenge ? confirmationText : undefined)}
                 className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-bold text-primary-foreground hover:bg-amber/90 disabled:opacity-50"
               >
                 {busy ? <LoaderCircle className="size-4 animate-spin" /> : <Check className="size-4" />}
-                {t('confirm')}
+                {action.risk === 'HIGH' && !action.confirmationChallenge ? t('reviewHighRisk') : t('confirm')}
               </button>
               <button
                 type="button"
@@ -497,19 +521,37 @@ export function AssistantWorkspace({
         conversation: {
           id: string;
           messages: StoredMessage[];
-          pendingActions: Array<{ id: string; status: string }>;
+          pendingActions: Array<{
+            id: string;
+            status: string;
+            risk: 'MEDIUM' | 'HIGH';
+            confirmationChallenge: string | null;
+            confirmationRequestedAt: string | null;
+          }>;
         };
       };
       if (loadId !== conversationLoadRef.current) return;
-      const actionStatuses = new Map(data.conversation.pendingActions.map((action) => [action.id, action.status]));
+      const actionStates = new Map(data.conversation.pendingActions.map((action) => [action.id, action]));
       setConversationId(data.conversation.id);
       setMessages(data.conversation.messages.slice().reverse().flatMap((message) => message.role === 'SYSTEM' ? [] : [{
         id: message.id,
         role: message.role,
         content: message.content ?? '',
-        events: payloadEvents(message.payload).map((event) => event.type === 'action_preview'
-          ? { ...event, action: { ...event.action, status: actionStatuses.get(event.action.id) ?? event.action.status } }
-          : event),
+        events: payloadEvents(message.payload).map((event) => {
+          if (event.type !== 'action_preview') return event;
+          const state = actionStates.get(event.action.id);
+          return {
+            ...event,
+            action: {
+              ...event.action,
+              risk: state?.risk ?? event.action.risk ?? 'MEDIUM',
+              status: state?.status ?? event.action.status,
+              confirmationChallenge: state?.confirmationRequestedAt
+                ? state.confirmationChallenge ?? undefined
+                : undefined,
+            },
+          };
+        }),
         createdAt: message.createdAt,
       }]));
       shouldFollowRef.current = true;
@@ -596,14 +638,14 @@ export function AssistantWorkspace({
     }
   };
 
-  const runAction = async (action: AiActionPreview, operation: 'confirm' | 'cancel') => {
+  const runAction = async (action: AiActionPreview, operation: 'confirm' | 'cancel', confirmationText?: string) => {
     if (actionBusy) return;
     setActionBusy(action.id);
     try {
       const response = await fetch(`/api/ai-assistant/actions/${action.id}/${operation}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ locale }),
+        body: JSON.stringify({ locale, ...(confirmationText ? { confirmationText } : {}) }),
       });
       const body = await response.json() as ActionResult & { message?: string; error?: string };
       if (!response.ok) {
@@ -617,6 +659,22 @@ export function AssistantWorkspace({
           })));
         }
         throw new Error(body.message || 'action_failed');
+      }
+      if (body.requiresSecondConfirmation && body.confirmationChallenge) {
+        setMessages((current) => current.map((message) => ({
+          ...message,
+          events: message.events.map((event) => event.type === 'action_preview' && event.action.id === action.id
+            ? {
+                ...event,
+                action: {
+                  ...event.action,
+                  status: 'PENDING',
+                  confirmationChallenge: body.confirmationChallenge,
+                },
+              }
+            : event),
+        })));
+        return;
       }
       setMessages((current) => current.map((message) => ({
         ...message,
@@ -635,6 +693,9 @@ export function AssistantWorkspace({
           message: body.message,
           href: body.href,
           invoiceHref: body.invoiceHref,
+          documentHref: body.documentHref,
+          documentStatus: body.documentStatus,
+          committed: body.committed,
         }],
         createdAt: new Date().toISOString(),
       }]);
@@ -758,6 +819,12 @@ export function AssistantWorkspace({
                             <Link href={event.invoiceHref} className="text-roast underline underline-offset-4">
                               {t('openInvoice')}
                             </Link>
+                          ) : null}
+                          {event.documentHref ? (
+                            <a href={event.documentHref} className="inline-flex items-center gap-1 text-roast underline underline-offset-4">
+                              <Download className="size-3.5" />
+                              {event.documentStatus === 'PENDING' ? t('documentPending') : t('downloadPdf')}
+                            </a>
                           ) : null}
                         </div>
                       );

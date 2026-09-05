@@ -6,8 +6,11 @@ import {
   EXPENSE_CATEGORY_TYPES,
   FULFILLMENT_METHODS,
   INVENTORY_CATEGORIES,
+  PARTY_TYPES,
+  PAYMENT_METHODS,
 } from '@/lib/enums';
 import { MEASUREMENT_UNITS } from '@/lib/units';
+import { DashboardConfigSchema } from '@/lib/dashboard-builder';
 
 export const ResolvedCustomerActionSchema = z.object({
   nameEn: z.string().optional(),
@@ -20,6 +23,22 @@ export const ResolvedCustomerActionSchema = z.object({
   notes: z.string().optional(),
   campaignSource: z.string().optional(),
   segment: z.enum(CUSTOMER_SEGMENTS),
+}).strict();
+
+export const ResolvedPartyActionSchema = z.object({
+  name: z.string().trim().min(1),
+  type: z.enum(PARTY_TYPES),
+  phone: z.string().trim().optional(),
+  email: z.string().trim().email().optional().or(z.literal('')),
+  address: z.string().trim().optional(),
+  branchId: z.string().trim().optional(),
+  openingPayable: z.number().int().default(0),
+  openingReceivable: z.number().int().default(0),
+  notes: z.string().trim().optional(),
+  equityShare: z.number().min(0).max(100).optional(),
+  defaultSettlementAccountId: z.string().trim().optional(),
+  netFeesFromRemittance: z.boolean().default(false),
+  collectsOrderPayments: z.boolean().default(false),
 }).strict();
 
 export const ResolvedOrderActionSchema = z.object({
@@ -59,10 +78,15 @@ export const ResolvedExpenseActionSchema = z.object({
   accountId: z.string(),
   categoryType: z.enum(EXPENSE_CATEGORY_TYPES),
   partyId: z.string().nullable(),
+  newParty: ResolvedPartyActionSchema.nullable().default(null),
   description: z.string().min(1),
   reference: z.string().nullable(),
   branchId: z.string().nullable(),
-}).strict();
+}).strict().superRefine((value, ctx) => {
+  if (value.partyId && value.newParty) {
+    ctx.addIssue({ code: 'custom', path: ['newParty'], message: 'Choose an existing party or create a new one.' });
+  }
+});
 
 export const ResolvedPurchaseActionSchema = z.object({
   purchaseType: z.enum(['INVENTORY', 'ASSET']),
@@ -78,17 +102,22 @@ export const ResolvedPurchaseActionSchema = z.object({
   newItemCategory: z.enum(INVENTORY_CATEGORIES).nullable(),
   assetName: z.string().nullable(),
   assetCategory: z.string().nullable(),
-  supplierId: z.string(),
+  supplierId: z.string().nullable(),
+  newSupplier: ResolvedPartyActionSchema.nullable().default(null),
   paidMode: z.enum(['PAID', 'CREDIT', 'PARTIAL']),
   paidAmount: z.number().nonnegative().nullable(),
   accountId: z.string().nullable(),
-  paymentMethod: z.string().nullable(),
+  paymentMethod: z.enum(PAYMENT_METHODS).nullable(),
   paymentDate: z.string().datetime().nullable(),
   dueDate: z.string().datetime().nullable(),
   branchId: z.string().nullable(),
   reference: z.string().nullable(),
   notes: z.string().nullable(),
-}).strict();
+}).strict().superRefine((value, ctx) => {
+  if (Boolean(value.supplierId) === Boolean(value.newSupplier)) {
+    ctx.addIssue({ code: 'custom', path: ['supplierId'], message: 'Exactly one supplier source is required.' });
+  }
+});
 
 export const ResolvedOrderStatusActionSchema = z.object({
   orderId: z.string(),
@@ -101,10 +130,108 @@ export const ResolvedOrderStatusActionSchema = z.object({
   date: z.string().datetime().nullable(),
 }).strict();
 
-export const ACTION_DATA_SCHEMAS = {
+export const ResolvedCustomerUpdateActionSchema = z.object({
+  customerId: z.string().min(1),
+  externalId: z.string().nullable(),
+  nameEn: z.string().trim().nullable().optional(),
+  nameAr: z.string().trim().nullable().optional(),
+  phone: z.string().trim().nullable().optional(),
+  email: z.string().trim().email().nullable().optional().or(z.literal('')),
+  governorate: z.string().trim().nullable().optional(),
+  address1: z.string().trim().nullable().optional(),
+  street: z.string().trim().nullable().optional(),
+  notes: z.string().trim().nullable().optional(),
+  segment: z.enum(CUSTOMER_SEGMENTS).optional(),
+  campaignSource: z.string().trim().nullable().optional(),
+  reason: z.string().trim().min(3),
+}).strict();
+
+export const ResolvedPartyUpdateActionSchema = ResolvedPartyActionSchema.partial().extend({
+  partyId: z.string().min(1),
+  partyName: z.string().min(1),
+  reason: z.string().trim().min(3),
+}).strict();
+
+export const ResolvedInventoryAdjustmentActionSchema = z.object({
+  inventoryItemId: z.string().min(1),
+  inventoryItemName: z.string().min(1),
+  targetQuantity: z.number().nonnegative().refine((value) => Number.isInteger(value * 1000)),
+  occurredAt: z.string().datetime(),
+  reason: z.string().trim().min(3),
+}).strict();
+
+export const ResolvedRoastBatchActionSchema = z.object({
+  batchNumber: z.string().trim().min(1),
+  origin: z.string().trim().min(1),
+  roastDate: z.string().datetime().nullable(),
+  roastLevel: z.string().trim().nullable(),
+  greenInputGrams: z.number().int().positive(),
+  roastedOutputGrams: z.number().int().positive().nullable(),
+  qcScore: z.number().nullable(),
+  qcNotes: z.string().trim().nullable(),
+  greenInventoryItemId: z.string().nullable(),
+  roastedInventoryItemId: z.string().nullable(),
+  branchId: z.string().nullable(),
+}).strict();
+
+export const ResolvedPaymentActionSchema = z.object({
+  targetType: z.enum(['ORDER', 'FINANCE_ENTRY']),
+  targetId: z.string().min(1),
+  targetNumber: z.string().min(1),
+  amount: z.number().positive(),
+  accountId: z.string().min(1),
+  accountName: z.string().min(1),
+  paymentMethod: z.string().trim().nullable(),
+  date: z.string().datetime(),
+}).strict();
+
+export const ResolvedRefundActionSchema = z.object({
+  orderId: z.string().min(1),
+  orderNumber: z.string().min(1),
+  amount: z.number().positive(),
+  accountId: z.string().min(1),
+  accountName: z.string().min(1),
+  paymentMethod: z.string().trim().nullable(),
+  date: z.string().datetime(),
+  reason: z.string().trim().min(3),
+}).strict();
+
+export const ResolvedReversalActionSchema = z.object({
+  financeEntryId: z.string().min(1),
+  recordNumber: z.string().min(1),
+  reason: z.string().trim().min(3),
+}).strict();
+
+export const ResolvedSpendReclassificationActionSchema = z.object({
+  entryId: z.string().min(1),
+  recordNumber: z.string().min(1),
+  lineId: z.string().min(1),
+  lineName: z.string().min(1),
+  spendTreatment: z.enum(['CAPEX', 'INVENTORY', 'OPEX', 'REVIEW']),
+  classificationNote: z.string().trim().min(3),
+  fixedAssetId: z.string().nullable(),
+  inventoryItemId: z.string().nullable(),
+}).strict();
+
+export const ResolvedDashboardDraftActionSchema = z.object({
+  name: z.string().trim().min(1),
+  description: z.string().trim().nullable(),
+  config: DashboardConfigSchema,
+}).strict();
+
+export const ACTION_DATA_SCHEMAS: Partial<Record<import('@prisma/client').AiPendingActionType, z.ZodType>> = {
   CREATE_CUSTOMER: ResolvedCustomerActionSchema,
   CREATE_ORDER: ResolvedOrderActionSchema,
   CREATE_EXPENSE: ResolvedExpenseActionSchema,
   CREATE_PURCHASE: ResolvedPurchaseActionSchema,
   UPDATE_ORDER_STATUS: ResolvedOrderStatusActionSchema,
+  UPDATE_CUSTOMER: ResolvedCustomerUpdateActionSchema,
+  UPDATE_PARTY: ResolvedPartyUpdateActionSchema,
+  ADJUST_INVENTORY: ResolvedInventoryAdjustmentActionSchema,
+  CREATE_ROAST_BATCH: ResolvedRoastBatchActionSchema,
+  RECORD_PAYMENT: ResolvedPaymentActionSchema,
+  RECORD_REFUND: ResolvedRefundActionSchema,
+  REVERSE_RECORD: ResolvedReversalActionSchema,
+  RECLASSIFY_SPEND: ResolvedSpendReclassificationActionSchema,
+  CREATE_DASHBOARD_DRAFT: ResolvedDashboardDraftActionSchema,
 } as const;

@@ -44,10 +44,12 @@ export type AiClarification = {
 export type AiActionPreview = {
   id: string;
   type: string;
+  risk: 'MEDIUM' | 'HIGH';
   title: string;
   summary: string;
   fields: Array<{ label: string; value: string }>;
   warnings: string[];
+  confirmationChallenge?: string;
   expiresAt: string;
   status: string;
 };
@@ -58,7 +60,19 @@ export type AiStreamEvent =
   | { type: 'clarification'; clarification: AiClarification }
   | { type: 'result_card'; card: AiResultCard }
   | { type: 'action_preview'; action: AiActionPreview }
-  | { type: 'action_result'; actionId: string; status: string; message: string; href?: string; invoiceHref?: string }
+  | {
+      type: 'action_result';
+      actionId: string;
+      status: string;
+      message: string;
+      href?: string;
+      invoiceHref?: string;
+      documentHref?: string;
+      documentStatus?: 'READY' | 'PENDING';
+      committed?: boolean;
+      requiresSecondConfirmation?: boolean;
+      confirmationChallenge?: string;
+    }
   | { type: 'error'; message: string; debugId: string; retryable: boolean }
   | { type: 'completion'; conversationId: string; messageId?: string };
 

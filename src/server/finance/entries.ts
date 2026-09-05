@@ -7,7 +7,17 @@ import { prisma } from '@/server/db/client';
 import { FINANCE_TYPES, CURRENCIES, OBLIGATION_KINDS, EXPENSE_CATEGORY_TYPES } from '@/lib/enums';
 import { toMinor, convertToIqd } from '@/lib/money';
 import { getUsdToIqd } from '@/server/settings';
-import { requireCap, audit, reqField, optField, type ActionState } from '@/server/records/shared';
+import type { TrustedCommandContext } from '@/server/commands/actor-context';
+import {
+  requireCap,
+  resolveCommandActor,
+  audit,
+  reqField,
+  optField,
+  type ActionState,
+  type CommandCommitHook,
+  type CommandPreconditionHook,
+} from '@/server/records/shared';
 import { syncAllocatedAssetTotals } from '@/server/finance/asset-allocations';
 import {
   captureLayerBaseCosts,
@@ -444,37 +454,63 @@ export async function updateEntry(id: string, _prev: ActionState, fd: FormData):
   redirect(`/${locale}/finance/ledger/${id}`);
 }
 
-async function reverseEntryForUser(id: string, user: { id: string }, locale: string, reason: string): Promise<void> {
-  const entry = await prisma.financeEntry.findUnique({
-    where: { id },
-    include: {
-      settlements: { where: { archivedAt: null, reversedAt: null, reversalOfId: null }, select: { id: true } },
-      fixedAssets: { select: { id: true } },
-      stockMovements: { select: { inventoryItemId: true } },
-      costLayers: { select: { inventoryItemId: true } },
-      ledgerLines: {
-        include: {
-          fixedAssetCostAllocations: { select: { fixedAssetId: true } },
-          landedCostAllocations: { select: { costLayerId: true, inventoryItemId: true } },
+const FinanceReversalCommandSchema = z.object({
+  entryId: z.string().min(1),
+  reason: z.string().trim().min(3),
+}).strict();
+
+export type FinanceReversalCommandInput = z.input<typeof FinanceReversalCommandSchema>;
+
+export async function reverseFinanceEntryFromInput(
+  rawInput: FinanceReversalCommandInput,
+  options: {
+    actorContext?: TrustedCommandContext;
+    precondition?: CommandPreconditionHook;
+    onCommitted?: CommandCommitHook<{
+      recordId: string;
+      reversalId: string;
+      reason: string;
+    }>;
+  } = {},
+) {
+  const user = await resolveCommandActor(CAP, options.actorContext);
+  if (!user || (user.role !== 'OWNER' && user.role !== 'ADMIN')) {
+    throw new Error('forbidden');
+  }
+  const { entryId: id, reason } = FinanceReversalCommandSchema.parse(rawInput);
+
+  return prisma.$transaction(async (tx) => {
+    await options.precondition?.(tx);
+    const entry = await tx.financeEntry.findUnique({
+      where: { id },
+      include: {
+        settlements: { where: { archivedAt: null, reversedAt: null, reversalOfId: null }, select: { id: true } },
+        fixedAssets: { select: { id: true } },
+        stockMovements: { select: { inventoryItemId: true } },
+        costLayers: { select: { inventoryItemId: true } },
+        ledgerLines: {
+          include: {
+            fixedAssetCostAllocations: { select: { fixedAssetId: true } },
+            landedCostAllocations: { select: { costLayerId: true, inventoryItemId: true } },
+          },
         },
       },
-    },
-  });
-  if (!entry || entry.importKey || entry.reversedAt || entry.reversalOfId) redirect(`/${locale}/finance/ledger/${id}`);
-  if (entry.obligation && entry.settlements.length > 0) {
-    redirect(`/${locale}/finance/ledger/${id}`);
-  }
-
-  const touchedItems = new Set<string>([
-    ...entry.stockMovements.map((movement) => movement.inventoryItemId),
-    ...entry.costLayers.map((layer) => layer.inventoryItemId),
-    ...entry.ledgerLines.flatMap((line) =>
-      line.landedCostAllocations
-        .map((allocation) => allocation.inventoryItemId)
-        .filter((value): value is string => Boolean(value)),
-    ),
-  ]);
-  await prisma.$transaction(async (tx) => {
+    });
+    if (!entry || entry.importKey || entry.reversedAt || entry.reversalOfId) {
+      throw new Error('entry_not_reversible');
+    }
+    if (entry.obligation && entry.settlements.length > 0) {
+      throw new Error('entry_has_settlements');
+    }
+    const touchedItems = new Set<string>([
+      ...entry.stockMovements.map((movement) => movement.inventoryItemId),
+      ...entry.costLayers.map((layer) => layer.inventoryItemId),
+      ...entry.ledgerLines.flatMap((line) =>
+        line.landedCostAllocations
+          .map((allocation) => allocation.inventoryItemId)
+          .filter((value): value is string => Boolean(value)),
+      ),
+    ]);
     const layerBaseCosts = await captureLayerBaseCosts(
       tx,
       entry.ledgerLines.flatMap((line) =>
@@ -491,7 +527,7 @@ async function reverseEntryForUser(id: string, user: { id: string }, locale: str
         reversalReason: reason,
       },
     });
-    await tx.financeEntry.create({
+    const reversal = await tx.financeEntry.create({
       data: {
         date: new Date(),
         type: entry.type,
@@ -559,27 +595,36 @@ async function reverseEntryForUser(id: string, user: { id: string }, locale: str
         },
       },
     });
+    const result = { recordId: entry.id, reversalId: reversal.id, reason };
+    await options.onCommitted?.(tx, result);
+    return result;
   });
+}
+
+function revalidateFinanceMutation() {
   revalidatePath(HUB, 'page');
   revalidatePath(LIST, 'page');
   revalidatePath('/[locale]/(dashboard)/finance/dues', 'page');
   revalidatePath(SHAREHOLDERS, 'page');
-  redirect(`/${locale}/finance/ledger`);
 }
 
 export async function reverseEntry(id: string, locale: string): Promise<void> {
-  const user = await requireCap(CAP);
-  if (!user) return;
-  await reverseEntryForUser(id, user, locale, 'Manual reversal');
+  await reverseFinanceEntryFromInput({ entryId: id, reason: 'Manual reversal' });
+  revalidateFinanceMutation();
+  redirect(`/${locale}/finance/ledger`);
 }
 
 export async function reverseEntryWithReason(id: string, _prev: ActionState, fd: FormData): Promise<ActionState> {
-  const user = await requireCap(CAP);
-  if (!user) return { error: 'forbidden' };
   const locale = reqField(fd, 'locale') || 'ar';
   const reason = reqField(fd, 'reason');
   if (reason.length < 3) return { error: 'reason' };
-  await reverseEntryForUser(id, user, locale, reason);
+  try {
+    await reverseFinanceEntryFromInput({ entryId: id, reason });
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'invalid' };
+  }
+  revalidateFinanceMutation();
+  redirect(`/${locale}/finance/ledger`);
 }
 
 export async function deleteEntry(id: string, locale: string): Promise<void> {
@@ -593,14 +638,116 @@ const settleSchema = z.object({
   date: z.coerce.date(),
 });
 
+const FinanceSettlementCommandSchema = settleSchema.extend({
+  obligationId: z.string().min(1),
+});
+
+export type FinanceSettlementCommandInput = z.input<typeof FinanceSettlementCommandSchema>;
+
+export async function settleFinanceEntryFromInput(
+  input: FinanceSettlementCommandInput,
+  options: {
+    actorContext?: TrustedCommandContext;
+    precondition?: CommandPreconditionHook;
+    onCommitted?: CommandCommitHook<{
+      recordId: string;
+      obligationId: string;
+      amount: number;
+      outstandingBefore: number;
+    }>;
+  } = {},
+) {
+  const user = await resolveCommandActor(CAP, options.actorContext);
+  if (!user) throw new Error('forbidden');
+  const parsed = FinanceSettlementCommandSchema.parse(input);
+
+  return prisma.$transaction(async (tx) => {
+    await options.precondition?.(tx);
+    const obligation = await tx.financeEntry.findUnique({
+      where: { id: parsed.obligationId },
+      include: {
+        settlements: {
+          where: { archivedAt: null, reversedAt: null, reversalOfId: null },
+          select: { amount: true },
+        },
+      },
+    });
+    if (
+      !obligation ||
+      obligation.archivedAt ||
+      obligation.reversedAt ||
+      obligation.reversalOfId ||
+      !obligation.obligation ||
+      !obligation.obligationKind
+    ) {
+      throw new Error('obligation_not_found');
+    }
+    const account = await tx.financeAccount.findFirst({
+      where: { id: parsed.accountId, isActive: true },
+      select: { id: true, currency: true },
+    });
+    if (!account || account.currency !== obligation.currency) throw new Error('account_currency');
+    const paid = obligation.settlements.reduce((sum, settlement) => sum + settlement.amount, 0);
+    const outstanding = Math.max(0, obligation.amount - paid);
+    if (outstanding <= 0) throw new Error('obligation_settled');
+    const amount = Math.min(toMinor(parsed.amount, obligation.currency), outstanding);
+    if (amount <= 0) throw new Error('amount');
+
+    const settlement = await tx.financeEntry.create({
+      data: {
+        date: parsed.date,
+        type: obligation.obligationKind === 'PAYABLE' ? 'PAYMENT_OUT' : 'PAYMENT_IN',
+        amount,
+        currency: obligation.currency,
+        obligation: false,
+        accountId: account.id,
+        partyId: obligation.partyId,
+        paymentMethod: parsed.paymentMethod ?? null,
+        settlesId: obligation.id,
+        branchId: obligation.branchId,
+        orderId: obligation.orderId,
+        reference: obligation.reference,
+        description: `Settlement for ${obligation.recordKey ?? obligation.reference ?? obligation.id}`,
+        createdById: user.id,
+      },
+    });
+    const result = {
+      recordId: settlement.id,
+      obligationId: obligation.id,
+      amount,
+      outstandingBefore: outstanding,
+    };
+    await tx.auditLog.create({
+      data: {
+        userId: user.id,
+        action: 'SETTLE',
+        entity: 'FinanceEntry',
+        entityId: settlement.id,
+        metadata: {
+          obligationId: obligation.id,
+          amount,
+          accountId: account.id,
+          paymentMethod: parsed.paymentMethod ?? null,
+          partyId: obligation.partyId,
+          branchId: obligation.branchId,
+          orderId: obligation.orderId,
+          date: parsed.date.toISOString(),
+          outstandingBefore: outstanding,
+          outstandingAfter: outstanding - amount,
+        },
+      },
+    });
+    await options.onCommitted?.(tx, result);
+    return result;
+  });
+}
+
 /** Record a (partial) payment that settles a payable/receivable obligation. */
 export async function settleEntry(
   obligationId: string,
   _prev: ActionState,
   fd: FormData,
 ): Promise<ActionState> {
-  const user = await requireCap(CAP);
-  if (!user) return { error: 'forbidden' };
   const r = settleSchema.safeParse({
     amount: reqField(fd, 'amount'),
     accountId: reqField(fd, 'accountId'),
@@ -609,45 +756,11 @@ export async function settleEntry(
   });
   if (!r.success) return { error: 'invalid' };
   const locale = reqField(fd, 'locale') || 'ar';
-
-  const ob = await prisma.financeEntry.findUnique({
-    where: { id: obligationId },
-    include: { settlements: { where: { archivedAt: null, reversedAt: null, reversalOfId: null }, select: { amount: true } } },
-  });
-  if (!ob || ob.archivedAt || ob.reversedAt || ob.reversalOfId || !ob.obligation || !ob.obligationKind) return { error: 'invalid' };
-  const paid = ob.settlements.reduce((s, x) => s + x.amount, 0);
-  const outstanding = Math.max(0, ob.amount - paid);
-  if (outstanding <= 0) return { error: 'invalid' };
-  const amount = Math.min(toMinor(r.data.amount, ob.currency), outstanding);
-
-  const settlement = await prisma.financeEntry.create({
-    data: {
-      date: r.data.date,
-      type: ob.obligationKind === 'PAYABLE' ? 'PAYMENT_OUT' : 'PAYMENT_IN',
-      amount,
-      currency: ob.currency,
-      obligation: false,
-      accountId: r.data.accountId,
-      partyId: ob.partyId,
-      paymentMethod: r.data.paymentMethod ?? null,
-      settlesId: ob.id,
-      branchId: ob.branchId,
-      orderId: ob.orderId,
-      description: 'Settlement',
-      createdById: user.id,
-    },
-  });
-  await audit(user.id, 'SETTLE', 'FinanceEntry', {
-    id: settlement.id,
-    obligationId,
-    amount,
-    accountId: r.data.accountId,
-    paymentMethod: r.data.paymentMethod ?? null,
-    partyId: ob.partyId,
-    branchId: ob.branchId,
-    orderId: ob.orderId,
-    date: r.data.date.toISOString(),
-  });
+  try {
+    await settleFinanceEntryFromInput({ obligationId, ...r.data });
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'invalid' };
+  }
   revalidatePath(HUB, 'page');
   revalidatePath(LIST, 'page');
   revalidatePath('/[locale]/(dashboard)/finance/dues', 'page');
