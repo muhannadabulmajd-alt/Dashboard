@@ -8,6 +8,7 @@ import {
   type AiStreamEvent,
 } from '@/lib/ai-assistant';
 import type { CurrentUser } from '@/server/auth/session';
+import type { AiPageContext } from '@/lib/ai-page-context';
 import { prisma } from '@/server/db/client';
 import { cancelPendingAction, confirmPendingAction } from './actions';
 import { getAiAssistantConfig } from './config';
@@ -33,6 +34,7 @@ export type AssistantMessageInput = {
   message: string;
   attachmentIds?: string[];
   conversationId?: string;
+  pageContext?: AiPageContext;
   channel?: AiConversationChannel;
   externalThreadId?: string;
   signal?: AbortSignal;
@@ -195,6 +197,7 @@ export async function processAssistantMessage(input: AssistantMessageInput): Pro
       attachments: attachments.filter((attachment) => attachment.kind !== 'AUDIO'),
       user: input.user,
       locale: input.locale,
+      pageContext: input.pageContext,
       signal: input.signal,
       hasPendingAction: Boolean(pendingContext),
       onEvent: emit,

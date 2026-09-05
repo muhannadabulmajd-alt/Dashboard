@@ -8,6 +8,7 @@ import { getPageContext } from '@/server/page-context';
 import { getOrderCatalog } from '@/server/records/order-catalog';
 import { getListOptions } from '@/server/lists/resolver';
 import { getOrderOperationalDefaults } from '@/server/records/order-defaults';
+import { resolveAiPageContext } from '@/lib/ai-page-context';
 
 export default async function AiAssistantPage({
   params,
@@ -16,10 +17,15 @@ export default async function AiAssistantPage({
   params: Promise<{ locale: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { locale, user } = await getPageContext(params, searchParams, 'use:ai-assistant');
+  const resolvedSearchParams = await searchParams;
+  const { locale, user } = await getPageContext(params, Promise.resolve(resolvedSearchParams), 'use:ai-assistant');
   const t = await getTranslations('aiAssistant');
   const config = getAiAssistantConfig();
   const available = config.enabled && config.apiKeyConfigured;
+  const rawPageContext = Array.isArray(resolvedSearchParams.context)
+    ? resolvedSearchParams.context[0]
+    : resolvedSearchParams.context;
+  const pageContext = resolveAiPageContext(rawPageContext);
   const [rows, catalog, customers, channels, governorates, fulfillment, statuses, defaults] = available ? await Promise.all([prisma.aiConversation.findMany({
     where: { userId: user.id, status: 'ACTIVE', expiresAt: { gt: new Date() } },
     select: {
@@ -74,6 +80,7 @@ export default async function AiAssistantPage({
       {available ? (
         <AssistantWorkspace
           locale={locale}
+          pageContext={pageContext ?? undefined}
           retentionDays={config.historyRetentionDays}
           initialConversations={rows.map((row) => ({
             id: row.id,

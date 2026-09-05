@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import type { AiActionPreview, AiClarification, AiResultCard, AiStreamEvent } from '@/lib/ai-assistant';
+import type { AiPageContext } from '@/lib/ai-page-context';
 import { Link } from '@/i18n/navigation';
 import { cn } from '@/lib/utils';
 import { GuidedOrderComposer, type QuickOrderPrepared } from './GuidedOrderComposer';
@@ -115,6 +116,21 @@ const PROMPTS = {
     status: 'ساعدني في تحديث حالة طلب.',
   },
 } as const;
+
+function pageContextPrompts(locale: 'ar' | 'en', pageLabel: string) {
+  if (locale === 'ar') {
+    return {
+      summary: `لخص بيانات أطلس المباشرة المتعلقة بصفحة ${pageLabel} حسب الفلاتر الحالية.`,
+      risks: `اكتشف المخاطر أو الحالات غير الاعتيادية المتعلقة بصفحة ${pageLabel} حسب الفلاتر الحالية.`,
+      nextSteps: `اقترح الخطوات التشغيلية التالية بناءً على بيانات صفحة ${pageLabel} الحالية دون تنفيذ أي تغيير.`,
+    };
+  }
+  return {
+    summary: `Summarize the live Atlas data relevant to the ${pageLabel} page using its current filters.`,
+    risks: `Find risks or unusual conditions relevant to the ${pageLabel} page using its current filters.`,
+    nextSteps: `Recommend the next operational steps from the current ${pageLabel} data without changing anything.`,
+  };
+}
 
 function payloadEvents(payload: unknown): AiStreamEvent[] {
   if (!payload || typeof payload !== 'object') return [];
@@ -426,11 +442,13 @@ function ConversationHistory({
 
 export function AssistantWorkspace({
   locale,
+  pageContext,
   initialConversations,
   retentionDays,
   quickOrder,
 }: {
   locale: 'ar' | 'en';
+  pageContext?: AiPageContext;
   initialConversations: ConversationSummary[];
   retentionDays: number;
   quickOrder: {
@@ -445,6 +463,7 @@ export function AssistantWorkspace({
 }) {
   const t = useTranslations('aiAssistant');
   const [conversations, setConversations] = useState(initialConversations);
+  const [activePageContext, setActivePageContext] = useState(pageContext);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -466,6 +485,13 @@ export function AssistantWorkspace({
   const chatAbortRef = useRef<AbortController | null>(null);
   const shouldFollowRef = useRef(true);
   const privacyText = t('privacy', { days: retentionDays });
+  const pageContextLabel = activePageContext
+    ? t(`pageContext.sections.${activePageContext.section}`)
+    : '';
+  const contextualPrompts = useMemo(
+    () => pageContextPrompts(locale, pageContextLabel),
+    [locale, pageContextLabel],
+  );
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -535,6 +561,7 @@ export function AssistantWorkspace({
     setConversationId(null);
     setMessages([]);
     setInput('');
+    setActivePageContext(pageContext);
     setAttachments([]);
     setAttachmentError(null);
     setHistoryOpen(false);
@@ -567,6 +594,7 @@ export function AssistantWorkspace({
       if (loadId !== conversationLoadRef.current) return;
       const actionStates = new Map(data.conversation.pendingActions.map((action) => [action.id, action]));
       setConversationId(data.conversation.id);
+      setActivePageContext(undefined);
       setMessages(data.conversation.messages.slice().reverse().flatMap((message) => message.role === 'SYSTEM' ? [] : [{
         id: message.id,
         role: message.role,
@@ -674,6 +702,7 @@ export function AssistantWorkspace({
           conversationId: conversationId ?? undefined,
           message: messageText || undefined,
           attachmentIds: selectedAttachments.map((attachment) => attachment.id),
+          pageContextPath: activePageContext?.path,
           locale,
         }),
         signal: controller.signal,
@@ -828,6 +857,51 @@ export function AssistantWorkspace({
             <button type="button" onClick={newConversation} aria-label={t('newChat')} className="inline-flex size-10 items-center justify-center rounded-lg bg-grove text-primary-foreground"><MessageSquarePlus className="size-4" /></button>
           </div>
         </div>
+
+        {activePageContext ? (
+          <section className="border-b border-amber/20 bg-linen/25 px-3 py-3 sm:px-5" aria-label={t('pageContext.title')}>
+            <div className="mx-auto max-w-3xl">
+              <div className="flex items-start gap-3">
+                <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-grove text-primary-foreground">
+                  <Sparkles className="size-4" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-bold text-roast">{t('pageContext.active', { page: pageContextLabel })}</p>
+                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                    <Link href={activePageContext.path} className="font-semibold text-primary underline underline-offset-4">
+                      {t('pageContext.return')}
+                    </Link>
+                    <span className="text-muted-foreground">{t('pageContext.safeHint')}</span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActivePageContext(undefined)}
+                  className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-card hover:text-roast"
+                  aria-label={t('pageContext.clear')}
+                  title={t('pageContext.clear')}
+                >
+                  <X className="size-4" />
+                </button>
+              </div>
+              {!messages.length ? (
+                <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                  {(['summary', 'risks', 'nextSteps'] as const).map((key) => (
+                    <button
+                      key={key}
+                      type="button"
+                      disabled={sending}
+                      onClick={() => void sendMessage(contextualPrompts[key])}
+                      className="min-h-10 rounded-lg border border-border bg-card px-3 py-2 text-start text-xs font-semibold leading-5 text-roast hover:border-amber/45 hover:bg-linen/35 disabled:opacity-50"
+                    >
+                      {t(`pageContext.suggestions.${key}`)}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          </section>
+        ) : null}
 
         <div
           ref={viewportRef}

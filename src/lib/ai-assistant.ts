@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { AiPageContextPathSchema } from './ai-page-context';
 
 export const AI_MESSAGE_MAX_LENGTH = 4_000;
 export const AI_CONTEXT_MESSAGE_LIMIT = 12;
@@ -10,6 +11,7 @@ export const AiChatRequestSchema = z.object({
   conversationId: z.string().cuid().optional(),
   message: z.string().trim().max(AI_MESSAGE_MAX_LENGTH).optional(),
   attachmentIds: z.array(z.string().cuid()).max(AI_ATTACHMENT_MAX_COUNT).optional(),
+  pageContextPath: AiPageContextPathSchema.optional(),
   locale: z.enum(['ar', 'en']),
 }).strict().refine((data) => Boolean(data.message || data.attachmentIds?.length), {
   message: 'A message or attachment is required.',

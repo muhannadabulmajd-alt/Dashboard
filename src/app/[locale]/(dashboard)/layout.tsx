@@ -6,12 +6,14 @@ import { Sidebar } from '@/components/layout/Sidebar';
 import { TopBar } from '@/components/layout/TopBar';
 import { getNavGroups } from '@/components/layout/nav';
 import { GlobalQuickAdd } from '@/components/layout/GlobalQuickAdd';
+import { GlobalAskAssistant } from '@/components/layout/GlobalAskAssistant';
 import { getQuickAddItems } from '@/components/layout/quick-add';
 import { StaleDataBanner } from '@/components/layout/StaleDataBanner';
 import { FilterBar } from '@/components/filters/FilterBar';
 import { getListOptions } from '@/server/lists/resolver';
 import type { AppLocale } from '@/lib/money';
 import { getTranslations } from 'next-intl/server';
+import { can } from '@/lib/rbac';
 
 export default async function DashboardLayout({
   children,
@@ -27,6 +29,7 @@ export default async function DashboardLayout({
   const navGroups = await getNavGroups(user.role);
   const quickAddItems = await getQuickAddItems(user.role);
   const tQuickAdd = await getTranslations('quickAdd');
+  const tAi = await getTranslations('aiAssistant');
 
   // Branch filter is shown only to non-scoped roles (others are locked to their branch).
   const branchOptions = scope.branchId
@@ -63,6 +66,7 @@ export default async function DashboardLayout({
           buttonLabel={tQuickAdd('buttonLabel')}
           closeLabel={tQuickAdd('closeLabel')}
         />
+        {can(user.role, 'use:ai-assistant') ? <GlobalAskAssistant label={tAi('pageContext.ask')} /> : null}
       </div>
     </div>
   );
