@@ -83,8 +83,8 @@ describe('AI report exports and Telegram delivery', () => {
 
     expect(new TextDecoder().decode(pdf.bytes.slice(0, 5))).toBe('%PDF-');
     expect(Array.from(xlsx.bytes.slice(0, 2))).toEqual([0x50, 0x4b]);
+    expect(Array.from(csv.bytes.slice(0, 3))).toEqual([0xef, 0xbb, 0xbf]);
     const csvText = new TextDecoder().decode(csv.bytes);
-    expect(csvText.startsWith('\uFEFF')).toBe(true);
     expect(csvText).toContain("'=HYPERLINK");
     expect(csvText).toContain('تقرير المشترين');
     expect(pdf.fileName).toMatch(/\.pdf$/);
