@@ -54,5 +54,8 @@ jobs:
       - run: pnpm test
       - run: pnpm exec prisma migrate deploy
       - run: pnpm db:seed
+      - run: pnpm test:ai-phase2:integration
+        env:
+          AI_PHASE2_INTEGRATION: "1"
       - run: pnpm check:reconciliation
       - run: pnpm build

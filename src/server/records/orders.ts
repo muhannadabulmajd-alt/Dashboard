@@ -534,7 +534,10 @@ export async function createOrderCommand(
     })
     : null;
   if (h.data.customerExternalId && !existingCustomer) return { error: 'customer', fieldErrors: { customerExternalId: 'customer' } };
-  const branch = await prisma.branch.findFirst({ orderBy: { createdAt: 'asc' }, select: { id: true } });
+  const branch = user.branchId
+    ? await prisma.branch.findFirst({ where: { id: user.branchId, isActive: true }, select: { id: true } })
+    : await prisma.branch.findFirst({ where: { isActive: true }, orderBy: { createdAt: 'asc' }, select: { id: true } });
+  if (user.branchId && !branch) return { error: 'branch', fieldErrors: { branchId: 'branch' } };
   const gross = lineData.reduce((s, l) => s + l.unitGrossPrice * l.quantity, 0);
   const discount = lineData.reduce((s, l) => s + l.lineDiscount, 0) + h.data.orderDiscount;
   const total = Math.max(0, gross - discount + h.data.deliveryFee + h.data.extraCharges);

@@ -60,6 +60,8 @@ const STALE_EXECUTION_CODES = new Set([
   'stock_configuration_ambiguous',
   'stock_insufficient',
 ]);
+const DUPLICATE_CONFIRM_WAIT_MS = 5_000;
+const DUPLICATE_CONFIRM_POLL_MS = 100;
 
 export type ActionExecutionResult = {
   actionId: string;
@@ -170,6 +172,29 @@ function storedExecutionResult(
     recordId: action.recordId ?? undefined,
     replayed: true,
   };
+}
+
+async function waitForStoredExecution(input: {
+  actionId: string;
+  userId: string;
+  locale: AppLocale;
+}): Promise<ActionExecutionResult | null> {
+  const deadline = Date.now() + DUPLICATE_CONFIRM_WAIT_MS;
+  while (Date.now() < deadline) {
+    const latest = await prisma.aiPendingAction.findFirst({
+      where: { id: input.actionId, userId: input.userId },
+      include: {
+        executionReceipt: {
+          include: { documents: { orderBy: { createdAt: 'asc' }, take: 1 } },
+        },
+      },
+    });
+    if (!latest) throw new Error('notfound');
+    if (latest.status === 'EXECUTED') return storedExecutionResult(latest, input.locale);
+    if (latest.status !== 'EXECUTING') return null;
+    await new Promise((resolve) => setTimeout(resolve, DUPLICATE_CONFIRM_POLL_MS));
+  }
+  return null;
 }
 
 async function completePendingAction(
@@ -1022,7 +1047,15 @@ export async function confirmPendingAction(input: {
   }
   if (action.status === 'EXECUTING') {
     const staleClaim = action.updatedAt.getTime() <= Date.now() - 2 * 60_000;
-    if (!staleClaim) throw new Error('action_in_progress');
+    if (!staleClaim) {
+      const completed = await waitForStoredExecution({
+        actionId: action.id,
+        userId: input.user.id,
+        locale: input.locale,
+      });
+      if (completed) return completed;
+      throw new Error('action_in_progress');
+    }
     const recovered = await prisma.aiPendingAction.updateMany({
       where: {
         id: action.id,
@@ -1157,8 +1190,12 @@ export async function confirmPendingAction(input: {
     return updated;
   });
   if (claimed.count !== 1) {
-    const latest = await prisma.aiPendingAction.findUnique({ where: { id: action.id } });
-    if (latest?.status === 'EXECUTED') return confirmPendingAction(input);
+    const completed = await waitForStoredExecution({
+      actionId: action.id,
+      userId: input.user.id,
+      locale: input.locale,
+    });
+    if (completed) return completed;
     throw new Error('action_in_progress');
   }
 
