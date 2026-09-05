@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { BellRing, CalendarClock, ChevronDown, LoaderCircle, RotateCcw } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import type { AiAutomationKindValue } from '@/lib/ai-automations';
@@ -94,13 +94,30 @@ function formatRun(value: string | null, locale: 'ar' | 'en', never: string): st
   }).format(new Date(value));
 }
 
-export function AutomationPreferences({ locale }: { locale: 'ar' | 'en' }) {
+export function AutomationPreferences({
+  locale,
+  initialPreferences,
+  initialHealth,
+  initialTelegramLinked,
+}: {
+  locale: 'ar' | 'en';
+  initialPreferences: PreferenceRecord[];
+  initialHealth: DeliveryHealth;
+  initialTelegramLinked: boolean;
+}) {
   const t = useTranslations('aiAssistant.automations');
   const initialDrafts = useMemo(() => Object.fromEntries(KINDS.map((kind) => [kind, defaults(kind, locale)])) as Record<AiAutomationKindValue, PreferenceDraft>, [locale]);
-  const [drafts, setDrafts] = useState(initialDrafts);
-  const [health, setHealth] = useState<DeliveryHealth | null>(null);
-  const [telegramLinked, setTelegramLinked] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [drafts, setDrafts] = useState(() => {
+    const next = { ...initialDrafts };
+    for (const kind of KINDS) {
+      const records = initialPreferences.filter((record) => record.kind === kind);
+      const selected = records.find((record) => record.enabled) ?? records[0];
+      if (selected) next[kind] = preferenceDraft(selected, locale);
+    }
+    return next;
+  });
+  const [health, setHealth] = useState<DeliveryHealth>(initialHealth);
+  const [telegramLinked, setTelegramLinked] = useState(initialTelegramLinked);
   const [saving, setSaving] = useState<AiAutomationKindValue | null>(null);
   const [replaying, setReplaying] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -127,12 +144,8 @@ export function AutomationPreferences({ locale }: { locale: 'ar' | 'en' }) {
       setError(null);
     } catch {
       setError(t('loadError'));
-    } finally {
-      setLoading(false);
     }
   }, [initialDrafts, locale, t]);
-
-  useEffect(() => { void load(); }, [load]);
 
   const update = (kind: AiAutomationKindValue, change: Partial<PreferenceDraft>) => {
     setDrafts((current) => ({ ...current, [kind]: { ...current[kind], ...change } }));
@@ -195,10 +208,7 @@ export function AutomationPreferences({ locale }: { locale: 'ar' | 'en' }) {
         <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
       </summary>
       <div className="border-t border-border/70 bg-linen/15 p-3 sm:p-4">
-        {loading ? (
-          <div className="flex min-h-20 items-center justify-center gap-2 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />{t('loading')}</div>
-        ) : (
-          <div className="grid gap-3">
+        <div className="grid gap-3">
             <div className="grid gap-3 xl:grid-cols-2">
               {KINDS.map((kind) => {
                 const draft = drafts[kind];
@@ -273,8 +283,7 @@ export function AutomationPreferences({ locale }: { locale: 'ar' | 'en' }) {
             ) : null}
             {notice ? <p className="text-xs font-semibold text-success">{notice}</p> : null}
             {error ? <p className="text-xs font-semibold text-danger">{error}</p> : null}
-          </div>
-        )}
+        </div>
       </div>
     </details>
   );

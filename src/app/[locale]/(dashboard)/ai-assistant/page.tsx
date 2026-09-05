@@ -4,6 +4,8 @@ import { AssistantWorkspace } from '@/components/ai-assistant/AssistantWorkspace
 import { AutomationPreferences } from '@/components/ai-assistant/AutomationPreferences';
 import { Card, CardContent, PageHeader } from '@/components/ui/primitives';
 import { getAiAssistantConfig } from '@/server/ai/config';
+import { getAiAutomationPreferences } from '@/server/ai/automations';
+import { getUserAiDeliveryHealth } from '@/server/ai/deliveries';
 import { prisma } from '@/server/db/client';
 import { getPageContext } from '@/server/page-context';
 import { getOrderCatalog } from '@/server/records/order-catalog';
@@ -27,6 +29,32 @@ export default async function AiAssistantPage({
     ? resolvedSearchParams.context[0]
     : resolvedSearchParams.context;
   const pageContext = resolveAiPageContext(rawPageContext);
+  const automationStatePromise = available
+    ? Promise.all([
+      getAiAutomationPreferences(user.id),
+      prisma.telegramIdentity.findFirst({
+        where: { userId: user.id, status: 'ACTIVE', privateChatId: { not: null } },
+        select: { id: true },
+      }),
+      getUserAiDeliveryHealth(user.id),
+    ]).then(([preferences, telegramIdentity, health]) => ({
+      preferences,
+      telegramLinked: Boolean(telegramIdentity),
+      health,
+    }))
+    : Promise.resolve({
+      preferences: [],
+      telegramLinked: false,
+      health: {
+        pendingDocuments: 0,
+        failedDocuments: 0,
+        pendingReports: 0,
+        failedReports: 0,
+        failedAutomations: 0,
+        enabledAutomations: 0,
+        retryable: 0,
+      },
+    });
   const [rows, catalog, customers, channels, governorates, fulfillment, statuses, defaults] = available ? await Promise.all([prisma.aiConversation.findMany({
     where: { userId: user.id, status: 'ACTIVE', expiresAt: { gt: new Date() } },
     select: {
@@ -64,6 +92,7 @@ export default async function AiAssistantPage({
   getListOptions('orderStatus', locale),
   getOrderOperationalDefaults(),
   ]) : [[], [], [], [], [], [], [], await getOrderOperationalDefaults()];
+  const automationState = await automationStatePromise;
 
   return (
     <>
@@ -80,7 +109,17 @@ export default async function AiAssistantPage({
       />
       {available ? (
         <>
-          <AutomationPreferences locale={locale} />
+          <AutomationPreferences
+            locale={locale}
+            initialPreferences={automationState.preferences.map((preference) => ({
+              ...preference,
+              nextRunAt: preference.nextRunAt?.toISOString() ?? null,
+              lastRunAt: preference.lastRunAt?.toISOString() ?? null,
+              updatedAt: preference.updatedAt.toISOString(),
+            }))}
+            initialHealth={automationState.health}
+            initialTelegramLinked={automationState.telegramLinked}
+          />
           <AssistantWorkspace
             locale={locale}
             pageContext={pageContext ?? undefined}
