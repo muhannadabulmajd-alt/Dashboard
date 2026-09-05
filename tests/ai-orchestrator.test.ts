@@ -117,7 +117,9 @@ describe('AI Responses API orchestration', () => {
   });
 
   it('treats current-page context as an untrusted navigation hint', async () => {
-    const stream = vi.fn(() => textStream('Here is the page summary.'));
+    const stream = vi
+      .fn<(request: unknown, options?: unknown) => ReturnType<typeof textStream>>()
+      .mockImplementation(() => textStream('Here is the page summary.'));
     await runAssistant({
       ...runnerInput(),
       pageContext: { path: '/sales?range=this_month', section: 'sales' },
