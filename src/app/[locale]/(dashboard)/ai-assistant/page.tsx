@@ -2,10 +2,12 @@ import { Bot, ShieldCheck } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
 import { AssistantWorkspace } from '@/components/ai-assistant/AssistantWorkspace';
 import { AutomationPreferences } from '@/components/ai-assistant/AutomationPreferences';
+import { CapabilityControls } from '@/components/ai-assistant/CapabilityControls';
 import { Card, CardContent, PageHeader } from '@/components/ui/primitives';
 import { getAiAssistantConfig } from '@/server/ai/config';
 import { getAiAutomationPreferences } from '@/server/ai/automations';
 import { getUserAiDeliveryHealth } from '@/server/ai/deliveries';
+import { getAiCapabilityStates } from '@/server/ai/capabilities';
 import { prisma } from '@/server/db/client';
 import { getPageContext } from '@/server/page-context';
 import { getOrderCatalog } from '@/server/records/order-catalog';
@@ -55,6 +57,9 @@ export default async function AiAssistantPage({
         retryable: 0,
       },
     });
+  const capabilityStatesPromise = available && user.role === 'OWNER'
+    ? getAiCapabilityStates()
+    : Promise.resolve([]);
   const [rows, catalog, customers, channels, governorates, fulfillment, statuses, defaults] = available ? await Promise.all([prisma.aiConversation.findMany({
     where: { userId: user.id, status: 'ACTIVE', expiresAt: { gt: new Date() } },
     select: {
@@ -92,7 +97,10 @@ export default async function AiAssistantPage({
   getListOptions('orderStatus', locale),
   getOrderOperationalDefaults(),
   ]) : [[], [], [], [], [], [], [], await getOrderOperationalDefaults()];
-  const automationState = await automationStatePromise;
+  const [automationState, capabilityStates] = await Promise.all([
+    automationStatePromise,
+    capabilityStatesPromise,
+  ]);
 
   return (
     <>
@@ -109,6 +117,7 @@ export default async function AiAssistantPage({
       />
       {available ? (
         <>
+          {user.role === 'OWNER' ? <CapabilityControls initialCapabilities={capabilityStates} /> : null}
           <AutomationPreferences
             locale={locale}
             initialPreferences={automationState.preferences.map((preference) => ({

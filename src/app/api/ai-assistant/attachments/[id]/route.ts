@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { can } from '@/lib/rbac';
 import { getCurrentUser } from '@/server/auth/session';
 import { prisma } from '@/server/db/client';
+import { isAiCapabilityEnabled } from '@/server/ai/capabilities';
 
 export const runtime = 'nodejs';
 
@@ -9,6 +10,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const user = await getCurrentUser();
   if (!user) return new NextResponse('Unauthorized', { status: 401 });
   if (!can(user.role, 'use:ai-assistant')) return new NextResponse('Forbidden', { status: 403 });
+  if (!await isAiCapabilityEnabled('MEDIA_REPORTS')) return new NextResponse('Unavailable', { status: 503 });
   const { id } = await params;
   const attachment = await prisma.aiAttachment.findFirst({
     where: { id, userId: user.id, status: { not: 'REJECTED' }, expiresAt: { gt: new Date() } },

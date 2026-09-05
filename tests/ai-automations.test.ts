@@ -37,6 +37,7 @@ const executeAssistantTool = vi.hoisted(() => vi.fn(async () => {
 
 vi.mock('@/server/db/client', () => ({
   prisma: {
+    aiCapabilitySetting: { findUnique: vi.fn(async () => null) },
     telegramIdentity: { findFirst: vi.fn(async () => null) },
     aiAutomationPreference: {
       updateMany: vi.fn(async () => ({ count: 1 })),

@@ -11,6 +11,7 @@ import { processAssistantMessage } from '@/server/ai/service';
 import { storeAiAttachment } from '@/server/ai/attachments';
 import { aiDeliveryStatusText, getUserAiDeliveryHealth, replayUserAiDeliveries } from '@/server/ai/deliveries';
 import { deliverAiReportsToTelegram } from '@/server/ai/reports';
+import { assertAiCapabilityEnabled } from '@/server/ai/capabilities';
 import {
   answerTelegramCallback,
   downloadTelegramFile,
@@ -353,6 +354,7 @@ export async function processTelegramUpdate(telegramUpdateId: string): Promise<v
     let message = telegram.text?.trim() ?? '';
     const attachmentIds: string[] = [];
     if (telegram.media) {
+      await assertAiCapabilityEnabled('MEDIA_REPORTS');
       if (telegram.media.fileSize && telegram.media.fileSize > aiConfig.mediaMaxBytes) {
         throw new Error('attachment_too_large');
       }

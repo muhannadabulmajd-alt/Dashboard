@@ -6,7 +6,7 @@ import type { AiStreamEvent } from '@/lib/ai-assistant';
 import { AI_TOOL_ROUND_LIMIT, safeAssistantNarrative } from '@/lib/ai-assistant';
 import type { AiPageContext } from '@/lib/ai-page-context';
 import { aiSafetyIdentifier, getAiAssistantConfig, getOpenAiClient } from './config';
-import { assistantToolsForRole } from './access';
+import { enabledAssistantToolsForRole } from './capabilities';
 import { executeAssistantTool, type ToolExecution } from './tools';
 import type { AssistantModelAttachment } from './attachments';
 
@@ -166,7 +166,7 @@ export async function runAssistant(
   const config = getAiAssistantConfig();
   const client = dependencies.client ?? getOpenAiClient();
   const executeTool = dependencies.executeTool ?? executeAssistantTool;
-  const tools = assistantToolsForRole(input.user.role);
+  const tools = await enabledAssistantToolsForRole(input.user.role);
   if (!tools.length) throw new Error('ai_no_allowed_tools');
   let responseInput: ResponseInput = responseInputWithAttachments(input.messages, input.attachments ?? []);
   const emittedEvents: AiStreamEvent[] = [];

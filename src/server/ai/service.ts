@@ -22,6 +22,7 @@ import {
 import { runAssistant } from './orchestrator';
 import { isOpenAiCreditUnavailable, safeOpenAiError, type SafeOpenAiError } from './provider-error';
 import { consumeAiRateLimit } from './rate-limit';
+import { assertAiCapabilityEnabled } from './capabilities';
 import {
   linkAssistantAttachments,
   loadAssistantAttachments,
@@ -67,11 +68,17 @@ function actionFailureMessage(locale: 'ar' | 'en', errorCode: string, debugId: s
       ? 'تغيرت بيانات أطلس بعد المعاينة. حضّر الطلب مجدداً لمراجعة القيم الحديثة.'
       : 'Atlas data changed after the preview. Prepare the action again to review current values.';
   }
+  if (errorCode === 'ai_capability_unavailable') {
+    return locale === 'ar'
+      ? 'قدرة المساعد هذه متوقفة حالياً. لم تتغير أي بيانات. اطلب من المالك مراجعة ضوابط الإصدار.'
+      : 'This assistant capability is currently paused. No data was changed. Ask an Owner to review the release controls.';
+  }
   return assistantErrorMessage(locale, debugId);
 }
 
 export async function processAssistantMessage(input: AssistantMessageInput): Promise<AssistantMessageResult> {
   await consumeAiRateLimit(input.user.id);
+  if (input.attachmentIds?.length) await assertAiCapabilityEnabled('MEDIA_REPORTS');
   const attachments = await loadAssistantAttachments({
     userId: input.user.id,
     attachmentIds: input.attachmentIds,

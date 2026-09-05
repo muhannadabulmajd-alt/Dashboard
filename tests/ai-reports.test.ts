@@ -25,6 +25,7 @@ const reportCard: AiResultCard = {
 
 vi.mock('@/server/db/client', () => ({
   prisma: {
+    aiCapabilitySetting: { findUnique: vi.fn(async () => null) },
     aiReportSnapshot: {
       findFirst: vi.fn(async () => ({
         id: 'report-1',

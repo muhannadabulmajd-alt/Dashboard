@@ -92,6 +92,7 @@ import {
   ResolvedTransferActionSchema,
 } from './action-data';
 import { assertAssistantToolAllowed } from './access';
+import { assertAiToolCapabilityEnabled } from './capabilities';
 
 export type ToolContext = {
   conversationId: string;
@@ -2888,6 +2889,7 @@ const TOOL_HANDLERS: Record<string, (raw: unknown, context: ToolContext) => Prom
 
 export async function executeAssistantTool(name: string, raw: unknown, context: ToolContext): Promise<ToolExecution> {
   assertAssistantToolAllowed(context.user.role, name);
+  await assertAiToolCapabilityEnabled(name);
   const handler = TOOL_HANDLERS[name];
   if (!handler) throw new Error('ai_tool_not_allowed');
   return handler(raw, context);

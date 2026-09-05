@@ -4,6 +4,7 @@ import { isHttpResponse, requireAiApiUser } from '@/server/ai/http';
 import { AiAttachmentError, storeAiAttachment } from '@/server/ai/attachments';
 import { getAiAssistantConfig } from '@/server/ai/config';
 import { prisma } from '@/server/db/client';
+import { assertAiCapabilityEnabled } from '@/server/ai/capabilities';
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;
@@ -21,6 +22,11 @@ function attachmentError(error: unknown): NextResponse {
 export async function POST(request: NextRequest) {
   const userOrResponse = await requireAiApiUser();
   if (isHttpResponse(userOrResponse)) return userOrResponse;
+  try {
+    await assertAiCapabilityEnabled('MEDIA_REPORTS');
+  } catch {
+    return NextResponse.json({ error: 'capability_unavailable' }, { status: 503 });
+  }
   const maxBytes = getAiAssistantConfig().mediaMaxBytes;
   const declaredLength = Number(request.headers.get('content-length'));
   if (Number.isFinite(declaredLength) && declaredLength > maxBytes + 1024 * 1024) {

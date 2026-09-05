@@ -3,6 +3,12 @@ import type OpenAI from 'openai';
 import type { AiStreamEvent } from '@/lib/ai-assistant';
 import { runAssistant } from '@/server/ai/orchestrator';
 
+vi.mock('@/server/db/client', () => ({
+  prisma: {
+    aiCapabilitySetting: { findMany: vi.fn(async () => []) },
+  },
+}));
+
 function responseStream(events: unknown[], response: Record<string, unknown>) {
   return {
     async *[Symbol.asyncIterator]() {

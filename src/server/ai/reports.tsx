@@ -25,6 +25,7 @@ import {
 import { sendTelegramDocument } from '@/server/telegram/api';
 import { getAiAssistantConfig } from './config';
 import { enqueueAiReportDelivery } from './report-queue';
+import { assertAiCapabilityEnabled, isAiCapabilityEnabled } from './capabilities';
 
 registerLaheebPdfFonts();
 
@@ -246,6 +247,7 @@ export async function createAiReportCard(
   context: ReportContext,
   reportType: string,
 ): Promise<AiResultCard> {
+  if (!await isAiCapabilityEnabled('MEDIA_REPORTS')) return card;
   const expiresAt = new Date(context.now.getTime() + getAiAssistantConfig().historyRetentionDays * 86_400_000);
   const snapshot = await prisma.$transaction(async (tx) => {
     const created = await tx.aiReportSnapshot.create({
@@ -321,6 +323,7 @@ function reportDeliveryPayload(value: Prisma.JsonValue): ReportDeliveryPayload {
 }
 
 export async function processAiReportNotification(notificationId: string): Promise<void> {
+  await assertAiCapabilityEnabled('MEDIA_REPORTS');
   const now = new Date();
   const staleAt = new Date(now.getTime() - 10 * 60_000);
   await prisma.aiNotificationLog.updateMany({

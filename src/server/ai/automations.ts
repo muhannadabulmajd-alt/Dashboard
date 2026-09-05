@@ -20,6 +20,7 @@ import { renderAssistantEvents } from '@/server/telegram/render';
 import { getOrCreateConversation, saveAiMessage } from './history';
 import { deliverAiReportsToTelegram } from './reports';
 import { executeAssistantTool } from './tools';
+import { assertAiCapabilityEnabled } from './capabilities';
 
 type StoredAutomationPayload = {
   preferenceId: string;
@@ -110,6 +111,7 @@ export async function saveAiAutomationPreference(input: {
   value: AiAutomationPreferenceInput;
   now?: Date;
 }) {
+  await assertAiCapabilityEnabled('AUTOMATIONS');
   const value = AiAutomationPreferenceInputSchema.parse(input.value);
   const now = input.now ?? new Date();
   const settings = normalizeAutomationSettings(value);
@@ -317,6 +319,7 @@ export async function processAiAutomationPreference(input: {
   origin: string;
   now?: Date;
 }): Promise<'SENT' | 'SKIPPED' | 'IGNORED'> {
+  await assertAiCapabilityEnabled('AUTOMATIONS');
   const now = input.now ?? new Date();
   const scheduledFor = input.preference.nextRunAt;
   if (!input.preference.enabled || !scheduledFor || scheduledFor > now) return 'IGNORED';
@@ -413,13 +416,14 @@ export async function processAiAutomationPreference(input: {
     return 'SENT';
   } catch (error) {
     const errorCode = error instanceof Error ? error.message.slice(0, 120) : 'ai_automation_failed';
-    if (errorCode === 'ai_tool_not_allowed') {
+    const baseCode = errorCode.split(':')[0];
+    if (['ai_tool_not_allowed', 'ai_tool_forbidden', 'ai_capability_unavailable'].includes(baseCode)) {
       await markSkipped({
         notificationId: notification.id,
         preference: input.preference,
         scheduledFor,
         now,
-        code: errorCode,
+        code: baseCode,
       });
       return 'SKIPPED';
     }

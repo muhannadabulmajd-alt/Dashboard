@@ -123,6 +123,28 @@
     "expiresAt": "Available until {date}.",
     "generatedAt": "Generated {date}",
     "noHistory": "No previous conversations yet.",
+    "capabilities": {
+      "title": "Assistant release controls",
+      "subtitle": "Activate each governed capability independently. Operational failures pause only the affected area.",
+      "attention": "Needs attention",
+      "status": "Availability",
+      "failureLimit": "Failure limit",
+      "reason": "Reason",
+      "failureCount": "Current failures: {count}",
+      "save": "Save control",
+      "saving": "Saving...",
+      "saved": "Assistant control saved.",
+      "saveError": "The assistant control could not be saved.",
+      "statuses": { "ENABLED": "Enabled", "PAUSED": "Auto-paused", "DISABLED": "Disabled" },
+      "types": {
+        "READS": { "title": "Reads and analytics", "description": "Live governed searches, summaries, buyers, alerts, and forecasts." },
+        "ORDERS_CUSTOMERS": { "title": "Orders and customers", "description": "Customer records, orders, order edits, and operational status changes." },
+        "SPENDING_PURCHASES": { "title": "Spending and purchases", "description": "Expenses, purchases, transfers, suppliers, and spend reclassification." },
+        "OPERATIONS_PAYMENTS": { "title": "Operations and payments", "description": "Inventory, roasting, payments, refunds, and reversible corrections." },
+        "MEDIA_REPORTS": { "title": "Media and reports", "description": "Receipt files, voice, PDF/Excel/CSV reports, and dashboard drafts." },
+        "AUTOMATIONS": { "title": "Schedules and alerts", "description": "Daily summaries, anomaly alerts, reorder advice, and demand forecasts." }
+      }
+    },
     "automations": {
       "title": "Scheduled reports",
       "subtitle": "Deliver governed Atlas insights to your private history or linked Telegram chat.",

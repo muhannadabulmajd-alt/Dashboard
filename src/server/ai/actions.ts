@@ -5,6 +5,7 @@ import { normalizeAssistantText } from '@/lib/ai-assistant';
 import { createTrustedCommandContext } from '@/server/commands/actor-context';
 import { can } from '@/lib/rbac';
 import type { AppLocale } from '@/lib/money';
+import { aiCapabilitiesForAction } from '@/lib/ai-capabilities';
 import { prisma } from '@/server/db/client';
 import { createCustomerCommand, updateCustomerCommand } from '@/server/commands/customers';
 import { updatePartyCommand } from '@/server/commands/parties';
@@ -22,6 +23,11 @@ import {
 } from '@/server/records/orders';
 import { aiDebugId, preconditionHash } from './hash';
 import { canExecuteAssistantAction } from './access';
+import {
+  assertAiActionCapabilitiesEnabled,
+  recordAiCapabilityFailure,
+  recordAiCapabilitySuccess,
+} from './capabilities';
 import { actionPreconditionIssues, loadActionPreconditions } from './preconditions';
 import {
   ACTION_DATA_SCHEMAS,
@@ -1035,6 +1041,7 @@ export async function confirmPendingAction(input: {
     throw new Error('action_in_progress');
   }
   if (action.status !== 'PENDING') throw new Error(`action_${action.status.toLowerCase()}`);
+  await assertAiActionCapabilitiesEnabled(action.type);
   if (action.expiresAt <= new Date()) {
     await prisma.$transaction(async (tx) => {
       const expired = await tx.aiPendingAction.updateMany({
@@ -1159,6 +1166,7 @@ export async function confirmPendingAction(input: {
   let committedArtifact: CommittedArtifact | undefined;
   try {
     const beforeExecute = async (tx: Prisma.TransactionClient) => {
+      await assertAiActionCapabilitiesEnabled(action.type, tx);
       const fresh = await loadActionPreconditions(action.type, action.validatedData, tx, { lock: true });
       const issues = actionPreconditionIssues(action.type, action.validatedData, fresh);
       if (issues.length || preconditionHash(fresh) !== action.preconditionHash) {
@@ -1188,6 +1196,9 @@ export async function confirmPendingAction(input: {
       },
     );
     if (!committedArtifact) throw new Error('execution_receipt_missing');
+    await Promise.allSettled(
+      aiCapabilitiesForAction(action.type).map((capability) => recordAiCapabilitySuccess(capability)),
+    );
     const documentStatus = await prepareAiDocument(committedArtifact.documentId);
     return executionResult({
       actionId: action.id,
@@ -1215,7 +1226,7 @@ export async function confirmPendingAction(input: {
       });
       throw new Error('action_stale');
     }
-    await prisma.$transaction(async (tx) => {
+    const markedFailed = await prisma.$transaction(async (tx) => {
       const failed = await tx.aiPendingAction.updateMany({
         where: { id: action.id, userId: input.user.id, status: 'EXECUTING' },
         data: { status: 'FAILED', errorCode: code, debugId },
@@ -1231,7 +1242,13 @@ export async function confirmPendingAction(input: {
           },
         });
       }
+      return failed.count === 1;
     });
+    if (markedFailed && code !== 'ai_capability_unavailable') {
+      await Promise.allSettled(aiCapabilitiesForAction(action.type).map((capability) => (
+        recordAiCapabilityFailure({ capability, userId: input.user.id, errorCode: code })
+      )));
+    }
     throw new Error(`action_failed:${debugId}`);
   }
 }
