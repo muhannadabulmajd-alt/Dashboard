@@ -3,17 +3,13 @@ import { getAiAssistantConfig } from '@/server/ai/config';
 import { replayDueAiDocuments } from '@/server/ai/documents';
 import { replayDueAiReports } from '@/server/ai/reports';
 import { prisma } from '@/server/db/client';
+import { isCronAuthorized } from '@/server/http/cron';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
-function authorized(request: NextRequest): boolean {
-  const secret = process.env.CRON_SECRET;
-  return Boolean(secret && request.headers.get('authorization') === `Bearer ${secret}`);
-}
-
 export async function GET(request: NextRequest) {
-  if (!authorized(request)) return new NextResponse('Unauthorized', { status: 401 });
+  if (!isCronAuthorized(request)) return new NextResponse('Unauthorized', { status: 401 });
   const now = new Date();
   const retentionCutoff = new Date(now);
   retentionCutoff.setUTCDate(retentionCutoff.getUTCDate() - getAiAssistantConfig().historyRetentionDays);
