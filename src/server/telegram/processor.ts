@@ -9,6 +9,7 @@ import { getAiAssistantConfig } from '@/server/ai/config';
 import { aiDebugId } from '@/server/ai/hash';
 import { processAssistantMessage } from '@/server/ai/service';
 import { storeAiAttachment } from '@/server/ai/attachments';
+import { aiDeliveryStatusText, getUserAiDeliveryHealth, replayUserAiDeliveries } from '@/server/ai/deliveries';
 import { deliverAiReportsToTelegram } from '@/server/ai/reports';
 import {
   answerTelegramCallback,
@@ -22,6 +23,7 @@ import {
   parseTelegramCallback,
   quickActionKeyboard,
   renderAssistantEvents,
+  statusKeyboard,
   TELEGRAM_QUICK_PROMPTS,
   type TelegramRenderedReply,
 } from './render';
@@ -255,13 +257,21 @@ export async function processTelegramUpdate(telegramUpdateId: string): Promise<v
     }
 
     const command = commandName(telegram.text);
-    if (command === '/start' || command === '/help' || command === '/status') {
-      const text = command === '/status'
-        ? locale === 'ar'
-          ? `تم ربط تيليغرام بحساب أطلس: ${user.name}\nالدور: ${user.role}`
-          : `Telegram is linked to Atlas user ${user.name}.\nRole: ${user.role}`
-        : helpMessage(locale, user.name);
-      await sendTelegramMessage({ chatId: telegram.chatId, text, keyboard: quickActionKeyboard(locale) });
+    if (command === '/status') {
+      const health = await getUserAiDeliveryHealth(user.id);
+      const linked = locale === 'ar'
+        ? `مرتبط بحساب أطلس: ${user.name}\nالدور: ${user.role}`
+        : `Linked Atlas user: ${user.name}\nRole: ${user.role}`;
+      await sendTelegramMessage({
+        chatId: telegram.chatId,
+        text: `${linked}\n\n${aiDeliveryStatusText(health, locale)}`,
+        keyboard: statusKeyboard(locale, health.retryable),
+      });
+      await markComplete(receipt.id, 'SUCCEEDED');
+      return;
+    }
+    if (command === '/start' || command === '/help') {
+      await sendTelegramMessage({ chatId: telegram.chatId, text: helpMessage(locale, user.name), keyboard: quickActionKeyboard(locale) });
       await markComplete(receipt.id, 'SUCCEEDED');
       return;
     }
@@ -280,6 +290,23 @@ export async function processTelegramUpdate(telegramUpdateId: string): Promise<v
     }
 
     const callback = parseTelegramCallback(telegram.callbackData);
+    if (callback?.type === 'delivery-replay') {
+      const replay = await replayUserAiDeliveries({ userId: user.id });
+      const health = await getUserAiDeliveryHealth(user.id);
+      const text = locale === 'ar'
+        ? `تمت محاولة ${replay.attempted} عملية تسليم؛ اكتملت ${replay.completed} وتعذر ${replay.failed}.\n\n${aiDeliveryStatusText(health, locale)}`
+        : `Attempted ${replay.attempted} deliveries; ${replay.completed} completed and ${replay.failed} failed.\n\n${aiDeliveryStatusText(health, locale)}`;
+      await deliverReply({
+        updateRecordId: receipt.id,
+        chatId: telegram.chatId,
+        replyMessageId: telegram.messageId,
+        existingReplyMessageId: receipt.replyMessageId,
+        locale,
+        rendered: { chunks: [text], keyboard: statusKeyboard(locale, health.retryable) },
+      });
+      await markComplete(receipt.id, 'SUCCEEDED');
+      return;
+    }
     if (callback?.type === 'action') {
       const chatId = telegram.chatId;
       const confirmationChallenge = callback.command === 'high-confirm'

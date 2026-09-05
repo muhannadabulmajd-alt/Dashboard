@@ -65,7 +65,8 @@ export const TELEGRAM_QUICK_PROMPTS: Record<string, { ar: string; en: string }> 
 export type TelegramCallbackAction =
   | { type: 'quick'; key: string }
   | { type: 'choice'; messageId: string; index: number }
-  | { type: 'action'; actionId: string; command: 'confirm' | 'high-confirm' | 'cancel' };
+  | { type: 'action'; actionId: string; command: 'confirm' | 'high-confirm' | 'cancel' }
+  | { type: 'delivery-replay' };
 
 export function parseTelegramCallback(value: string | undefined): TelegramCallbackAction | null {
   if (!value) return null;
@@ -81,7 +82,19 @@ export function parseTelegramCallback(value: string | undefined): TelegramCallba
       command: tail === 'c' ? 'confirm' : tail === 'h' ? 'high-confirm' : 'cancel',
     };
   }
+  if (prefix === 'd' && id === 'r' && !tail) return { type: 'delivery-replay' };
   return null;
+}
+
+export function statusKeyboard(locale: 'ar' | 'en', retryable: number): InlineKeyboard {
+  const keyboard = quickActionKeyboard(locale);
+  if (retryable > 0) {
+    keyboard.push([{
+      text: locale === 'ar' ? `إعادة محاولة التسليم (${retryable})` : `Retry delivery (${retryable})`,
+      callback_data: 'd:r',
+    }]);
+  }
+  return keyboard;
 }
 
 export function renderAssistantEvents(

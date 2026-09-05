@@ -6,6 +6,7 @@ import {
   parseTelegramCallback,
   renderAssistantEvents,
   splitTelegramText,
+  statusKeyboard,
 } from '@/server/telegram/render';
 import { supportedTelegramUpdate, telegramLocale, TelegramUpdateSchema } from '@/server/telegram/schemas';
 import type { CurrentUser } from '@/server/auth/session';
@@ -95,7 +96,16 @@ describe('Telegram Atlas AI transport contracts', () => {
     expect(parseTelegramCallback('a:action123:c')).toEqual({ type: 'action', actionId: 'action123', command: 'confirm' });
     expect(parseTelegramCallback('a:action123:h')).toEqual({ type: 'action', actionId: 'action123', command: 'high-confirm' });
     expect(parseTelegramCallback('a:action123:x')).toEqual({ type: 'action', actionId: 'action123', command: 'cancel' });
+    expect(parseTelegramCallback('d:r')).toEqual({ type: 'delivery-replay' });
     expect(parseTelegramCallback('bad')).toBeNull();
+  });
+
+  it('offers failed-delivery replay only when the linked user has retryable work', () => {
+    expect(statusKeyboard('en', 0).flat().some((button) => button.callback_data === 'd:r')).toBe(false);
+    expect(statusKeyboard('ar', 2).flat()).toContainEqual({
+      text: 'إعادة محاولة التسليم (2)',
+      callback_data: 'd:r',
+    });
   });
 
   it('keeps Telegram text within the API limit without dropping content', () => {

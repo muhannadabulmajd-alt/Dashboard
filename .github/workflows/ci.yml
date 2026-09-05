@@ -49,7 +49,7 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm check:translations
       - run: pnpm check:ai-evals
-      - run: pnpm exec vitest run tests/ai-assistant.test.ts tests/ai-attachments.test.ts tests/ai-automations.test.ts tests/ai-reports.test.ts tests/ai-tool-contracts.test.ts tests/ai-orchestrator.test.ts tests/telegram-assistant.test.ts tests/order-inventory-readiness.test.ts
+      - run: pnpm exec vitest run tests/ai-assistant.test.ts tests/ai-attachments.test.ts tests/ai-automations.test.ts tests/ai-deliveries.test.ts tests/ai-reports.test.ts tests/ai-tool-contracts.test.ts tests/ai-orchestrator.test.ts tests/telegram-assistant.test.ts tests/order-inventory-readiness.test.ts
       - run: pnpm exec vitest run tests/barcode.test.ts tests/invoice.test.ts tests/provider-fees.test.ts tests/provider-settlement.test.ts tests/spend-treatment.test.ts
       - run: pnpm test
       - run: pnpm exec prisma migrate deploy
