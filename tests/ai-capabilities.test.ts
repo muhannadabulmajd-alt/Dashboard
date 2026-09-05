@@ -53,8 +53,8 @@ vi.mock('@/server/db/client', () => {
     }),
     upsert: vi.fn(async (input: {
       where: { capability: string };
-      create: Partial<Row> & { capability: string };
-      update: Partial<Row> & { failureCount?: number | { increment: number } };
+      create: Omit<Partial<Row>, 'failureCount'> & { capability: string; failureCount?: number };
+      update: Omit<Partial<Row>, 'failureCount'> & { failureCount?: number | { increment: number } };
     }) => {
       const existing = database.rows.get(input.where.capability);
       const base = existing ?? freshRow(input.where.capability);
