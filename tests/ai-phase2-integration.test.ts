@@ -16,9 +16,15 @@ vi.mock('@/server/telegram/api', () => ({ sendTelegramDocument }));
 import type { CurrentUser } from '@/server/auth/session';
 import { createTrustedCommandContext } from '@/server/commands/actor-context';
 import { prisma } from '@/server/db/client';
-import { createCentralRecordFromInput } from '@/server/finance/central-records';
+import {
+  CENTRAL_RECORD_TRANSACTION_CHECKPOINTS,
+  createCentralRecordFromInput,
+} from '@/server/finance/central-records';
 import { getInvoiceData } from '@/server/invoice/data';
-import { createOrderFromInput } from '@/server/records/orders';
+import {
+  ORDER_CREATE_TRANSACTION_CHECKPOINTS,
+  createOrderFromInput,
+} from '@/server/records/orders';
 import { confirmPendingAction } from '@/server/ai/actions';
 import {
   ResolvedExpenseActionSchema,
@@ -473,6 +479,23 @@ describeIntegration('AI Assistant Phase 2 database regressions', () => {
     expect(await prisma.order.count({ where: { notes: runMarker, customer: { normalizedPhone: phone } } })).toBe(0);
   });
 
+  it('rolls back every order transaction checkpoint independently', async () => {
+    for (const checkpoint of ORDER_CREATE_TRANSACTION_CHECKPOINTS) {
+      const phone = nextPhone();
+      const data = orderFixture({ product, name: `Phase Order ${checkpoint}`, phone });
+      const result = await createOrderFromInput(orderCommandInput(data), {
+        actorContext: createTrustedCommandContext(owner),
+        afterStage: async (_tx, reached) => {
+          if (reached === checkpoint) throw new Error(`phase2_forced_order_${checkpoint}`);
+        },
+      });
+
+      expect(result?.ok, checkpoint).not.toBe(true);
+      expect(await prisma.customer.count({ where: { normalizedPhone: phone } }), checkpoint).toBe(0);
+      expect(await prisma.order.count({ where: { customer: { normalizedPhone: phone } } }), checkpoint).toBe(0);
+    }
+  });
+
   it('records equivalent multi-line spending with three-decimal quantities and finance PDFs', async () => {
     const formInput = expenseFixture({ name: 'Phase Form Supplier', phone: nextPhone(), accountId, branchId });
     const webInput = expenseFixture({ name: 'Phase Web Supplier', phone: nextPhone(), accountId, branchId });
@@ -543,6 +566,33 @@ describeIntegration('AI Assistant Phase 2 database regressions', () => {
     expect(await prisma.party.count({ where: { phone } })).toBe(0);
     expect(await prisma.financeEntry.count({ where: { reference } })).toBe(0);
     expect(await prisma.ledgerEntryLine.count({ where: { financeEntry: { reference } } })).toBe(0);
+  });
+
+  it('rolls back every spending transaction checkpoint independently', async () => {
+    for (const checkpoint of CENTRAL_RECORD_TRANSACTION_CHECKPOINTS) {
+      const phone = nextPhone();
+      const data = expenseFixture({
+        name: `Phase Spend ${checkpoint}`,
+        phone,
+        accountId,
+        branchId,
+      });
+      const reference = data.reference as string;
+      const result = await createCentralRecordFromInput(expenseCommandInput(data), {
+        actorContext: createTrustedCommandContext(owner),
+        afterStage: async (_tx, reached) => {
+          if (reached === checkpoint) throw new Error(`phase2_forced_spend_${checkpoint}`);
+        },
+      });
+
+      expect(result?.ok, checkpoint).not.toBe(true);
+      expect(result?.stage, checkpoint).toBe(checkpoint);
+      expect(await prisma.party.count({ where: { phone } }), checkpoint).toBe(0);
+      expect(await prisma.financeEntry.count({ where: { reference } }), checkpoint).toBe(0);
+      expect(await prisma.ledgerEntryLine.count({ where: { financeEntry: { reference } } }), checkpoint).toBe(0);
+      expect(await prisma.fixedAsset.count({ where: { financeEntry: { reference } } }), checkpoint).toBe(0);
+      expect(await prisma.stockMovement.count({ where: { financeEntry: { reference } } }), checkpoint).toBe(0);
+    }
   });
 
   it('blocks expired, stale, cross-user, and revoked Telegram confirmations with no writes', async () => {

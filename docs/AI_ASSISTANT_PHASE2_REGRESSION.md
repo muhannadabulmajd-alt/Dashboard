@@ -5,7 +5,7 @@ This matrix is a permanent release gate for web AI and Telegram mutations. Datab
 | Previous failure or risk | Permanent assertion |
 | --- | --- |
 | Order reported as created but missing from Atlas | The order, execution receipt, audit reference, and persisted PDF share the same record ID. A replay returns that stored result. |
-| Order save failed after creating a customer | A forced final-hook failure leaves no customer, order, finance row, or inventory movement. |
+| Order save failed after creating a customer | Every in-transaction checkpoint is failed independently; each attempt leaves no customer, order, finance row, or inventory movement. |
 | Customer name, phone, or address disappeared during clarification | 160 English, Arabic, Iraqi-dialect, and mixed prompts must retain at least 98% exact structured customer records. |
 | Phone number displayed as the customer name | Preview and persisted invoice fixtures assert independent name and normalized-phone fields. |
 | Repeated confirmation created duplicate customers or orders | Concurrent and repeated confirmations must resolve to one customer, one order, one receipt, and one PDF. |
@@ -14,7 +14,7 @@ This matrix is a permanent release gate for web AI and Telegram mutations. Datab
 | Unauthorized or revoked Telegram confirmation | Cross-user and revoked-identity confirmation attempts leave the pending action and business data unchanged. |
 | Branch-scoped Telegram order escaped its branch | The canonical order command stores the authenticated actor's active branch. |
 | Multi-line spending lost classifications or decimals | Canonical finance fixtures assert line totals, three-decimal quantities, OPEX treatment, ledger rows, party, and account. |
-| Spending partially committed | A forced final-hook failure rolls back the party, finance entry, ledger lines, stock layers, movements, and assets. |
+| Spending partially committed | Every party, entry, line, payment, audit, cost-sync, and final-hook checkpoint is failed independently and rolls back the party, finance entry, ledger lines, stock layers, movements, and assets. |
 | Raw structured tool data appeared in chat | Narrative and tool-contract tests prohibit untrusted structured payloads from being rendered as assistant prose. |
 | False success or false “no data changed” after commit | Once the receipt exists, confirmation recovery returns the persisted success result even if a later delivery attempt fails. |
 | Missing order/invoice link | Successful order results assert direct record, invoice, and document links. |

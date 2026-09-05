@@ -14,6 +14,7 @@ import {
   type ActionState,
   type CommandCommitHook,
   type CommandPreconditionHook,
+  type CommandStageHook,
   resolveCommandActor,
 } from '@/server/records/shared';
 import { can } from '@/lib/rbac';
@@ -62,6 +63,19 @@ const RECORD_KINDS = [
 
 type RecordKind = (typeof RECORD_KINDS)[number];
 type Tx = Prisma.TransactionClient;
+
+export const CENTRAL_RECORD_TRANSACTION_CHECKPOINTS = [
+  'precondition',
+  'party',
+  'finance_entry',
+  'line_effects',
+  'payment',
+  'audit',
+  'cost_sync',
+  'commit_hook',
+] as const;
+
+export type CentralRecordTransactionCheckpoint = (typeof CENTRAL_RECORD_TRANSACTION_CHECKPOINTS)[number];
 
 const LINE_TYPES = ['INVENTORY', 'ASSET', 'EXPENSE', 'SERVICE', 'OTHER'] as const;
 type LedgerLineType = (typeof LINE_TYPES)[number];
@@ -613,6 +627,7 @@ export async function createCentralRecordFromInput(
     actorContext?: TrustedCommandContext;
     beforeExecute?: CommandPreconditionHook;
     onCommitted?: CommandCommitHook<{ recordId: string }>;
+    afterStage?: CommandStageHook<CentralRecordTransactionCheckpoint>;
   } = {},
 ): Promise<ActionState> {
   const parsed = CentralRecordCommandInputSchema.safeParse(rawInput);
@@ -702,6 +717,7 @@ export async function createCentralRecordCommand(
     actorContext?: TrustedCommandContext;
     beforeExecute?: CommandPreconditionHook;
     onCommitted?: CommandCommitHook<{ recordId: string }>;
+    afterStage?: CommandStageHook<CentralRecordTransactionCheckpoint>;
     newParty?: PartyCommandInput;
   } = {},
 ): Promise<ActionState> {
@@ -738,9 +754,12 @@ export async function createCentralRecordCommand(
 
   let newId = '';
   const touchedItems: string[] = [];
+  let stage: CentralRecordTransactionCheckpoint = 'precondition';
   try {
     await prisma.$transaction(async (tx) => {
       await options.beforeExecute?.(tx);
+      await options.afterStage?.(tx, 'precondition');
+      stage = 'party';
       if (!optField(fd, 'partyId') && options.newParty) {
         const party = await resolveOrCreatePartyInTransaction(
           tx,
@@ -749,9 +768,11 @@ export async function createCentralRecordCommand(
         );
         fd.set('partyId', party.id);
       }
+      await options.afterStage?.(tx, 'party');
       if (isMultiLineRecord && linePayload) {
       const paymentMethod = parsePaymentMethod(fd);
       const entryType: FinanceType = kind === 'MONEY_OUT' ? 'EXPENSE' : 'PURCHASE';
+      stage = 'finance_entry';
       const entry = await tx.financeEntry.create({
         data: {
           ...baseEntryData(fd, date, money, entryType, payable, payable ? 'PAYABLE' : null),
@@ -764,7 +785,9 @@ export async function createCentralRecordCommand(
         },
         select: { id: true },
       });
+      await options.afterStage?.(tx, 'finance_entry');
 
+      stage = 'line_effects';
       for (const line of linePayload.lines) {
         let inventoryItemId = line.inventoryItemId;
         let categoryType = line.categoryType;
@@ -861,7 +884,9 @@ export async function createCentralRecordCommand(
           });
         }
       }
+      await options.afterStage?.(tx, 'line_effects');
 
+      stage = 'payment';
       if (kind !== 'MONEY_OUT' && paidMode === 'PARTIAL') {
         await tx.financeEntry.create({
           data: {
@@ -882,7 +907,9 @@ export async function createCentralRecordCommand(
           },
         });
       }
+      await options.afterStage?.(tx, 'payment');
 
+      stage = 'audit';
       await tx.auditLog.create({
         data: {
           userId: user.id,
@@ -906,11 +933,16 @@ export async function createCentralRecordCommand(
           },
         },
       });
+      await options.afterStage?.(tx, 'audit');
+      stage = 'cost_sync';
       for (const itemId of [...new Set(touchedItems)]) {
         await syncActiveCost(itemId, tx);
       }
+      await options.afterStage?.(tx, 'cost_sync');
       newId = entry.id;
+      stage = 'commit_hook';
       await options.onCommitted?.(tx, { recordId: newId });
+      await options.afterStage?.(tx, 'commit_hook');
         return;
       }
 
@@ -922,6 +954,7 @@ export async function createCentralRecordCommand(
       const item = await resolveInventoryItem(tx, fd, user.id, unitCost);
       if (!item) throw new Error('invalid-item');
       const paymentMethod = parsePaymentMethod(fd);
+      stage = 'finance_entry';
       const entry = await tx.financeEntry.create({
         data: {
           ...baseEntryData(fd, date, money, 'PURCHASE', payable, payable ? 'PAYABLE' : null),
@@ -935,6 +968,8 @@ export async function createCentralRecordCommand(
         },
         select: { id: true },
       });
+      await options.afterStage?.(tx, 'finance_entry');
+      stage = 'line_effects';
       await tx.ledgerEntryLine.create({
         data: {
           financeEntryId: entry.id,
@@ -976,6 +1011,8 @@ export async function createCentralRecordCommand(
           branchId: optField(fd, 'branchId') ?? item.branchId,
         },
       });
+      await options.afterStage?.(tx, 'line_effects');
+      stage = 'payment';
       if (paidMode === 'PARTIAL') {
         await tx.financeEntry.create({
           data: {
@@ -996,6 +1033,8 @@ export async function createCentralRecordCommand(
           },
         });
       }
+      await options.afterStage?.(tx, 'payment');
+      stage = 'audit';
       await tx.auditLog.create({
         data: {
           userId: user.id,
@@ -1013,10 +1052,15 @@ export async function createCentralRecordCommand(
           },
         },
       });
+      await options.afterStage?.(tx, 'audit');
       newId = entry.id;
       touchedItems.push(item.id);
+      stage = 'cost_sync';
       await syncActiveCost(item.id, tx);
+      await options.afterStage?.(tx, 'cost_sync');
+      stage = 'commit_hook';
       await options.onCommitted?.(tx, { recordId: newId });
+      await options.afterStage?.(tx, 'commit_hook');
       return;
     }
 
@@ -1028,6 +1072,7 @@ export async function createCentralRecordCommand(
       if (!name || !isMeasurementUnit(unit)) throw new Error('invalid-asset');
       const unitCost = unitCostData(money.amount, qty);
       const paymentMethod = parsePaymentMethod(fd);
+      stage = 'finance_entry';
       const entry = await tx.financeEntry.create({
         data: {
           ...baseEntryData(fd, date, money, 'PURCHASE', payable, payable ? 'PAYABLE' : null),
@@ -1040,6 +1085,8 @@ export async function createCentralRecordCommand(
         },
         select: { id: true },
       });
+      await options.afterStage?.(tx, 'finance_entry');
+      stage = 'line_effects';
       const ledgerLine = await tx.ledgerEntryLine.create({
         data: {
           financeEntryId: entry.id,
@@ -1088,6 +1135,8 @@ export async function createCentralRecordCommand(
           notes: 'Created from central record panel',
         },
       });
+      await options.afterStage?.(tx, 'line_effects');
+      stage = 'audit';
       await tx.auditLog.create({
         data: {
           userId: user.id,
@@ -1097,6 +1146,8 @@ export async function createCentralRecordCommand(
           metadata: { source: 'central-ledger-panel', financeEntryId: entry.id, name, quantity: decimalData(qty), unit, totalCost: money.amount, unitCost },
         },
       });
+      await options.afterStage?.(tx, 'audit');
+      stage = 'payment';
       if (paidMode === 'PARTIAL') {
         await tx.financeEntry.create({
           data: {
@@ -1117,8 +1168,13 @@ export async function createCentralRecordCommand(
           },
         });
       }
+      await options.afterStage?.(tx, 'payment');
+      stage = 'cost_sync';
+      await options.afterStage?.(tx, 'cost_sync');
       newId = entry.id;
+      stage = 'commit_hook';
       await options.onCommitted?.(tx, { recordId: newId });
+      await options.afterStage?.(tx, 'commit_hook');
       return;
     }
 
@@ -1144,6 +1200,7 @@ export async function createCentralRecordCommand(
     if (mapped.type === 'CAPITAL_IN' || mapped.type === 'DRAWING') {
       await requireActiveShareholder(tx, optField(fd, 'partyId') ?? null);
     }
+    stage = 'finance_entry';
     const entry = await tx.financeEntry.create({
       data: {
         ...baseEntryData(fd, date, money, mapped.type, mapped.obligation, mapped.kind),
@@ -1152,6 +1209,8 @@ export async function createCentralRecordCommand(
       },
       select: { id: true },
     });
+    await options.afterStage?.(tx, 'finance_entry');
+    stage = 'line_effects';
     if (mapped.type === 'EXPENSE' || mapped.type === 'PURCHASE') {
       const isOperating = mapped.type === 'EXPENSE';
       await tx.ledgerEntryLine.create({
@@ -1178,6 +1237,10 @@ export async function createCentralRecordCommand(
         },
       });
     }
+    await options.afterStage?.(tx, 'line_effects');
+    stage = 'payment';
+    await options.afterStage?.(tx, 'payment');
+    stage = 'audit';
     await tx.auditLog.create({
       data: {
         userId: user.id,
@@ -1187,11 +1250,19 @@ export async function createCentralRecordCommand(
         metadata: { source: 'central-ledger-panel', kind, amount: money.amount },
       },
     });
+    await options.afterStage?.(tx, 'audit');
+    stage = 'cost_sync';
+    await options.afterStage?.(tx, 'cost_sync');
     newId = entry.id;
+    stage = 'commit_hook';
     await options.onCommitted?.(tx, { recordId: newId });
+    await options.afterStage?.(tx, 'commit_hook');
     });
   } catch (error) {
-    return { error: error instanceof Error && error.message === 'action_stale' ? 'action_stale' : 'invalid' };
+    return {
+      error: error instanceof Error && error.message === 'action_stale' ? 'action_stale' : 'invalid',
+      stage,
+    };
   }
 
   revalidateFinancePaths();

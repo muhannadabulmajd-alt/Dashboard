@@ -40,6 +40,7 @@ import {
   type ActionState,
   type CommandCommitHook,
   type CommandPreconditionHook,
+  type CommandStageHook,
 } from './shared';
 
 const LIST = '/[locale]/(dashboard)/admin/records/orders';
@@ -81,6 +82,20 @@ type OrderCreateStage =
   | 'finance_sync'
   | 'customer_stats'
   | 'commit_hook';
+
+export const ORDER_CREATE_TRANSACTION_CHECKPOINTS = [
+  'precondition',
+  'order_number',
+  'customer',
+  'inventory_readiness',
+  'order_insert',
+  'stock_sync',
+  'finance_sync',
+  'customer_stats',
+  'commit_hook',
+] as const;
+
+export type OrderCreateTransactionCheckpoint = (typeof ORDER_CREATE_TRANSACTION_CHECKPOINTS)[number];
 
 const headerSchema = z.object({
   orderNumber: z.string().optional(),
@@ -151,6 +166,7 @@ export async function createOrderFromInput(
     actorContext?: TrustedCommandContext;
     beforeExecute?: CommandPreconditionHook;
     onCommitted?: CommandCommitHook<{ recordId: string; recordNumber: string }>;
+    afterStage?: CommandStageHook<OrderCreateTransactionCheckpoint>;
   } = {},
 ): Promise<ActionState> {
   const parsed = OrderCreateCommandInputSchema.safeParse(rawInput);
@@ -405,6 +421,7 @@ export async function createOrderCommand(
     actorContext?: TrustedCommandContext;
     beforeExecute?: CommandPreconditionHook;
     onCommitted?: CommandCommitHook<{ recordId: string; recordNumber: string }>;
+    afterStage?: CommandStageHook<OrderCreateTransactionCheckpoint>;
   } = {},
 ): Promise<ActionState> {
   const user = await resolveCommandActor(CAP, options.actorContext);
@@ -562,8 +579,12 @@ export async function createOrderCommand(
   try {
     order = await prisma.$transaction(async (tx) => {
       await options.beforeExecute?.(tx);
+      stage = 'validation';
+      await options.afterStage?.(tx, 'precondition');
       stage = 'order_number';
       const orderNumber = await generateOrderNumber(tx, h.data.placedAt, h.data.channel);
+      await options.afterStage?.(tx, 'order_number');
+      stage = 'customer_lookup';
       const customer = newCustomer
         ? await resolveOrCreateCustomerInTransaction(tx, newCustomer, {
             actorId: user.id,
@@ -577,11 +598,13 @@ export async function createOrderCommand(
           source: 'ai-assistant-order',
         });
       }
+      await options.afterStage?.(tx, 'customer');
       stage = 'stock_sync';
       const stockReadiness = await resolveOrderInventoryReadiness(
         tx,
         lineData.map((line) => line.productId),
       );
+      await options.afterStage?.(tx, 'inventory_readiness');
       stage = 'order_insert';
       const o = await tx.order.create({
         data: {
@@ -606,6 +629,7 @@ export async function createOrderCommand(
           lines: { create: lineData },
         },
       });
+      await options.afterStage?.(tx, 'order_insert');
       // Only statuses mapped as completed sales consume stock. Changing the role
       // on a later edit reverses or reapplies the linked movements atomically.
       stage = 'stock_sync';
@@ -628,6 +652,7 @@ export async function createOrderCommand(
           },
         });
       }
+      await options.afterStage?.(tx, 'stock_sync');
       stage = 'finance_sync';
       await syncOrderFinance(tx, o.id, {
         mode: financeMode as FinanceSyncMode,
@@ -640,11 +665,14 @@ export async function createOrderCommand(
         partyId: provider?.id ?? null,
         statusRole,
       });
+      await options.afterStage?.(tx, 'finance_sync');
       stage = 'customer_stats';
       await syncCustomerStats(tx, customer?.id, saleStatuses);
+      await options.afterStage?.(tx, 'customer_stats');
       const commandResult = { recordId: o.id, recordNumber: o.orderNumber };
       stage = 'commit_hook';
       await options.onCommitted?.(tx, commandResult);
+      await options.afterStage?.(tx, 'commit_hook');
       return { id: o.id, orderNumber: o.orderNumber };
     }, {
       maxWait: 10_000,
