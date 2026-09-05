@@ -1151,7 +1151,7 @@ async function resolveLedgerLines(
     let inventoryItemMode: 'existing' | 'new' = 'existing';
     let newItemNameEn = '';
     let newItemNameAr = '';
-    let newItemCategory = input.newItemCategory;
+    const newItemCategory = input.newItemCategory;
     let existingInventory: { id: string; name: string; unit: string; category: string } | null = null;
     if (itemType === 'INVENTORY') {
       if (input.inventoryItemQuery) {
