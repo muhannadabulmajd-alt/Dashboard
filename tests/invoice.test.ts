@@ -6,6 +6,7 @@ import {
   type InvoiceFinanceEntryLike,
   type InvoiceOrderLike,
 } from '@/lib/invoice';
+import { getInvoiceLabels } from '@/server/invoice/labels';
 
 const order = (over: Partial<InvoiceOrderLike> = {}): InvoiceOrderLike => ({
   id: 'ord1',
@@ -27,6 +28,18 @@ const entry = (over: Partial<InvoiceFinanceEntryLike> & Pick<InvoiceFinanceEntry
 });
 
 describe('invoice helpers', () => {
+  it('loads bilingual PDF labels without a request context', async () => {
+    const [english, arabic] = await Promise.all([
+      getInvoiceLabels('en'),
+      getInvoiceLabels('ar'),
+    ]);
+
+    expect(english.title).toBeTruthy();
+    expect(arabic.title).toBeTruthy();
+    expect(english['paymentStatus.PAID']).toBeTruthy();
+    expect(arabic['paymentStatus.PAID']).toBeTruthy();
+  });
+
   it('calculates invoice total from order totals', () => {
     expect(invoiceTotal(order())).toBe(95_000);
   });
