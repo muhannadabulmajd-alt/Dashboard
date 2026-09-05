@@ -25,6 +25,21 @@ export const CustomerCommandSchema = z.object({
 
 export type CustomerCommandInput = z.infer<typeof CustomerCommandSchema>;
 
+export const CustomerOrderEnrichmentSchema = z.object({
+  nameEn: z.string().trim().optional(),
+  nameAr: z.string().trim().optional(),
+  phone: z.string().trim().optional(),
+  email: z.string().trim().email().optional().or(z.literal('')),
+  governorate: z.string().trim().optional(),
+  address1: z.string().trim().optional(),
+  street: z.string().trim().optional(),
+  notes: z.string().trim().optional(),
+  campaignSource: z.string().trim().optional(),
+  segment: z.enum(CUSTOMER_SEGMENTS).optional(),
+}).strict();
+
+export type CustomerOrderEnrichmentInput = z.infer<typeof CustomerOrderEnrichmentSchema>;
+
 export const CustomerUpdateCommandSchema = z.object({
   customerId: z.string().min(1),
   nameEn: z.string().trim().nullable().optional(),
@@ -209,6 +224,69 @@ export async function resolveOrCreateCustomerInTransaction(
   }
   const created = await createCustomerInTransaction(tx, input, context);
   return { ...created, reused: false as const };
+}
+
+export async function enrichCustomerForOrderInTransaction(
+  tx: Prisma.TransactionClient,
+  customerId: string,
+  rawInput: CustomerOrderEnrichmentInput,
+  context: { actorId: string; source: string },
+) {
+  const input = CustomerOrderEnrichmentSchema.parse(rawInput);
+  await tx.$queryRaw`SELECT "id" FROM "Customer" WHERE "id" = ${customerId} FOR UPDATE`;
+  const customer = await tx.customer.findUnique({ where: { id: customerId } });
+  if (!customer?.isActive) throw new Error('customer_not_found');
+  if (compatibleCustomerMatches(input, [customer]).length !== 1) {
+    throw new Error('customer_name_conflict');
+  }
+
+  const normalizedPhone = input.phone === undefined ? undefined : normalizeIraqiPhone(input.phone);
+  if (normalizedPhone) {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`customer-phone:${normalizedPhone}`}))`;
+    const samePhone = await tx.customer.findMany({
+      where: { normalizedPhone, isActive: true, id: { not: customerId } },
+      select: { id: true, nameEn: true, nameAr: true },
+    });
+    const proposedNames = {
+      nameEn: input.nameEn ?? customer.nameEn ?? undefined,
+      nameAr: input.nameAr ?? customer.nameAr ?? undefined,
+    };
+    if (compatibleCustomerMatches(proposedNames, samePhone).length) {
+      throw new Error('customer_duplicate');
+    }
+  }
+
+  const data: Prisma.CustomerUpdateInput = {
+    ...input,
+    ...(input.email === '' ? { email: null } : {}),
+    ...(normalizedPhone !== undefined ? { normalizedPhone } : {}),
+  };
+  const updated = await tx.customer.update({ where: { id: customerId }, data });
+  await tx.auditLog.create({
+    data: {
+      userId: context.actorId,
+      action: 'CUSTOMER_ENRICHED_FROM_ORDER',
+      entity: 'Customer',
+      entityId: customerId,
+      metadata: {
+        source: context.source,
+        fields: Object.keys(input),
+        before: {
+          nameEn: customer.nameEn,
+          nameAr: customer.nameAr,
+          phone: customer.phone,
+          email: customer.email,
+          governorate: customer.governorate,
+          address1: customer.address1,
+          street: customer.street,
+          notes: customer.notes,
+          campaignSource: customer.campaignSource,
+          segment: customer.segment,
+        },
+      },
+    },
+  });
+  return updated;
 }
 
 export async function createCustomerCommand(

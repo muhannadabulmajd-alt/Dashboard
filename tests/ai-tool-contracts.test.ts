@@ -4,16 +4,19 @@ import {
   PrepareOrderSchema,
   PreparePurchaseSchema,
   PrepareRefundSchema,
+  PrepareTransferSchema,
   ProductBuyersSchema,
 } from '@/server/ai/schemas';
 import {
   ResolvedInventoryAdjustmentActionSchema,
   ResolvedOrderActionSchema,
   ResolvedRefundActionSchema,
+  ResolvedTransferActionSchema,
 } from '@/server/ai/action-data';
 import { AI_ASSISTANT_TOOLS } from '@/server/ai/tool-definitions';
 import { actionPreconditionIssues } from '@/server/ai/preconditions';
 import { QuickOrderDraftSchema } from '@/lib/ai-quick-order';
+import { compatibleCustomerMatches } from '@/server/commands/customers';
 
 describe('AI write tool validation', () => {
   it('accepts a bounded guided order draft and rejects unsafe extras', () => {
@@ -148,7 +151,7 @@ describe('AI write tool validation', () => {
   });
 
   it('publishes only strict allowlisted function schemas', () => {
-    expect(AI_ASSISTANT_TOOLS).toHaveLength(21);
+    expect(AI_ASSISTANT_TOOLS).toHaveLength(22);
     expect(new Set(AI_ASSISTANT_TOOLS.map((tool) => tool.name)).size).toBe(AI_ASSISTANT_TOOLS.length);
     for (const tool of AI_ASSISTANT_TOOLS) {
       expect(tool.strict).toBe(true);
@@ -157,6 +160,44 @@ describe('AI write tool validation', () => {
     expect(AI_ASSISTANT_TOOLS.some((tool) => tool.name.includes('delete'))).toBe(false);
     expect(AI_ASSISTANT_TOOLS.some((tool) => tool.name.includes('sql'))).toBe(false);
     expect(AI_ASSISTANT_TOOLS.some((tool) => tool.name === 'product_buyers')).toBe(true);
+  });
+
+  it('requires distinct accounts for a governed transfer', () => {
+    const extracted = PrepareTransferSchema.parse({
+      date: null,
+      amount: 125_000,
+      currency: null,
+      rate: null,
+      fromAccountQuery: 'Cash',
+      toAccountQuery: 'Bank',
+      description: null,
+      reference: null,
+    });
+    expect(extracted.amount).toBe(125_000);
+    const resolved = {
+      date: '2026-09-05T09:00:00.000Z',
+      amount: 125_000,
+      currency: 'IQD' as const,
+      rate: null,
+      fromAccountId: 'cash',
+      fromAccountName: 'Cash',
+      toAccountId: 'bank',
+      toAccountName: 'Bank',
+      description: 'Cash deposit',
+      reference: null,
+    };
+    expect(ResolvedTransferActionSchema.parse(resolved)).toEqual(resolved);
+    expect(() => ResolvedTransferActionSchema.parse({ ...resolved, toAccountId: 'cash' })).toThrow();
+    expect(actionPreconditionIssues('CREATE_TRANSFER', resolved, {
+      fromAccount: { id: 'cash', isActive: true, currency: 'IQD', type: 'CASH' },
+      toAccount: { id: 'bank', isActive: false, currency: 'IQD', type: 'BANK' },
+    } as never)).toContainEqual({ field: 'toAccountQuery', code: 'account_inactive' });
+  });
+
+  it('keeps differently named customers separate even when they share a phone', () => {
+    const existing = [{ id: 'customer-1', nameEn: null, nameAr: 'نور عبداللطيف' }];
+    expect(compatibleCustomerMatches({ nameAr: 'نور عبداللطيف' }, existing)).toHaveLength(1);
+    expect(compatibleCustomerMatches({ nameAr: 'سارة أحمد' }, existing)).toHaveLength(0);
   });
 
   it('validates governed operations without accepting raw query fields', () => {

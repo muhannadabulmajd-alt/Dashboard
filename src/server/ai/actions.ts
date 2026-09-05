@@ -39,6 +39,7 @@ import {
   ResolvedReversalActionSchema,
   ResolvedRoastBatchActionSchema,
   ResolvedSpendReclassificationActionSchema,
+  ResolvedTransferActionSchema,
 } from './action-data';
 import {
   aiDocumentHref,
@@ -328,6 +329,7 @@ async function executeOrder(
     placedAt: input.placedAt,
     customerExternalId: input.customerExternalId,
     newCustomer: input.newCustomer,
+    customerEnrichment: input.customerEnrichment,
     channel: input.channel,
     governorate: input.governorate,
     fulfillmentMethod: input.fulfillmentMethod,
@@ -478,6 +480,52 @@ async function executePurchase(
     recordId: result.recordId,
     href: `/finance/ledger/${result.recordId}`,
     message: localized(locale, 'The purchase was recorded and linked records were synchronized.', 'تم تسجيل الشراء ومزامنة السجلات المرتبطة.'),
+  };
+}
+
+async function executeTransfer(
+  raw: unknown,
+  user: CurrentUser,
+  locale: AppLocale,
+  beforeExecute: (tx: Prisma.TransactionClient) => Promise<void>,
+  onCommitted: (tx: Prisma.TransactionClient, record: ExecutionRecord) => Promise<void>,
+) {
+  const input = ResolvedTransferActionSchema.parse(raw);
+  let record: ExecutionRecord | null = null;
+  const result = await createCentralRecordFromInput({
+    locale,
+    recordKind: 'TRANSFER',
+    date: input.date,
+    amount: input.amount,
+    currency: input.currency,
+    rate: input.rate,
+    accountId: input.fromAccountId,
+    toAccountId: input.toAccountId,
+    description: input.description,
+    reference: input.reference,
+  }, {
+    actorContext: createTrustedCommandContext(user),
+    beforeExecute,
+    onCommitted: async (tx, commandResult) => {
+      record = {
+        recordType: 'FinanceEntry',
+        recordId: commandResult.recordId,
+        href: `/finance/ledger/${commandResult.recordId}`,
+        message: localized(
+          locale,
+          `The transfer from ${input.fromAccountName} to ${input.toAccountName} was recorded.`,
+          `تم تسجيل التحويل من ${input.fromAccountName} إلى ${input.toAccountName}.`,
+        ),
+      };
+      await onCommitted(tx, record);
+    },
+  });
+  if (!result?.ok || !result.recordId) throw new Error(result?.error || 'transfer_create_failed');
+  return record ?? {
+    recordType: 'FinanceEntry',
+    recordId: result.recordId,
+    href: `/finance/ledger/${result.recordId}`,
+    message: localized(locale, 'The transfer was recorded.', 'تم تسجيل التحويل.'),
   };
 }
 
@@ -873,6 +921,8 @@ async function executeByType(
       return executeExpense(raw, user, locale, beforeExecute, onCommitted);
     case 'CREATE_PURCHASE':
       return executePurchase(raw, user, locale, beforeExecute, onCommitted);
+    case 'CREATE_TRANSFER':
+      return executeTransfer(raw, user, locale, beforeExecute, onCommitted);
     case 'UPDATE_ORDER_STATUS':
       return executeOrderStatus(raw, user, locale, beforeExecute, onCommitted);
     case 'UPDATE_CUSTOMER':

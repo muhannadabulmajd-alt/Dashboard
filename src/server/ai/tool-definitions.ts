@@ -235,6 +235,20 @@ export const AI_ASSISTANT_TOOLS: FunctionTool[] = [
     }),
   ),
   tool(
+    'prepare_create_transfer',
+    'Prepare an internal transfer between two active Atlas finance accounts for explicit confirmation. The source and destination must be different and use the selected currency.',
+    object({
+      date: nullableString,
+      amount: nullableNumber,
+      currency: enumSchema(CURRENCIES, true),
+      rate: nullableNumber,
+      fromAccountQuery: nullableString,
+      toAccountQuery: nullableString,
+      description: nullableString,
+      reference: nullableString,
+    }),
+  ),
+  tool(
     'prepare_update_order_status',
     'Prepare one order status update for explicit confirmation, including required payment routing for completion.',
     object({

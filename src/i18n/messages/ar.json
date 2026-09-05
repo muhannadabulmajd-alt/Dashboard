@@ -1610,6 +1610,8 @@
     "governorate": "المدينة / المحافظة",
     "address": "العنوان",
     "street": "الشارع / أقرب نقطة دالة",
+    "segment": "شريحة العميل",
+    "customerNotes": "ملاحظات العميل",
     "deliveryDetails": "تفاصيل الطلب والتسليم",
     "fulfillment": "طريقة التسليم",
     "source": "المصدر",

@@ -157,6 +157,17 @@ export const PreparePurchaseSchema = z.object({
   lines: z.array(PrepareLedgerLineSchema).min(1).max(50).nullable(),
 }).strict();
 
+export const PrepareTransferSchema = z.object({
+  date: z.string().nullable(),
+  amount: z.number().positive().nullable(),
+  currency: z.enum(CURRENCIES).nullable(),
+  rate: z.number().positive().nullable(),
+  fromAccountQuery: z.string().trim().nullable(),
+  toAccountQuery: z.string().trim().nullable(),
+  description: z.string().trim().nullable(),
+  reference: z.string().trim().nullable(),
+}).strict();
+
 export const PrepareOrderStatusSchema = z.object({
   orderQuery: z.string().trim().nullable(),
   status: z.string().trim().nullable(),

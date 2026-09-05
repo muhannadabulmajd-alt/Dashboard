@@ -23,9 +23,12 @@ import {
 } from '@/server/orders/sync';
 import { generateOrderNumber } from '@/server/records/numbering';
 import {
+  enrichCustomerForOrderInTransaction,
   resolveOrCreateCustomerInTransaction,
   CustomerCommandSchema,
+  CustomerOrderEnrichmentSchema,
   type CustomerCommandInput,
+  type CustomerOrderEnrichmentInput,
 } from '@/server/commands/customers';
 import type { TrustedCommandContext } from '@/server/commands/actor-context';
 import {
@@ -116,6 +119,7 @@ const OrderCreateCommandInputSchema = headerSchema.omit({ orderNumber: true }).e
   locale: z.enum(['en', 'ar']).default('ar'),
   customerExternalId: z.string().nullish(),
   newCustomer: CustomerCommandSchema.nullish(),
+  customerEnrichment: CustomerOrderEnrichmentSchema.nullish(),
   financeAccountId: z.string().nullish(),
   financeProviderId: z.string().nullish(),
   financePaidAmount: z.coerce.number().int().nonnegative().nullish(),
@@ -162,6 +166,7 @@ export async function createOrderFromInput(
   setCommandField(fd, 'placedAt', input.placedAt);
   setCommandField(fd, 'customerExternalId', input.customerExternalId);
   if (input.newCustomer) setCommandField(fd, 'newCustomer', JSON.stringify(input.newCustomer));
+  if (input.customerEnrichment) setCommandField(fd, 'customerEnrichment', JSON.stringify(input.customerEnrichment));
   setCommandField(fd, 'channel', input.channel);
   setCommandField(fd, 'governorate', input.governorate);
   setCommandField(fd, 'fulfillmentMethod', input.fulfillmentMethod);
@@ -438,6 +443,22 @@ export async function createOrderCommand(
   if (h.data.customerExternalId && newCustomer) {
     return { error: 'customer', fieldErrors: { customerExternalId: 'customer' } };
   }
+  let customerEnrichment: CustomerOrderEnrichmentInput | null = null;
+  const customerEnrichmentRaw = optField(fd, 'customerEnrichment');
+  if (customerEnrichmentRaw) {
+    try {
+      const parsedEnrichment = CustomerOrderEnrichmentSchema.safeParse(JSON.parse(customerEnrichmentRaw));
+      if (!parsedEnrichment.success || !Object.keys(parsedEnrichment.data).length) {
+        return { error: 'customer', fieldErrors: { customerExternalId: 'customer' } };
+      }
+      customerEnrichment = parsedEnrichment.data;
+    } catch {
+      return { error: 'customer', fieldErrors: { customerExternalId: 'customer' } };
+    }
+  }
+  if ((!h.data.customerExternalId && customerEnrichment) || (newCustomer && customerEnrichment)) {
+    return { error: 'customer', fieldErrors: { customerExternalId: 'customer' } };
+  }
   const statusRoles = await getOrderStatusRoleMap();
   const statusRole = statusRoles.get(h.data.status) ?? 'UNKNOWN';
   const saleStatuses = [...statusRoles].filter(([, role]) => role === 'SALE').map(([code]) => code);
@@ -546,6 +567,13 @@ export async function createOrderCommand(
             source: 'ai-assistant-order',
           })
         : existingCustomer;
+      if (!newCustomer && customerEnrichment && customer) {
+        stage = 'customer_lookup';
+        await enrichCustomerForOrderInTransaction(tx, customer.id, customerEnrichment, {
+          actorId: user.id,
+          source: 'ai-assistant-order',
+        });
+      }
       stage = 'stock_sync';
       const stockReadiness = await resolveOrderInventoryReadiness(
         tx,

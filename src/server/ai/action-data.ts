@@ -25,6 +25,19 @@ export const ResolvedCustomerActionSchema = z.object({
   segment: z.enum(CUSTOMER_SEGMENTS),
 }).strict();
 
+export const ResolvedCustomerEnrichmentSchema = z.object({
+  nameEn: z.string().trim().optional(),
+  nameAr: z.string().trim().optional(),
+  phone: z.string().trim().optional(),
+  email: z.string().trim().email().optional().or(z.literal('')),
+  governorate: z.string().trim().optional(),
+  address1: z.string().trim().optional(),
+  street: z.string().trim().optional(),
+  notes: z.string().trim().optional(),
+  campaignSource: z.string().trim().optional(),
+  segment: z.enum(CUSTOMER_SEGMENTS).optional(),
+}).strict();
+
 export const ResolvedPartyActionSchema = z.object({
   name: z.string().trim().min(1),
   type: z.enum(PARTY_TYPES),
@@ -74,6 +87,7 @@ export const ResolvedLedgerLineActionSchema = z.object({
 export const ResolvedOrderActionSchema = z.object({
   customerExternalId: z.string().nullable(),
   newCustomer: ResolvedCustomerActionSchema.nullable(),
+  customerEnrichment: ResolvedCustomerEnrichmentSchema.nullable().default(null),
   placedAt: z.string().datetime(),
   channel: z.string().min(1),
   governorate: z.string().min(1),
@@ -162,6 +176,22 @@ export const ResolvedPurchaseActionSchema = z.object({
   if (value.purchaseType === 'ASSET' && (!value.assetName || !value.assetCategory)) {
     ctx.addIssue({ code: 'custom', path: ['assetName'], message: 'An asset name and category are required.' });
   }
+});
+
+export const ResolvedTransferActionSchema = z.object({
+  date: z.string().datetime(),
+  amount: z.number().positive(),
+  currency: z.enum(CURRENCIES),
+  rate: z.number().positive().nullable(),
+  fromAccountId: z.string().min(1),
+  fromAccountName: z.string().min(1),
+  toAccountId: z.string().min(1),
+  toAccountName: z.string().min(1),
+  description: z.string().trim().min(1),
+  reference: z.string().trim().nullable(),
+}).strict().refine((value) => value.fromAccountId !== value.toAccountId, {
+  path: ['toAccountId'],
+  message: 'Transfer accounts must be different.',
 });
 
 export const ResolvedOrderStatusActionSchema = z.object({
@@ -269,6 +299,7 @@ export const ACTION_DATA_SCHEMAS: Partial<Record<import('@prisma/client').AiPend
   CREATE_ORDER: ResolvedOrderActionSchema,
   CREATE_EXPENSE: ResolvedExpenseActionSchema,
   CREATE_PURCHASE: ResolvedPurchaseActionSchema,
+  CREATE_TRANSFER: ResolvedTransferActionSchema,
   UPDATE_ORDER_STATUS: ResolvedOrderStatusActionSchema,
   UPDATE_CUSTOMER: ResolvedCustomerUpdateActionSchema,
   UPDATE_PARTY: ResolvedPartyUpdateActionSchema,

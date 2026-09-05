@@ -1610,6 +1610,8 @@
     "governorate": "City / governorate",
     "address": "Address",
     "street": "Street / landmark",
+    "segment": "Customer segment",
+    "customerNotes": "Customer notes",
     "deliveryDetails": "Order and delivery details",
     "fulfillment": "Fulfillment",
     "source": "Source",

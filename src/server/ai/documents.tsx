@@ -471,7 +471,7 @@ export function documentKindForAction(actionType: string): AiDocumentKind {
   if (actionType === 'CREATE_ORDER') return 'INVOICE';
   if (actionType === 'RECORD_PAYMENT') return 'PAYMENT_RECEIPT';
   if (actionType === 'RECORD_REFUND') return 'REFUND_RECEIPT';
-  if (actionType === 'CREATE_EXPENSE' || actionType === 'CREATE_PURCHASE' || actionType === 'RECLASSIFY_SPEND') return 'FINANCE_VOUCHER';
+  if (actionType === 'CREATE_EXPENSE' || actionType === 'CREATE_PURCHASE' || actionType === 'CREATE_TRANSFER' || actionType === 'RECLASSIFY_SPEND') return 'FINANCE_VOUCHER';
   if (actionType === 'ADJUST_INVENTORY') return 'INVENTORY_MOVEMENT';
   if (actionType === 'CREATE_ROAST_BATCH') return 'PRODUCTION_MOVEMENT';
   if (actionType === 'UPDATE_ORDER_STATUS' || actionType === 'REVERSE_RECORD') return 'CHANGE_CONFIRMATION';

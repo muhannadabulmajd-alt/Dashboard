@@ -27,6 +27,7 @@ import {
   ResolvedReversalActionSchema,
   ResolvedRoastBatchActionSchema,
   ResolvedSpendReclassificationActionSchema,
+  ResolvedTransferActionSchema,
 } from './action-data';
 
 type Db = typeof prisma | Prisma.TransactionClient;
@@ -93,6 +94,10 @@ async function lockActionRows(tx: Prisma.TransactionClient, type: AiPendingActio
       const phone = normalizeIraqiPhone(input.newCustomer.phone);
       if (phone) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`customer-phone:${phone}`}))`;
     }
+    if (input.customerEnrichment?.phone) {
+      const phone = normalizeIraqiPhone(input.customerEnrichment.phone);
+      if (phone) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`customer-phone:${phone}`}))`;
+    }
     if (input.financeAccountId) await lockById(tx, 'FinanceAccount', input.financeAccountId);
     if (input.financeProviderId) await lockById(tx, 'Party', input.financeProviderId);
     const status = await managedListState(tx, 'orderStatus', input.status, ORDER_STATUSES);
@@ -126,6 +131,13 @@ async function lockActionRows(tx: Prisma.TransactionClient, type: AiPendingActio
     for (const line of input.lines ?? []) {
       if (line.inventoryItemId) await lockById(tx, 'InventoryItem', line.inventoryItemId);
       if (line.branchId) await lockById(tx, 'Branch', line.branchId);
+    }
+    return;
+  }
+  if (type === 'CREATE_TRANSFER') {
+    const input = ResolvedTransferActionSchema.parse(raw);
+    for (const id of [input.fromAccountId, input.toAccountId].sort()) {
+      await lockById(tx, 'FinanceAccount', id);
     }
     return;
   }
@@ -386,7 +398,22 @@ async function orderPreconditions(raw: unknown, db: Db) {
     input.customerExternalId
       ? db.customer.findUnique({
           where: { externalId: input.customerExternalId },
-          select: { id: true, externalId: true, isActive: true, normalizedPhone: true },
+          select: {
+            id: true,
+            externalId: true,
+            isActive: true,
+            nameEn: true,
+            nameAr: true,
+            phone: true,
+            normalizedPhone: true,
+            email: true,
+            governorate: true,
+            address1: true,
+            street: true,
+            notes: true,
+            campaignSource: true,
+            segment: true,
+          },
         })
       : Promise.resolve(null),
     input.financeAccountId
@@ -405,12 +432,32 @@ async function orderPreconditions(raw: unknown, db: Db) {
   const possibleNewCustomerDuplicates = newCustomerPhone
     ? await db.customer.findMany({
         where: { isActive: true, normalizedPhone: newCustomerPhone },
-        select: { id: true, externalId: true, normalizedPhone: true, isActive: true },
+        select: { id: true, externalId: true, nameEn: true, nameAr: true, normalizedPhone: true, isActive: true },
+        orderBy: { id: 'asc' },
+      })
+    : [];
+  const enrichmentPhone = normalizeIraqiPhone(input.customerEnrichment?.phone);
+  const possibleCustomerEnrichmentDuplicates = enrichmentPhone && customer
+    ? await db.customer.findMany({
+        where: { isActive: true, normalizedPhone: enrichmentPhone, id: { not: customer.id } },
+        select: { id: true, externalId: true, nameEn: true, nameAr: true, normalizedPhone: true, isActive: true },
         orderBy: { id: 'asc' },
       })
     : [];
   const automaticFinance = await automaticFinanceState(input, status.role ?? 'UNKNOWN', db);
-  return { products, customer, possibleNewCustomerDuplicates, account, provider, automaticFinance, status, channel, governorate, fulfillment };
+  return {
+    products,
+    customer,
+    possibleNewCustomerDuplicates,
+    possibleCustomerEnrichmentDuplicates,
+    account,
+    provider,
+    automaticFinance,
+    status,
+    channel,
+    governorate,
+    fulfillment,
+  };
 }
 
 async function expensePreconditions(raw: unknown, db: Db) {
@@ -477,6 +524,21 @@ async function purchasePreconditions(raw: unknown, db: Db) {
     }))),
   ]);
   return { item, supplier, account, branch, newSupplier, lines };
+}
+
+async function transferPreconditions(raw: unknown, db: Db) {
+  const input = ResolvedTransferActionSchema.parse(raw);
+  const [fromAccount, toAccount] = await Promise.all([
+    db.financeAccount.findUnique({
+      where: { id: input.fromAccountId },
+      select: { id: true, name: true, currency: true, type: true, isActive: true },
+    }),
+    db.financeAccount.findUnique({
+      where: { id: input.toAccountId },
+      select: { id: true, name: true, currency: true, type: true, isActive: true },
+    }),
+  ]);
+  return { fromAccount, toAccount };
 }
 
 async function customerUpdatePreconditions(raw: unknown, db: Db) {
@@ -821,6 +883,8 @@ export async function loadActionPreconditions(
       return expensePreconditions(raw, db);
     case 'CREATE_PURCHASE':
       return purchasePreconditions(raw, db);
+    case 'CREATE_TRANSFER':
+      return transferPreconditions(raw, db);
     case 'UPDATE_ORDER_STATUS':
       return orderStatusPreconditions(raw, db);
     case 'UPDATE_CUSTOMER':
@@ -945,13 +1009,25 @@ export function actionPreconditionIssues(
     if (!(state.governorate as ManagedListState | undefined)?.active) issues.push({ field: 'governorate', code: 'governorate_invalid' });
     if (!(state.fulfillment as ManagedListState | undefined)?.active) issues.push({ field: 'fulfillmentMethod', code: 'fulfillment_invalid' });
     if (!status?.active || status.role === 'UNKNOWN') issues.push({ field: 'status', code: 'status_invalid' });
-    const customer = state.customer as { isActive?: boolean } | null;
+    const customer = state.customer as { id?: string; isActive?: boolean; nameEn?: string | null; nameAr?: string | null } | null;
     if (input.customerExternalId && (!customer || !customer.isActive)) issues.push({ field: 'customerQuery', code: 'customer_inactive' });
     const possibleCustomers = Array.isArray(state.possibleNewCustomerDuplicates)
       ? state.possibleNewCustomerDuplicates as Array<{ id: string; nameEn: string | null; nameAr: string | null }>
       : [];
     if (input.newCustomer && compatibleCustomerMatches(input.newCustomer, possibleCustomers).length > 1) {
       issues.push({ field: 'newCustomer.phone', code: 'customer_match_ambiguous' });
+    }
+    if (input.customerEnrichment && customer && compatibleCustomerMatches(input.customerEnrichment, [customer]).length !== 1) {
+      issues.push({ field: 'newCustomer', code: 'customer_name_conflict' });
+    }
+    const enrichmentDuplicates = Array.isArray(state.possibleCustomerEnrichmentDuplicates)
+      ? state.possibleCustomerEnrichmentDuplicates as Array<{ id: string; nameEn: string | null; nameAr: string | null }>
+      : [];
+    if (input.customerEnrichment && compatibleCustomerMatches({
+      nameEn: input.customerEnrichment.nameEn ?? customer?.nameEn ?? undefined,
+      nameAr: input.customerEnrichment.nameAr ?? customer?.nameAr ?? undefined,
+    }, enrichmentDuplicates).length) {
+      issues.push({ field: 'newCustomer.phone', code: 'customer_duplicate' });
     }
     if (input.financeMode === 'PAID' || input.financeMode === 'PARTIAL') {
       const code = invalidAccount(state.account as Parameters<typeof invalidAccount>[0]);
@@ -1077,6 +1153,17 @@ export function actionPreconditionIssues(
         issues.push({ field: `lines.${index}.branchQuery`, code: 'inventory_branch_mismatch' });
       }
     });
+    return issues;
+  }
+  if (type === 'CREATE_TRANSFER') {
+    const input = ResolvedTransferActionSchema.parse(raw);
+    const fromCode = invalidAccount(state.fromAccount as Parameters<typeof invalidAccount>[0]);
+    const toCode = invalidAccount(state.toAccount as Parameters<typeof invalidAccount>[0]);
+    if (fromCode) issues.push({ field: 'fromAccountQuery', code: fromCode });
+    if (toCode) issues.push({ field: 'toAccountQuery', code: toCode });
+    if (input.fromAccountId === input.toAccountId) {
+      issues.push({ field: 'toAccountQuery', code: 'transfer_same_account' });
+    }
     return issues;
   }
   if (type === 'UPDATE_CUSTOMER') {

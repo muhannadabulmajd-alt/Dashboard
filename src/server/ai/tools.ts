@@ -9,6 +9,7 @@ import { DashboardFiltersSchema } from '@/lib/filters';
 import { DASHBOARD_TEMPLATES } from '@/lib/dashboard-builder';
 import { salesByDimension, stockRow, topProducts } from '@/lib/metrics';
 import { inferCustomerCandidate, recoverCustomerCandidate } from '@/lib/customer-candidate';
+import { compatibleCustomerMatches } from '@/server/commands/customers';
 import { getInventoryItems } from '@/server/db/repositories/inventory.repo';
 import { prisma } from '@/server/db/client';
 import { buildBranchScope } from '@/server/filters/where-builder';
@@ -46,6 +47,7 @@ import {
   PrepareReversalSchema,
   PrepareRoastBatchSchema,
   PrepareSpendReclassificationSchema,
+  PrepareTransferSchema,
   PreparePurchaseSchema,
   ProductBuyersSchema,
   SalesSummarySchema,
@@ -53,6 +55,7 @@ import {
 } from './schemas';
 import {
   ResolvedCustomerActionSchema,
+  ResolvedCustomerEnrichmentSchema,
   ResolvedCustomerUpdateActionSchema,
   ResolvedDashboardDraftActionSchema,
   ResolvedExpenseActionSchema,
@@ -68,6 +71,7 @@ import {
   ResolvedReversalActionSchema,
   ResolvedRoastBatchActionSchema,
   ResolvedSpendReclassificationActionSchema,
+  ResolvedTransferActionSchema,
 } from './action-data';
 import { assertAssistantToolAllowed } from './access';
 
@@ -197,6 +201,7 @@ async function actionResult(input: {
       product_inactive: ['A selected product is inactive.', 'أحد المنتجات المختارة غير فعال.'],
       stock_insufficient: ['There is not enough available stock for this order.', 'المخزون المتاح لا يكفي لهذا الطلب.'],
       customer_inactive: ['The selected customer is inactive.', 'العميل المختار غير فعال.'],
+      customer_name_conflict: ['The supplied customer name conflicts with the matched customer. No data was changed.', 'اسم العميل المرسل لا يطابق العميل المحدد. لم يتم تغيير أي بيانات.'],
       account_inactive: ['The selected finance account is unavailable.', 'الحساب المالي المختار غير متاح.'],
       provider_invalid: ['The selected payment provider is unavailable or not configured.', 'مزود الدفع المختار غير متاح أو غير مهيأ.'],
       status_invalid: ['The selected status is unavailable.', 'الحالة المختارة غير متاحة.'],
@@ -208,6 +213,8 @@ async function actionResult(input: {
       inventory_item_missing: ['The selected inventory item is unavailable.', 'مادة المخزون المختارة غير متاحة.'],
       supplier_invalid: ['The selected supplier is unavailable.', 'المورد المختار غير متاح.'],
       order_missing: ['The selected order no longer exists.', 'الطلب المختار لم يعد موجوداً.'],
+      account_invalid: ['The selected finance account is incompatible with this action.', 'الحساب المالي المختار غير متوافق مع هذا الإجراء.'],
+      transfer_same_account: ['The transfer source and destination accounts must be different.', 'يجب أن يختلف حساب التحويل المصدر عن الحساب المستلم.'],
     };
     const copy = messages[issue.code] ?? ['Atlas could not safely prepare this action.', 'تعذر على أطلس إعداد هذا الإجراء بأمان.'];
     return clarificationResult({
@@ -704,6 +711,9 @@ async function prepareOrder(raw: unknown, context: ToolContext): Promise<ToolExe
   let customerExternalId: string | null = null;
   let customerLabel = localized(context.locale, 'Walk-in / no customer', 'بيع مباشر / بدون عميل');
   let inferredNewCustomer: z.infer<typeof ResolvedCustomerActionSchema> | null = null;
+  let customerEnrichment: z.infer<typeof ResolvedCustomerEnrichmentSchema> | null = null;
+  type CustomerMatch = Extract<Awaited<ReturnType<typeof matchCustomer>>, { kind: 'exact' }>['value'];
+  let existingCustomer: CustomerMatch | null = null;
   if (input.customerQuery) {
     const match = await matchCustomer(input.customerQuery);
     if (match.kind === 'none') {
@@ -728,11 +738,19 @@ async function prepareOrder(raw: unknown, context: ToolContext): Promise<ToolExe
       );
     }
     if (match.kind === 'exact') {
-      customerExternalId = match.value.externalId;
-      customerLabel = context.locale === 'ar'
-        ? match.value.nameAr || match.value.nameEn || match.value.externalId || customerLabel
-        : match.value.nameEn || match.value.nameAr || match.value.externalId || customerLabel;
-      if (!customerExternalId) return noMatch(context.locale, 'customerQuery', localized(context.locale, 'customer ID', 'رقم العميل'));
+      const suppliedNamesAreCompatible = !input.newCustomer
+        || compatibleCustomerMatches({
+          nameEn: input.newCustomer.nameEn ?? undefined,
+          nameAr: input.newCustomer.nameAr ?? undefined,
+        }, [match.value]).length === 1;
+      if (suppliedNamesAreCompatible) {
+        customerExternalId = match.value.externalId;
+        existingCustomer = match.value;
+        customerLabel = context.locale === 'ar'
+          ? match.value.nameAr || match.value.nameEn || match.value.externalId || customerLabel
+          : match.value.nameEn || match.value.nameAr || match.value.externalId || customerLabel;
+        if (!customerExternalId) return noMatch(context.locale, 'customerQuery', localized(context.locale, 'customer ID', 'رقم العميل'));
+      }
     }
   }
 
@@ -754,10 +772,22 @@ async function prepareOrder(raw: unknown, context: ToolContext): Promise<ToolExe
         address1: input.newCustomer.address1 ?? recoveredExplicitCustomer?.address1,
       }
     : null;
+  const explicitCustomerEnrichment = input.newCustomer
+    ? ResolvedCustomerEnrichmentSchema.parse(Object.fromEntries(
+        Object.entries(input.newCustomer).filter(([, value]) => value !== null),
+      ))
+    : null;
+  if (customerExternalId && explicitCustomerEnrichment && Object.keys(explicitCustomerEnrichment).length) {
+    customerEnrichment = explicitCustomerEnrichment;
+  }
   const newCustomerInput = customerExternalId ? null : explicitNewCustomer ?? inferredNewCustomer;
   if (newCustomerInput) {
     const parsed = ResolvedCustomerActionSchema.safeParse(Object.fromEntries(
-      Object.entries({ ...newCustomerInput, segment: newCustomerInput.segment ?? 'NEW' }).map(([key, value]) => [key, value ?? undefined]),
+      Object.entries({
+        ...newCustomerInput,
+        governorate: newCustomerInput.governorate ?? governorate.code,
+        segment: newCustomerInput.segment ?? 'NEW',
+      }).map(([key, value]) => [key, value ?? undefined]),
     ));
     if (!parsed.success || (!parsed.data.nameEn && !parsed.data.nameAr && !parsed.data.phone)) {
       return missingResult(context.locale, [localized(context.locale, 'new customer name or phone', 'اسم العميل الجديد أو الهاتف')]);
@@ -769,14 +799,19 @@ async function prepareOrder(raw: unknown, context: ToolContext): Promise<ToolExe
     if (newCustomer.phone) {
       const existing = await matchCustomer(newCustomer.phone);
       if (existing.kind === 'exact') {
-        if (!existing.value.externalId) {
-          return noMatch(context.locale, 'newCustomer.phone', localized(context.locale, 'customer ID', 'رقم العميل'));
+        const compatible = compatibleCustomerMatches(newCustomer, [existing.value]).length === 1;
+        if (compatible) {
+          if (!existing.value.externalId) {
+            return noMatch(context.locale, 'newCustomer.phone', localized(context.locale, 'customer ID', 'رقم العميل'));
+          }
+          customerExternalId = existing.value.externalId;
+          existingCustomer = existing.value;
+          customerLabel = context.locale === 'ar'
+            ? existing.value.nameAr || existing.value.nameEn || existing.value.externalId
+            : existing.value.nameEn || existing.value.nameAr || existing.value.externalId;
+          customerEnrichment = explicitCustomerEnrichment;
+          newCustomer = null;
         }
-        customerExternalId = existing.value.externalId;
-        customerLabel = context.locale === 'ar'
-          ? existing.value.nameAr || existing.value.nameEn || existing.value.externalId
-          : existing.value.nameEn || existing.value.nameAr || existing.value.externalId;
-        newCustomer = null;
       }
       if (existing.kind === 'ambiguous') {
         return ambiguousMatch(
@@ -862,6 +897,7 @@ async function prepareOrder(raw: unknown, context: ToolContext): Promise<ToolExe
   const validated = ResolvedOrderActionSchema.parse({
     customerExternalId,
     newCustomer,
+    customerEnrichment,
     placedAt: placedAt.toISOString(),
     channel: channel.code,
     governorate: governorate.code,
@@ -889,6 +925,11 @@ async function prepareOrder(raw: unknown, context: ToolContext): Promise<ToolExe
     getListLabel('fulfillment', validated.fulfillmentMethod, context.locale),
     getListLabel('orderStatus', validated.status, context.locale),
   ]);
+  const customerDetails = newCustomer ?? (
+    existingCustomer
+      ? { ...existingCustomer, ...(customerEnrichment ?? {}) }
+      : null
+  );
   return actionResult({
     context,
     type: 'CREATE_ORDER',
@@ -901,16 +942,37 @@ async function prepareOrder(raw: unknown, context: ToolContext): Promise<ToolExe
       ...(newCustomer ? [{
         label: localized(context.locale, 'Customer setup', 'إعداد العميل'),
         value: localized(context.locale, 'Create new customer with this order', 'إنشاء عميل جديد مع هذا الطلب'),
-      }, {
+      }] : []),
+      ...(customerDetails ? [{
         label: localized(context.locale, 'Customer name', 'اسم العميل'),
-        value: newCustomer.nameAr || newCustomer.nameEn || '—',
+        value: context.locale === 'ar'
+          ? customerDetails.nameAr || customerDetails.nameEn || '—'
+          : customerDetails.nameEn || customerDetails.nameAr || '—',
       }, {
         label: localized(context.locale, 'Customer phone', 'هاتف العميل'),
-        value: newCustomer.phone || '—',
-      }, ...(newCustomer.address1 ? [{
+        value: customerDetails.phone || '—',
+      }, {
+        label: localized(context.locale, 'Customer email', 'بريد العميل'),
+        value: customerDetails.email || '—',
+      }, {
+        label: localized(context.locale, 'Customer governorate', 'محافظة العميل'),
+        value: customerDetails.governorate || '—',
+      }, {
         label: localized(context.locale, 'Customer address', 'عنوان العميل'),
-        value: newCustomer.address1,
-      }] : [])] : []),
+        value: customerDetails.address1 || '—',
+      }, {
+        label: localized(context.locale, 'Customer street / landmark', 'شارع العميل / أقرب نقطة'),
+        value: customerDetails.street || '—',
+      }, {
+        label: localized(context.locale, 'Customer notes', 'ملاحظات العميل'),
+        value: customerDetails.notes || '—',
+      }, {
+        label: localized(context.locale, 'Customer source', 'مصدر العميل'),
+        value: customerDetails.campaignSource || '—',
+      }, {
+        label: localized(context.locale, 'Customer segment', 'شريحة العميل'),
+        value: customerDetails.segment || '—',
+      }] : []),
       { label: localized(context.locale, 'Items', 'المواد'), value: previewLines.join(', ') },
       { label: localized(context.locale, 'Date', 'التاريخ'), value: input.placedAt },
       { label: localized(context.locale, 'Channel', 'القناة'), value: channelLabel },
@@ -1427,6 +1489,75 @@ async function preparePurchase(raw: unknown, context: ToolContext): Promise<Tool
         value: localized(context.locale, 'Create new supplier with this purchase', 'إنشاء مورد جديد مع عملية الشراء'),
       }] : []),
       { label: localized(context.locale, 'Payment', 'الدفع'), value: `${validated.paidMode}${validated.accountId ? ` · ${accountName}` : ''}` },
+    ],
+  });
+}
+
+async function prepareTransfer(raw: unknown, context: ToolContext): Promise<ToolExecution> {
+  const input = PrepareTransferSchema.parse(raw);
+  const date = dateValue(input.date) ?? context.now;
+  const currency = input.currency ?? 'IQD';
+  const missing: string[] = [];
+  if (input.date && !dateValue(input.date)) missing.push(localized(context.locale, 'valid transfer date', 'تاريخ تحويل صحيح'));
+  if (input.amount === null) missing.push(localized(context.locale, 'transfer amount', 'مبلغ التحويل'));
+  if (!input.toAccountQuery) missing.push(localized(context.locale, 'destination account', 'الحساب المستلم'));
+  if (currency === 'USD' && !input.rate) missing.push(localized(context.locale, 'USD conversion rate', 'سعر تحويل الدولار'));
+  if (missing.length) return missingResult(context.locale, missing);
+
+  const from = await resolveFinanceAccount(input.fromAccountQuery, context);
+  if (!from.ok) return from.result;
+  const to = await matchFinanceAccount(input.toAccountQuery as string);
+  if (to.kind === 'none') {
+    return noMatch(context.locale, 'toAccountQuery', localized(context.locale, 'destination account', 'الحساب المستلم'));
+  }
+  if (to.kind === 'ambiguous') {
+    return ambiguousMatch(
+      context.locale,
+      'toAccountQuery',
+      to.candidates,
+      (row) => `${String(row.name)} · ${String(row.currency)}`,
+      (row) => String(row.id),
+    );
+  }
+  if (from.value.id === to.value.id) {
+    return clarificationResult({
+      field: 'toAccountQuery',
+      message: localized(
+        context.locale,
+        'Choose a destination account different from the source account.',
+        'اختر حساباً مستلماً يختلف عن الحساب المصدر.',
+      ),
+    });
+  }
+
+  const description = input.description
+    || localized(context.locale, `Transfer from ${from.value.name} to ${to.value.name}`, `تحويل من ${from.value.name} إلى ${to.value.name}`);
+  const validated = ResolvedTransferActionSchema.parse({
+    date: date.toISOString(),
+    amount: input.amount,
+    currency,
+    rate: input.rate,
+    fromAccountId: from.value.id,
+    fromAccountName: from.value.name,
+    toAccountId: to.value.id,
+    toAccountName: to.value.name,
+    description,
+    reference: input.reference,
+  });
+  return actionResult({
+    context,
+    type: 'CREATE_TRANSFER',
+    extractedData: input,
+    validatedData: validated,
+    title: localized(context.locale, 'Transfer between accounts', 'تحويل بين الحسابات'),
+    summary: localized(context.locale, `Transfer funds to ${to.value.name}.`, `تحويل الأموال إلى ${to.value.name}.`),
+    fields: [
+      { label: localized(context.locale, 'Amount', 'المبلغ'), value: formatMoney(toMinor(validated.amount, validated.currency), validated.currency, context.locale) },
+      { label: localized(context.locale, 'From account', 'من حساب'), value: from.value.name },
+      { label: localized(context.locale, 'To account', 'إلى حساب'), value: to.value.name },
+      { label: localized(context.locale, 'Date', 'التاريخ'), value: validated.date.slice(0, 10) },
+      { label: localized(context.locale, 'Description', 'الوصف'), value: validated.description },
+      ...(validated.reference ? [{ label: localized(context.locale, 'Reference', 'المرجع'), value: validated.reference }] : []),
     ],
   });
 }
@@ -2146,6 +2277,7 @@ const TOOL_HANDLERS: Record<string, (raw: unknown, context: ToolContext) => Prom
   prepare_create_order: prepareOrder,
   prepare_create_expense: prepareExpense,
   prepare_create_purchase: preparePurchase,
+  prepare_create_transfer: prepareTransfer,
   prepare_update_order_status: prepareOrderStatus,
   prepare_update_customer: prepareCustomerUpdate,
   prepare_update_party: preparePartyUpdate,

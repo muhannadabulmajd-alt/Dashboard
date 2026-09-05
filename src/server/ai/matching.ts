@@ -14,7 +14,21 @@ export async function matchCustomer(query: string) {
   const normalizedQuery = normalizeAssistantText(query);
   const rows = await prisma.customer.findMany({
     where: { isActive: true },
-    select: { id: true, externalId: true, nameEn: true, nameAr: true, phone: true, normalizedPhone: true },
+    select: {
+      id: true,
+      externalId: true,
+      nameEn: true,
+      nameAr: true,
+      phone: true,
+      normalizedPhone: true,
+      email: true,
+      governorate: true,
+      address1: true,
+      street: true,
+      notes: true,
+      campaignSource: true,
+      segment: true,
+    },
     orderBy: { createdAt: 'desc' },
   });
   const exact = rows.filter((row) =>
