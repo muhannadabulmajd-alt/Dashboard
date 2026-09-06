@@ -13,6 +13,7 @@ import * as Metrics from '@/lib/metrics';
 import { can } from '@/lib/rbac';
 import { inferCustomerCandidate, recoverCustomerCandidate } from '@/lib/customer-candidate';
 import { buildDemandForecast } from '@/lib/ai-demand-forecast';
+import { partyPreviewFields } from '@/lib/ai-party-preview';
 import { compatibleCustomerMatches } from '@/server/commands/customers';
 import { getCustomers, getOrderHistory } from '@/server/db/repositories/customers.repo';
 import { getShipments } from '@/server/db/repositories/fulfillment.repo';
@@ -1955,8 +1956,12 @@ async function prepareExpense(raw: unknown, context: ToolContext): Promise<ToolE
         value: `${line.itemName} · ${treatmentForLine(line.itemType)} · ${formatQuantity(line.quantity, context.locale)} ${line.unit} × ${formatMoney(toMinor(line.unitCost, validated.currency), validated.currency, context.locale)}`,
       })) ?? [{ label: localized(context.locale, 'Category', 'الفئة'), value: validated.categoryType ?? '—' }]),
       { label: localized(context.locale, 'Account', 'الحساب'), value: account.value.name },
-      ...(party.value || party.newParty ? [{ label: localized(context.locale, 'Party', 'الجهة'), value: party.value?.name ?? party.newParty?.name ?? '—' }] : []),
-      ...(party.newParty ? [{ label: localized(context.locale, 'Party setup', 'إعداد الجهة'), value: localized(context.locale, 'Create new party with this record', 'إنشاء جهة جديدة مع هذا السجل') }] : []),
+      ...partyPreviewFields({
+        locale: context.locale,
+        subject: 'PARTY',
+        existing: party.value,
+        created: party.newParty,
+      }),
       { label: localized(context.locale, 'Date', 'التاريخ'), value: validated.date.slice(0, 10) },
     ],
   });
@@ -2081,11 +2086,12 @@ async function preparePurchase(raw: unknown, context: ToolContext): Promise<Tool
         { label: localized(context.locale, 'Quantity', 'الكمية'), value: `${formatQuantity(validated.quantity as number, context.locale)} ${validated.unit}` },
       ]),
       { label: localized(context.locale, 'Total', 'الإجمالي'), value: formatMoney(toMinor(totalAmount, validated.currency), validated.currency, context.locale) },
-      { label: localized(context.locale, 'Supplier', 'المورد'), value: supplier.value?.name ?? supplier.newParty?.name ?? '—' },
-      ...(supplier.newParty ? [{
-        label: localized(context.locale, 'Supplier setup', 'إعداد المورد'),
-        value: localized(context.locale, 'Create new supplier with this purchase', 'إنشاء مورد جديد مع عملية الشراء'),
-      }] : []),
+      ...partyPreviewFields({
+        locale: context.locale,
+        subject: 'SUPPLIER',
+        existing: supplier.value,
+        created: supplier.newParty,
+      }),
       { label: localized(context.locale, 'Payment', 'الدفع'), value: `${validated.paidMode}${validated.accountId ? ` · ${accountName}` : ''}` },
     ],
   });
