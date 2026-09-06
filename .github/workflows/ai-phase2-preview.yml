@@ -1,6 +1,8 @@
 name: AI Phase 2 Isolated Preview
 
 on:
+  pull_request:
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
     inputs:
       operation:
@@ -26,12 +28,14 @@ env:
 
 jobs:
   deploy:
-    if: github.event.inputs.operation == 'deploy'
+    if: >-
+      (github.event_name == 'pull_request' && github.head_ref == 'feat/ai-assistant-phase-2') ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.operation == 'deploy')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - name: Require the production-based feature branch
-        run: test "$GITHUB_REF_NAME" = "$FEATURE_BRANCH"
+        run: test "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "$FEATURE_BRANCH"
 
       - uses: actions/checkout@v4
 
@@ -194,7 +198,7 @@ jobs:
           retention-days: 7
 
   cleanup:
-    if: github.event.inputs.operation == 'cleanup'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.operation == 'cleanup'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
