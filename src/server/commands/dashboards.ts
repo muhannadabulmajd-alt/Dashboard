@@ -6,6 +6,7 @@ import { DashboardConfigSchema } from '@/lib/dashboard-builder';
 import { prisma } from '@/server/db/client';
 import type { CurrentUser } from '@/server/auth/session';
 import type { CommandCommitHook, CommandPreconditionHook } from '@/server/records/shared';
+import { COMMAND_TRANSACTION_OPTIONS } from './transaction-checkpoints';
 
 const DashboardDraftCommandSchema = z.object({
   name: z.string().trim().min(1),
@@ -49,5 +50,5 @@ export async function createDashboardDraftCommand(
     });
     await options.onCommitted?.(tx, { recordId: row.id, name: row.name });
     return { recordId: row.id, name: row.name };
-  });
+  }, COMMAND_TRANSACTION_OPTIONS);
 }

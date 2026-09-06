@@ -1475,7 +1475,7 @@ export async function recordInvoicePaymentFromInput(
     });
     await options.onCommitted?.(tx, result);
     return result;
-  });
+  }, COMMAND_TRANSACTION_OPTIONS);
 }
 
 export async function recordInvoicePayment(
@@ -1637,5 +1637,5 @@ export async function recordOrderRefundFromInput(
     });
     await options.onCommitted?.(tx, result);
     return result;
-  });
+  }, COMMAND_TRANSACTION_OPTIONS);
 }

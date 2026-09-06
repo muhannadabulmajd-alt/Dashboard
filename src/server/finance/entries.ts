@@ -8,6 +8,7 @@ import { FINANCE_TYPES, CURRENCIES, OBLIGATION_KINDS, EXPENSE_CATEGORY_TYPES } f
 import { toMinor, convertToIqd } from '@/lib/money';
 import { getUsdToIqd } from '@/server/settings';
 import type { TrustedCommandContext } from '@/server/commands/actor-context';
+import { COMMAND_TRANSACTION_OPTIONS } from '@/server/commands/transaction-checkpoints';
 import {
   requireCap,
   resolveCommandActor,
@@ -598,7 +599,7 @@ export async function reverseFinanceEntryFromInput(
     const result = { recordId: entry.id, reversalId: reversal.id, reason };
     await options.onCommitted?.(tx, result);
     return result;
-  });
+  }, COMMAND_TRANSACTION_OPTIONS);
 }
 
 function revalidateFinanceMutation() {
@@ -739,7 +740,7 @@ export async function settleFinanceEntryFromInput(
     });
     await options.onCommitted?.(tx, result);
     return result;
-  });
+  }, COMMAND_TRANSACTION_OPTIONS);
 }
 
 /** Record a (partial) payment that settles a payable/receivable obligation. */

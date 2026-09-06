@@ -6,6 +6,7 @@ import { normalizeIraqiPhone } from '@/lib/phone';
 import { prisma } from '@/server/db/client';
 import { generateCustomerExternalId } from '@/server/records/numbering';
 import type { CommandCommitHook, CommandPreconditionHook } from '@/server/records/shared';
+import { COMMAND_TRANSACTION_OPTIONS } from './transaction-checkpoints';
 
 export const CustomerCommandSchema = z.object({
   nameEn: z.string().trim().optional(),
@@ -313,7 +314,7 @@ export async function createCustomerCommand(
       : { ...await createCustomerInTransaction(tx, rawInput, context), reused: false as const };
     await options.onCommitted?.(tx, customer);
     return customer;
-  });
+  }, COMMAND_TRANSACTION_OPTIONS);
 }
 
 export async function updateCustomerCommand(
@@ -402,7 +403,7 @@ export async function updateCustomerCommand(
     });
     await options.onCommitted?.(tx, customer);
     return customer;
-  });
+  }, COMMAND_TRANSACTION_OPTIONS);
 }
 
 export function customerDisplayLabel(data: {

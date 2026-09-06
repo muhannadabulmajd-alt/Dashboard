@@ -9,6 +9,7 @@ import { decimalNumber } from '@/lib/decimal';
 import { syncActiveCost, recomputeProductsForItem } from '@/server/inventory/fifo';
 import { syncInventoryReceiptFinance } from '@/server/finance/sync';
 import type { TrustedCommandContext } from '@/server/commands/actor-context';
+import { COMMAND_TRANSACTION_OPTIONS } from '@/server/commands/transaction-checkpoints';
 import {
   requireCap,
   resolveCommandActor,
@@ -121,7 +122,7 @@ export async function adjustInventoryFromInput(
     });
     await options.onCommitted?.(tx, result);
     return result;
-  });
+  }, COMMAND_TRANSACTION_OPTIONS);
 }
 
 const schema = z.object({

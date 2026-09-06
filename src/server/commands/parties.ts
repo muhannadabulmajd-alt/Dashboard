@@ -6,6 +6,7 @@ import { normalizeIraqiPhone } from '@/lib/phone';
 import { prisma } from '@/server/db/client';
 import type { CommandCommitHook, CommandPreconditionHook } from '@/server/records/shared';
 import { normalizeCustomerName } from './customers';
+import { COMMAND_TRANSACTION_OPTIONS } from './transaction-checkpoints';
 
 export const PartyCommandSchema = z.object({
   name: z.string().trim().min(1),
@@ -161,7 +162,7 @@ export async function createPartyCommand(
         })();
     await options.onCommitted?.(tx, row);
     return row;
-  });
+  }, COMMAND_TRANSACTION_OPTIONS);
 }
 
 export async function updatePartyCommand(
@@ -201,5 +202,5 @@ export async function updatePartyCommand(
     });
     await options.onCommitted?.(tx, row);
     return row;
-  });
+  }, COMMAND_TRANSACTION_OPTIONS);
 }

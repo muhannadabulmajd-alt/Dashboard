@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { prisma } from '@/server/db/client';
 import type { TrustedCommandContext } from '@/server/commands/actor-context';
+import { COMMAND_TRANSACTION_OPTIONS } from '@/server/commands/transaction-checkpoints';
 import {
   requireCap,
   resolveCommandActor,
@@ -333,7 +334,7 @@ export async function reclassifyLedgerLineFromInput(
     };
     await options.onCommitted?.(tx, result);
     return result;
-  });
+  }, COMMAND_TRANSACTION_OPTIONS);
 }
 
 export async function reclassifyLedgerLine(

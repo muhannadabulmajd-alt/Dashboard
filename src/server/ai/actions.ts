@@ -1258,6 +1258,13 @@ export async function confirmPendingAction(input: {
     }
     const rawCode = error instanceof Error ? error.message.slice(0, 120) : 'execution_failed';
     const code = rawCode.split(':')[0];
+    console.error('AI pending action execution failed', {
+      debugId,
+      actionId: action.id,
+      actionType: action.type,
+      errorCode: code,
+      errorName: error instanceof Error ? error.name : 'UnknownError',
+    });
     if (STALE_EXECUTION_CODES.has(code)) {
       await markActionStale({
         actionId: action.id,

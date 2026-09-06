@@ -40,6 +40,7 @@ import { createTrustedCommandContext } from '@/server/commands/actor-context';
 import { prisma } from '@/server/db/client';
 import { createCentralRecordFromInput } from '@/server/finance/central-records';
 import { createOrderFromInput } from '@/server/records/orders';
+import { resetAiCapabilitiesForIntegration } from './fixtures/ai-phase2-database';
 
 const integrationEnabled = process.env.AI_PHASE2_INTEGRATION === '1';
 const describeIntegration = integrationEnabled ? describe.sequential : describe.skip;
@@ -281,6 +282,7 @@ describeIntegration('AI Assistant Phase 2 governed operations', { timeout: remot
 
   beforeAll(async () => {
     assertSafeIntegrationDatabase();
+    await resetAiCapabilitiesForIntegration();
     const branch = await prisma.branch.findFirstOrThrow({ where: { isActive: true }, orderBy: { createdAt: 'asc' } });
     branchId = branch.id;
     const [account, secondAccount] = await Promise.all([

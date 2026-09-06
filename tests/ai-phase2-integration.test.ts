@@ -31,6 +31,7 @@ import {
 } from '@/server/ai/action-data';
 import { createPendingAction } from '@/server/ai/pending';
 import { actionPreconditionIssues, loadActionPreconditions } from '@/server/ai/preconditions';
+import { resetAiCapabilitiesForIntegration } from './fixtures/ai-phase2-database';
 
 const integrationEnabled = process.env.AI_PHASE2_INTEGRATION === '1';
 const describeIntegration = integrationEnabled ? describe.sequential : describe.skip;
@@ -309,6 +310,7 @@ describeIntegration('AI Assistant Phase 2 database regressions', { timeout: remo
 
   beforeAll(async () => {
     assertSafeIntegrationDatabase();
+    await resetAiCapabilitiesForIntegration();
     const branches = await prisma.branch.findMany({ where: { isActive: true }, orderBy: { createdAt: 'asc' }, take: 2 });
     expect(branches.length).toBeGreaterThanOrEqual(2);
     branchId = branches[0].id;

@@ -8,6 +8,7 @@ import { prisma } from '@/server/db/client';
 import { decimalNumber } from '@/lib/decimal';
 import { syncActiveCost } from '@/server/inventory/fifo';
 import type { TrustedCommandContext } from '@/server/commands/actor-context';
+import { COMMAND_TRANSACTION_OPTIONS } from '@/server/commands/transaction-checkpoints';
 import {
   requireCap,
   audit,
@@ -209,7 +210,7 @@ export async function createRoastBatchFromInput(
     });
     await options.onCommitted?.(tx, result);
     return result;
-  });
+  }, COMMAND_TRANSACTION_OPTIONS);
 }
 
 function parse(fd: FormData) {
