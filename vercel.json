@@ -38,6 +38,6 @@
     { "path": "/api/reports/scheduled?kind=monthly", "schedule": "0 6 1 * *" },
     { "path": "/api/connectors/sync", "schedule": "0 3 * * *" },
     { "path": "/api/ai-assistant/cleanup", "schedule": "30 2 * * *" },
-    { "path": "/api/ai-assistant/automations", "schedule": "7 * * * *" }
+    { "path": "/api/ai-assistant/automations", "schedule": "7 3 * * *" }
   ]
 }
