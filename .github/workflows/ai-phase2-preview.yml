@@ -81,7 +81,6 @@ jobs:
           branch_name: ${{ env.NEON_BRANCH_NAME }}
           expires_at: ${{ steps.expiry.outputs.at }}
           prisma: true
-          suspend_timeout: 900
 
       - name: Mask isolated database values
         run: |
