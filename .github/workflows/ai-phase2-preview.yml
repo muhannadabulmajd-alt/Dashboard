@@ -1,0 +1,226 @@
+name: AI Phase 2 Isolated Preview
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Deploy or remove the isolated Phase 2 preview resources
+        required: true
+        default: deploy
+        type: choice
+        options:
+          - deploy
+          - cleanup
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-phase2-isolated-preview
+  cancel-in-progress: false
+
+env:
+  FEATURE_BRANCH: feat/ai-assistant-phase-2
+  NEON_BRANCH_NAME: preview-ai-phase2-pr-43
+  VERCEL_CLI_VERSION: 59.11.7
+
+jobs:
+  deploy:
+    if: github.event.inputs.operation == 'deploy'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Require the production-based feature branch
+        run: test "$GITHUB_REF_NAME" = "$FEATURE_BRANCH"
+
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Resolve the primary Neon branch and replace only the Phase 2 clone
+        id: neon-parent
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
+        run: |
+          response="$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer $NEON_API_KEY" \
+            "https://console.neon.tech/api/v2/projects/$NEON_PROJECT_ID/branches?limit=100")"
+          parent_id="$(jq -r '[.branches[]? | select(.primary == true)][0].id // empty' <<<"$response")"
+          test -n "$parent_id"
+          previous_id="$(jq -r --arg name "$NEON_BRANCH_NAME" '.branches[]? | select(.name == $name) | .id' <<<"$response" | head -n 1)"
+          if [ -n "$previous_id" ]; then
+            curl --fail --silent --show-error --request DELETE \
+              --header "Authorization: Bearer $NEON_API_KEY" \
+              "https://console.neon.tech/api/v2/projects/$NEON_PROJECT_ID/branches/$previous_id" >/dev/null
+          fi
+          echo "parent_id=$parent_id" >> "$GITHUB_OUTPUT"
+
+      - name: Set Neon branch expiry
+        id: expiry
+        run: echo "at=$(date -u --date '+7 days' +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
+
+      - name: Clone the current Neon primary branch
+        id: neon
+        uses: neondatabase/create-branch-action@v6
+        with:
+          project_id: ${{ vars.NEON_PROJECT_ID }}
+          api_key: ${{ secrets.NEON_API_KEY }}
+          parent_branch: ${{ steps.neon-parent.outputs.parent_id }}
+          branch_name: ${{ env.NEON_BRANCH_NAME }}
+          expires_at: ${{ steps.expiry.outputs.at }}
+          prisma: true
+          suspend_timeout: 300
+
+      - name: Mask isolated database values
+        run: |
+          echo "::add-mask::${{ steps.neon.outputs.db_url_pooled }}"
+          echo "::add-mask::${{ steps.neon.outputs.db_url }}"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client and apply additive migrations
+        env:
+          DATABASE_URL: ${{ steps.neon.outputs.db_url_pooled }}
+          DIRECT_URL: ${{ steps.neon.outputs.db_url }}
+        run: |
+          pnpm exec prisma generate
+          pnpm exec prisma migrate deploy
+
+      - name: Run transaction, rollback, parity, and reconciliation gates
+        env:
+          DATABASE_URL: ${{ steps.neon.outputs.db_url_pooled }}
+          DIRECT_URL: ${{ steps.neon.outputs.db_url }}
+          AI_PHASE2_DATABASE_ISOLATED: 'true'
+          AI_PHASE2_INTEGRATION: '1'
+          AUTH_SECRET: ai-phase2-github-actions-auth-secret
+        run: |
+          pnpm check:ai-evals
+          pnpm test:ai-phase2:integration
+          pnpm check:reconciliation
+
+      - name: Generate an ephemeral browser-test password
+        id: e2e-secret
+        run: |
+          password="$(openssl rand -hex 24)"
+          echo "::add-mask::$password"
+          echo "password=$password" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare the isolated preview actor
+        id: fixture
+        env:
+          DATABASE_URL: ${{ steps.neon.outputs.db_url_pooled }}
+          DIRECT_URL: ${{ steps.neon.outputs.db_url }}
+          AI_PHASE2_DATABASE_ISOLATED: 'true'
+          AI_PHASE2_EXPECTED_DB_HOST: ${{ steps.neon.outputs.db_host_pooled }}
+          AI_PHASE2_E2E_PASSWORD: ${{ steps.e2e-secret.outputs.password }}
+        run: |
+          fixture="$(pnpm exec tsx scripts/prepare-ai-phase2-preview.ts)"
+          echo "email=$(jq -r '.email' <<<"$fixture")" >> "$GITHUB_OUTPUT"
+          echo "product_sku=$(jq -r '.productSku' <<<"$fixture")" >> "$GITHUB_OUTPUT"
+
+      - name: Install the pinned Vercel CLI
+        run: npm install --global "vercel@$VERCEL_CLI_VERSION"
+
+      - name: Link the Dashboard project
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+        run: vercel pull --yes --environment=preview --git-branch="$FEATURE_BRANCH" --token="$VERCEL_TOKEN"
+
+      - name: Scope the isolated database only to the feature branch
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          DATABASE_URL: ${{ steps.neon.outputs.db_url_pooled }}
+          DIRECT_URL: ${{ steps.neon.outputs.db_url }}
+        run: |
+          printf '%s' "$DATABASE_URL" | vercel env add DATABASE_URL preview --git-branch "$FEATURE_BRANCH" --sensitive --force --yes --token="$VERCEL_TOKEN"
+          printf '%s' "$DIRECT_URL" | vercel env add DIRECT_URL preview --git-branch "$FEATURE_BRANCH" --sensitive --force --yes --token="$VERCEL_TOKEN"
+          vercel pull --yes --environment=preview --git-branch="$FEATURE_BRANCH" --token="$VERCEL_TOKEN"
+
+      - name: Force a fresh remote Preview build
+        id: preview
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          git checkout -B "$FEATURE_BRANCH" "$GITHUB_SHA"
+          deployment="$(vercel deploy --yes --force --target=preview --token="$VERCEL_TOKEN" --json \
+            --meta githubCommitRef="$FEATURE_BRANCH" \
+            --meta githubCommitSha="$GITHUB_SHA")"
+          url="$(jq -r '.url // empty' <<<"$deployment")"
+          test -n "$url"
+          if [[ "$url" != http* ]]; then url="https://$url"; fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Install Chromium for remote-only browser verification
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Verify the deployed AI journey
+        env:
+          AI_PHASE2_PREVIEW_URL: ${{ steps.preview.outputs.url }}
+          AI_PHASE2_E2E_EMAIL: ${{ steps.fixture.outputs.email }}
+          AI_PHASE2_E2E_PASSWORD: ${{ steps.e2e-secret.outputs.password }}
+          AI_PHASE2_E2E_PRODUCT_SKU: ${{ steps.fixture.outputs.product_sku }}
+          AI_PHASE2_E2E_RUN_ID: ${{ github.run_id }}
+        run: pnpm exec playwright test e2e/ai-phase2-preview.spec.ts
+
+      - name: Publish safe preview details
+        if: always() && steps.preview.outputs.url != ''
+        run: |
+          echo "### AI Phase 2 isolated preview" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Preview: ${{ steps.preview.outputs.url }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Neon branch: $NEON_BRANCH_NAME" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Neon expiry: ${{ steps.expiry.outputs.at }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Source: $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload browser evidence on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-phase2-preview-browser-evidence
+          path: |
+            playwright-report
+            test-results
+          if-no-files-found: warn
+          retention-days: 7
+
+  cleanup:
+    if: github.event.inputs.operation == 'cleanup'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Install the pinned Vercel CLI
+        run: npm install --global "vercel@$VERCEL_CLI_VERSION"
+
+      - name: Remove only the feature-branch database overrides
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+        run: |
+          vercel env rm DATABASE_URL preview "$FEATURE_BRANCH" --yes --project "$VERCEL_PROJECT_ID" --token="$VERCEL_TOKEN" || true
+          vercel env rm DIRECT_URL preview "$FEATURE_BRANCH" --yes --project "$VERCEL_PROJECT_ID" --token="$VERCEL_TOKEN" || true
+
+      - name: Delete only the named Phase 2 Neon clone
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
+        run: |
+          response="$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer $NEON_API_KEY" \
+            "https://console.neon.tech/api/v2/projects/$NEON_PROJECT_ID/branches?limit=100")"
+          branch_id="$(jq -r --arg name "$NEON_BRANCH_NAME" '.branches[]? | select(.name == $name) | .id' <<<"$response" | head -n 1)"
+          if [ -n "$branch_id" ]; then
+            curl --fail --silent --show-error --request DELETE \
+              --header "Authorization: Bearer $NEON_API_KEY" \
+              "https://console.neon.tech/api/v2/projects/$NEON_PROJECT_ID/branches/$branch_id" >/dev/null
+          fi
+          echo "Removed only $NEON_BRANCH_NAME and the $FEATURE_BRANCH database overrides." >> "$GITHUB_STEP_SUMMARY"
