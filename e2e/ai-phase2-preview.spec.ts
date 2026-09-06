@@ -1,13 +1,15 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
-const email = process.env.AI_PHASE2_E2E_EMAIL;
-const password = process.env.AI_PHASE2_E2E_PASSWORD;
-const productSku = process.env.AI_PHASE2_E2E_PRODUCT_SKU;
-const runId = process.env.AI_PHASE2_E2E_RUN_ID ?? 'manual';
-
-if (!email || !password || !productSku) {
-  throw new Error('Phase 2 preview credentials and product fixture are required.');
+function requiredEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} is required for the Phase 2 preview.`);
+  return value;
 }
+
+const email = requiredEnv('AI_PHASE2_E2E_EMAIL');
+const password = requiredEnv('AI_PHASE2_E2E_PASSWORD');
+const productSku = requiredEnv('AI_PHASE2_E2E_PRODUCT_SKU');
+const runId = process.env.AI_PHASE2_E2E_RUN_ID ?? 'manual';
 
 function fixturePhone(prefix: '780' | '781'): string {
   const suffix = runId.replace(/\D/g, '').slice(-7).padStart(7, prefix === '780' ? '1' : '2');
