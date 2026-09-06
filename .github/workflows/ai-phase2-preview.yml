@@ -170,11 +170,15 @@ jobs:
       - name: Verify the deployed AI journey
         env:
           AI_PHASE2_PREVIEW_URL: ${{ steps.preview.outputs.url }}
+          AI_PHASE2_VERCEL_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
           AI_PHASE2_E2E_EMAIL: ${{ steps.fixture.outputs.email }}
           AI_PHASE2_E2E_PASSWORD: ${{ steps.e2e-secret.outputs.password }}
           AI_PHASE2_E2E_PRODUCT_SKU: ${{ steps.fixture.outputs.product_sku }}
           AI_PHASE2_E2E_RUN_ID: ${{ github.run_id }}
-        run: pnpm exec playwright test e2e/ai-phase2-preview.spec.ts
+        run: |
+          test -n "$AI_PHASE2_VERCEL_BYPASS_SECRET"
+          echo "::add-mask::$AI_PHASE2_VERCEL_BYPASS_SECRET"
+          pnpm exec playwright test e2e/ai-phase2-preview.spec.ts
 
       - name: Publish safe preview details
         if: always() && steps.preview.outputs.url != ''

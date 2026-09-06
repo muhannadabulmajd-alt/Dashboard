@@ -8,6 +8,11 @@ type VercelConfig = {
 const config = JSON.parse(
   readFileSync(new URL('../vercel.json', import.meta.url), 'utf8'),
 ) as VercelConfig;
+const playwrightConfig = readFileSync(new URL('../playwright.config.ts', import.meta.url), 'utf8');
+const phase2Workflow = readFileSync(
+  new URL('../.github/workflows/ai-phase2-preview.yml', import.meta.url),
+  'utf8',
+);
 
 describe('Vercel deployment configuration', () => {
   it('keeps every cron at a Hobby-compatible daily-or-less frequency', () => {
@@ -18,5 +23,14 @@ describe('Vercel deployment configuration', () => {
       expect(fields[0], `${cron.path} minute`).toMatch(/^\d+$/);
       expect(fields[1], `${cron.path} hour`).toMatch(/^\d+$/);
     }
+  });
+
+  it('authenticates remote browser verification through deployment protection', () => {
+    expect(playwrightConfig).toContain("process.env.AI_PHASE2_VERCEL_BYPASS_SECRET");
+    expect(playwrightConfig).toContain("'x-vercel-protection-bypass': protectionBypass");
+    expect(playwrightConfig).toContain("'x-vercel-set-bypass-cookie': 'true'");
+    expect(phase2Workflow).toContain(
+      'AI_PHASE2_VERCEL_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}',
+    );
   });
 });
