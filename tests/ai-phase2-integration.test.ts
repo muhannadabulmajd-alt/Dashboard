@@ -34,6 +34,7 @@ import { actionPreconditionIssues, loadActionPreconditions } from '@/server/ai/p
 
 const integrationEnabled = process.env.AI_PHASE2_INTEGRATION === '1';
 const describeIntegration = integrationEnabled ? describe.sequential : describe.skip;
+const remoteIntegrationTimeout = 120_000;
 const runMarker = `phase2-${randomUUID().slice(0, 8)}`;
 const phoneSeed = randomInt(0, 9_000_000);
 let phoneCounter = 0;
@@ -297,7 +298,7 @@ async function expectReadyPdf(documentId: string | undefined, recordId: string):
   expect(document.checksum).toMatch(/^[a-f0-9]{64}$/);
 }
 
-describeIntegration('AI Assistant Phase 2 database regressions', () => {
+describeIntegration('AI Assistant Phase 2 database regressions', { timeout: remoteIntegrationTimeout }, () => {
   let branchId: string;
   let secondaryBranchId: string;
   let accountId: string;

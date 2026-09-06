@@ -1,5 +1,10 @@
 import 'server-only';
 
+export const COMMAND_TRANSACTION_OPTIONS = {
+  maxWait: 10_000,
+  timeout: 60_000,
+} as const;
+
 export const ORDER_CREATE_TRANSACTION_CHECKPOINTS = [
   'precondition',
   'order_number',

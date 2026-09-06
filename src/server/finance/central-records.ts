@@ -7,7 +7,10 @@ import { prisma } from '@/server/db/client';
 import { getCurrentUser } from '@/server/auth/session';
 import { getUsdToIqd } from '@/server/settings';
 import type { TrustedCommandContext } from '@/server/commands/actor-context';
-import type { CentralRecordTransactionCheckpoint } from '@/server/commands/transaction-checkpoints';
+import {
+  COMMAND_TRANSACTION_OPTIONS,
+  type CentralRecordTransactionCheckpoint,
+} from '@/server/commands/transaction-checkpoints';
 import {
   audit,
   optField,
@@ -1245,7 +1248,7 @@ export async function createCentralRecordCommand(
     stage = 'commit_hook';
     await options.onCommitted?.(tx, { recordId: newId });
     await options.afterStage?.(tx, 'commit_hook');
-    });
+    }, COMMAND_TRANSACTION_OPTIONS);
   } catch (error) {
     return {
       error: error instanceof Error && error.message === 'action_stale' ? 'action_stale' : 'invalid',

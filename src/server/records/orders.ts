@@ -31,7 +31,10 @@ import {
   type CustomerOrderEnrichmentInput,
 } from '@/server/commands/customers';
 import type { TrustedCommandContext } from '@/server/commands/actor-context';
-import type { OrderCreateTransactionCheckpoint } from '@/server/commands/transaction-checkpoints';
+import {
+  COMMAND_TRANSACTION_OPTIONS,
+  type OrderCreateTransactionCheckpoint,
+} from '@/server/commands/transaction-checkpoints';
 import {
   requireCap,
   resolveCommandActor,
@@ -661,10 +664,7 @@ export async function createOrderCommand(
       await options.onCommitted?.(tx, commandResult);
       await options.afterStage?.(tx, 'commit_hook');
       return { id: o.id, orderNumber: o.orderNumber };
-    }, {
-      maxWait: 10_000,
-      timeout: 60_000,
-    });
+    }, COMMAND_TRANSACTION_OPTIONS);
   } catch (error) {
     if (error instanceof Error && error.message === 'action_stale') return { error: 'action_stale' };
     const metadata = {
