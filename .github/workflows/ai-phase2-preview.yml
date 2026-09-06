@@ -23,7 +23,8 @@ concurrency:
 
 env:
   FEATURE_BRANCH: feat/ai-assistant-phase-2
-  NEON_BRANCH_NAME: preview-ai-phase2-pr-43
+  NEON_BRANCH_PREFIX: preview-ai-phase2-pr-43
+  NEON_BRANCH_NAME: preview-ai-phase2-pr-43-${{ github.run_id }}-${{ github.run_attempt }}
   VERCEL_CLI_VERSION: 59.11.7
 
 jobs:
@@ -48,7 +49,7 @@ jobs:
           node-version: 22
           cache: pnpm
 
-      - name: Resolve the primary Neon branch and replace only the Phase 2 clone
+      - name: Resolve the primary Neon branch
         id: neon-parent
         env:
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
@@ -59,12 +60,6 @@ jobs:
             "https://console.neon.tech/api/v2/projects/$NEON_PROJECT_ID/branches?limit=100")"
           parent_id="$(jq -r '[.branches[]? | select(.primary == true)][0].id // empty' <<<"$response")"
           test -n "$parent_id"
-          previous_id="$(jq -r --arg name "$NEON_BRANCH_NAME" '.branches[]? | select(.name == $name) | .id' <<<"$response" | head -n 1)"
-          if [ -n "$previous_id" ]; then
-            curl --fail --silent --show-error --request DELETE \
-              --header "Authorization: Bearer $NEON_API_KEY" \
-              "https://console.neon.tech/api/v2/projects/$NEON_PROJECT_ID/branches/$previous_id" >/dev/null
-          fi
           echo "parent_id=$parent_id" >> "$GITHUB_OUTPUT"
 
       - name: Set Neon branch expiry
@@ -223,7 +218,7 @@ jobs:
           vercel env rm AI_PHASE2_VERIFICATION_ENABLED preview "$FEATURE_BRANCH" --yes --project "$VERCEL_PROJECT_ID" --token="$VERCEL_TOKEN" || true
           vercel env rm AI_PHASE2_EXPECTED_DB_HOST preview "$FEATURE_BRANCH" --yes --project "$VERCEL_PROJECT_ID" --token="$VERCEL_TOKEN" || true
 
-      - name: Delete only the named Phase 2 Neon clone
+      - name: Delete only Phase 2 Neon clones
         env:
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
           NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
@@ -231,10 +226,13 @@ jobs:
           response="$(curl --fail --silent --show-error \
             --header "Authorization: Bearer $NEON_API_KEY" \
             "https://console.neon.tech/api/v2/projects/$NEON_PROJECT_ID/branches?limit=100")"
-          branch_id="$(jq -r --arg name "$NEON_BRANCH_NAME" '.branches[]? | select(.name == $name) | .id' <<<"$response" | head -n 1)"
-          if [ -n "$branch_id" ]; then
+          branch_ids="$(jq -r --arg prefix "$NEON_BRANCH_PREFIX" \
+            '.branches[]? | select(.name == $prefix or (.name | startswith($prefix + "-"))) | .id' \
+            <<<"$response")"
+          while IFS= read -r branch_id; do
+            [ -z "$branch_id" ] && continue
             curl --fail --silent --show-error --request DELETE \
               --header "Authorization: Bearer $NEON_API_KEY" \
               "https://console.neon.tech/api/v2/projects/$NEON_PROJECT_ID/branches/$branch_id" >/dev/null
-          fi
-          echo "Removed only $NEON_BRANCH_NAME and the $FEATURE_BRANCH database overrides." >> "$GITHUB_STEP_SUMMARY"
+          done <<<"$branch_ids"
+          echo "Removed only $NEON_BRANCH_PREFIX clones and the $FEATURE_BRANCH database overrides." >> "$GITHUB_STEP_SUMMARY"

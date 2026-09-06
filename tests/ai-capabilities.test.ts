@@ -4,7 +4,6 @@ import {
   AiCapabilityUpdateSchema,
   aiCapabilitiesForAction,
   aiCapabilityForTool,
-  type AiCapability,
 } from '@/lib/ai-capabilities';
 
 type Row = {
