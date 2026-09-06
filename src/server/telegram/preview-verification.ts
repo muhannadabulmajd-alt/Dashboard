@@ -219,7 +219,9 @@ export async function verifyTelegramPreview(input: {
         username: true,
       },
     });
-    if (!identity?.privateChatId) throw new Error('telegram_preview_linked_identity_missing');
+    if (!identity?.privateChatId || !identity.userId) {
+      throw new Error('telegram_preview_linked_identity_missing');
+    }
     const telegramUserId = Number(identity.telegramUserId);
     const privateChatId = Number(identity.privateChatId);
     if (!Number.isSafeInteger(telegramUserId) || !Number.isSafeInteger(privateChatId)) {
