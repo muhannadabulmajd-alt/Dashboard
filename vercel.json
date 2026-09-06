@@ -1,6 +1,11 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "prisma migrate deploy && pnpm check:reconciliation && next build",
+  "git": {
+    "deploymentEnabled": {
+      "feat/ai-assistant-phase-2": false
+    }
+  },
   "functions": {
     "src/app/api/queues/telegram-updates/route.ts": {
       "experimentalTriggers": [

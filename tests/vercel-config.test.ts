@@ -3,6 +3,9 @@ import { describe, expect, it } from 'vitest';
 
 type VercelConfig = {
   crons?: Array<{ path: string; schedule: string }>;
+  git?: {
+    deploymentEnabled?: boolean | Record<string, boolean>;
+  };
 };
 
 const config = JSON.parse(
@@ -23,6 +26,19 @@ const telegramPreviewRoute = readFileSync(
 );
 
 describe('Vercel deployment configuration', () => {
+  it('leaves automatic deployments enabled except for the workflow-owned Phase 2 branch', () => {
+    expect(config.git?.deploymentEnabled).toEqual({
+      'feat/ai-assistant-phase-2': false,
+    });
+  });
+
+  it('creates a unique expiring Neon clone for every isolated preview run', () => {
+    expect(phase2Workflow).toContain(
+      'NEON_BRANCH_NAME: preview-ai-phase2-pr-43-${{ github.run_id }}-${{ github.run_attempt }}',
+    );
+    expect(phase2Workflow).not.toContain('previous_id=');
+  });
+
   it('keeps every cron at a Hobby-compatible daily-or-less frequency', () => {
     expect(config.crons?.length).toBeGreaterThan(0);
     for (const cron of config.crons ?? []) {
