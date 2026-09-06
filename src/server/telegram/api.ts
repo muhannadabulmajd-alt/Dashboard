@@ -25,6 +25,13 @@ export type TelegramWebhookInfo = {
   allowed_updates?: string[];
 };
 
+export type TelegramFile = {
+  file_id: string;
+  file_unique_id: string;
+  file_size?: number;
+  file_path?: string;
+};
+
 export type InlineKeyboard = Array<Array<{ text: string; callback_data?: string; url?: string }>>;
 
 async function telegramRequest<T>(method: string, payload?: Record<string, unknown>): Promise<T> {
@@ -70,13 +77,85 @@ export function getTelegramWebhookInfo(): Promise<TelegramWebhookInfo> {
   return telegramRequest<TelegramWebhookInfo>('getWebhookInfo');
 }
 
+export function setTelegramWebhook(input: {
+  url: string;
+  secretToken: string;
+  maxConnections?: number;
+  allowedUpdates?: string[];
+}): Promise<boolean> {
+  return telegramRequest<boolean>('setWebhook', {
+    url: input.url,
+    secret_token: input.secretToken,
+    drop_pending_updates: false,
+    ...(input.maxConnections !== undefined ? { max_connections: input.maxConnections } : {}),
+    ...(input.allowedUpdates !== undefined ? { allowed_updates: input.allowedUpdates } : {}),
+  });
+}
+
+export function deleteTelegramWebhook(): Promise<boolean> {
+  return telegramRequest<boolean>('deleteWebhook', { drop_pending_updates: false });
+}
+
+export function getTelegramFile(fileId: string): Promise<TelegramFile> {
+  return telegramRequest<TelegramFile>('getFile', { file_id: fileId });
+}
+
+async function boundedResponseBytes(response: Response, maxBytes: number): Promise<Uint8Array> {
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error('telegram_file_body_missing');
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      throw new Error('attachment_too_large');
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+}
+
+export async function downloadTelegramFile(fileId: string, maxBytes: number): Promise<{
+  bytes: Uint8Array;
+  file: TelegramFile;
+}> {
+  const file = await getTelegramFile(fileId);
+  if (file.file_size && file.file_size > maxBytes) throw new Error('attachment_too_large');
+  if (!file.file_path || file.file_path.includes('..') || !/^[A-Za-z0-9_./-]+$/.test(file.file_path)) {
+    throw new Error('telegram_file_path_invalid');
+  }
+  const { token } = requireTelegramConfig();
+  const response = await fetch(`https://api.telegram.org/file/bot${token}/${file.file_path}`, {
+    method: 'GET',
+    cache: 'no-store',
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!response.ok) {
+    const error = new Error(`telegram_file_${response.status}`);
+    Object.assign(error, { retryable: response.status === 429 || response.status >= 500 });
+    throw error;
+  }
+  const declaredLength = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) throw new Error('attachment_too_large');
+  const bytes = await boundedResponseBytes(response, maxBytes);
+  return { bytes, file };
+}
+
 export async function registerTelegramWebhook(url: string): Promise<void> {
   const { webhookSecret } = requireTelegramConfig();
-  await telegramRequest<boolean>('setWebhook', {
+  await setTelegramWebhook({
     url,
-    secret_token: webhookSecret,
-    allowed_updates: ['message', 'callback_query'],
-    drop_pending_updates: false,
+    secretToken: webhookSecret,
+    allowedUpdates: ['message', 'callback_query'],
   });
   await telegramRequest<boolean>('setMyCommands', {
     commands: [

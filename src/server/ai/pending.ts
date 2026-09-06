@@ -1,6 +1,6 @@
 import 'server-only';
 import { randomUUID } from 'node:crypto';
-import type { AiPendingActionType, Prisma } from '@prisma/client';
+import type { AiPendingActionRisk, AiPendingActionType, Prisma } from '@prisma/client';
 import type { AiActionPreview } from '@/lib/ai-assistant';
 import { AI_PENDING_ACTION_MINUTES } from '@/lib/ai-assistant';
 import { prisma } from '@/server/db/client';
@@ -15,10 +15,12 @@ export async function createPendingAction(input: {
   userId: string;
   sourceMessageId?: string;
   type: AiPendingActionType;
+  risk?: AiPendingActionRisk;
+  confirmationChallenge?: string;
   extractedData: Prisma.InputJsonValue;
   validatedData: Prisma.InputJsonValue;
   preconditions: unknown;
-  preview: Omit<AiActionPreview, 'id' | 'expiresAt' | 'status'>;
+  preview: Omit<AiActionPreview, 'id' | 'expiresAt' | 'status' | 'risk'>;
 }) {
   const expiresAt = pendingActionExpiry();
   return prisma.$transaction(async (tx) => {
@@ -51,6 +53,8 @@ export async function createPendingAction(input: {
         userId: input.userId,
         sourceMessageId: input.sourceMessageId,
         type: input.type,
+        risk: input.risk ?? 'MEDIUM',
+        confirmationChallenge: input.confirmationChallenge,
         extractedData: input.extractedData,
         validatedData: input.validatedData,
         missingFields: [],
@@ -79,6 +83,7 @@ export async function createPendingAction(input: {
       clientPreview: {
         ...input.preview,
         id: action.id,
+        risk: action.risk,
         expiresAt: expiresAt.toISOString(),
         status: action.status,
       } satisfies AiActionPreview,

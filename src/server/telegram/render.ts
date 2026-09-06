@@ -65,7 +65,8 @@ export const TELEGRAM_QUICK_PROMPTS: Record<string, { ar: string; en: string }> 
 export type TelegramCallbackAction =
   | { type: 'quick'; key: string }
   | { type: 'choice'; messageId: string; index: number }
-  | { type: 'action'; actionId: string; command: 'confirm' | 'cancel' };
+  | { type: 'action'; actionId: string; command: 'confirm' | 'high-confirm' | 'cancel' }
+  | { type: 'delivery-replay' };
 
 export function parseTelegramCallback(value: string | undefined): TelegramCallbackAction | null {
   if (!value) return null;
@@ -74,10 +75,26 @@ export function parseTelegramCallback(value: string | undefined): TelegramCallba
   if (prefix === 'c' && id && /^\d+$/.test(tail ?? '')) {
     return { type: 'choice', messageId: id, index: Number(tail) };
   }
-  if (prefix === 'a' && id && (tail === 'c' || tail === 'x')) {
-    return { type: 'action', actionId: id, command: tail === 'c' ? 'confirm' : 'cancel' };
+  if (prefix === 'a' && id && (tail === 'c' || tail === 'h' || tail === 'x')) {
+    return {
+      type: 'action',
+      actionId: id,
+      command: tail === 'c' ? 'confirm' : tail === 'h' ? 'high-confirm' : 'cancel',
+    };
   }
+  if (prefix === 'd' && id === 'r' && !tail) return { type: 'delivery-replay' };
   return null;
+}
+
+export function statusKeyboard(locale: 'ar' | 'en', retryable: number): InlineKeyboard {
+  const keyboard = quickActionKeyboard(locale);
+  if (retryable > 0) {
+    keyboard.push([{
+      text: locale === 'ar' ? `إعادة محاولة التسليم (${retryable})` : `Retry delivery (${retryable})`,
+      callback_data: 'd:r',
+    }]);
+  }
+  return keyboard;
 }
 
 export function renderAssistantEvents(
@@ -109,6 +126,12 @@ export function renderAssistantEvents(
       if (card.href) {
         keyboard.push([{ text: input.locale === 'ar' ? 'فتح التفاصيل' : 'Open details', url: atlasUrl(input.origin, input.locale, card.href) }]);
       }
+      if (card.downloads?.length) {
+        keyboard.push(card.downloads.slice(0, 3).map((download) => ({
+          text: `${input.locale === 'ar' ? 'تنزيل' : 'Download'} ${download.format}`,
+          url: new URL(download.href, input.origin).toString(),
+        })));
+      }
       sections.push(lines.join('\n'));
     }
 
@@ -139,9 +162,20 @@ export function renderAssistantEvents(
 
     if (event.type === 'action_result') {
       sections.push(event.message);
+      if (event.requiresSecondConfirmation && event.confirmationChallenge) {
+        keyboard.push([
+          {
+            text: `${input.locale === 'ar' ? 'تأكيد' : 'Confirm'} ${clean(event.confirmationChallenge)}`.slice(0, 60),
+            callback_data: `a:${event.actionId}:h`,
+          },
+          { text: input.locale === 'ar' ? 'إلغاء' : 'Cancel', callback_data: `a:${event.actionId}:x` },
+        ]);
+        continue;
+      }
       const links: InlineKeyboard[number] = [];
       if (event.href) links.push({ text: input.locale === 'ar' ? 'فتح السجل' : 'Open record', url: atlasUrl(input.origin, input.locale, event.href) });
       if (event.invoiceHref) links.push({ text: input.locale === 'ar' ? 'فتح الفاتورة' : 'Open invoice', url: atlasUrl(input.origin, input.locale, event.invoiceHref) });
+      if (event.documentHref) links.push({ text: input.locale === 'ar' ? 'تنزيل PDF' : 'Download PDF', url: atlasUrl(input.origin, input.locale, event.documentHref) });
       if (links.length) keyboard.push(links);
     }
 

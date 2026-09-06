@@ -9,6 +9,7 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:ai-phase2:integration": "vitest run --no-file-parallelism tests/ai-phase2-integration.test.ts tests/ai-phase2-operations-integration.test.ts",
     "test:watch": "vitest",
     "check:reconciliation": "tsx scripts/check-reconciliation.ts",
     "check:translations": "tsx scripts/check-translations.ts",
@@ -51,6 +52,7 @@
   },
   "devDependencies": {
     "@faker-js/faker": "^10.4.0",
+    "@playwright/test": "1.63.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/papaparse": "^5.5.2",

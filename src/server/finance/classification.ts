@@ -1,8 +1,16 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { z } from 'zod';
 import { prisma } from '@/server/db/client';
-import { requireCap } from '@/server/records/shared';
+import type { TrustedCommandContext } from '@/server/commands/actor-context';
+import { COMMAND_TRANSACTION_OPTIONS } from '@/server/commands/transaction-checkpoints';
+import {
+  requireCap,
+  resolveCommandActor,
+  type CommandCommitHook,
+  type CommandPreconditionHook,
+} from '@/server/records/shared';
 import { syncActiveCost } from '@/server/inventory/fifo';
 import { syncAllocatedAssetTotals } from '@/server/finance/asset-allocations';
 import {
@@ -12,28 +20,49 @@ import {
 
 const VALID_TREATMENTS = new Set(['CAPEX', 'INVENTORY', 'OPEX', 'REVIEW']);
 
+const SpendReclassificationCommandSchema = z.object({
+  entryId: z.string().min(1),
+  lineId: z.string().min(1),
+  spendTreatment: z.enum(['CAPEX', 'INVENTORY', 'OPEX', 'REVIEW']),
+  classificationNote: z.string().trim().min(3),
+  fixedAssetId: z.string().min(1).nullish(),
+  inventoryItemId: z.string().min(1).nullish(),
+}).strict();
+
+export type SpendReclassificationCommandInput = z.input<
+  typeof SpendReclassificationCommandSchema
+>;
+
 function optionalId(formData: FormData, name: string): string | null {
   const value = String(formData.get(name) ?? '').trim();
   return value || null;
 }
 
-export async function reclassifyLedgerLine(
-  entryId: string,
-  lineId: string,
-  formData: FormData,
-): Promise<void> {
-  const user = await requireCap('manage:finance');
+export async function reclassifyLedgerLineFromInput(
+  rawInput: SpendReclassificationCommandInput,
+  options: {
+    actorContext?: TrustedCommandContext;
+    precondition?: CommandPreconditionHook;
+    onCommitted?: CommandCommitHook<{
+      recordId: string;
+      entryId: string;
+      treatment: 'CAPEX' | 'INVENTORY' | 'OPEX' | 'REVIEW';
+    }>;
+  } = {},
+) {
+  const user = await resolveCommandActor('manage:finance', options.actorContext);
   if (!user || (user.role !== 'OWNER' && user.role !== 'ADMIN')) {
     throw new Error('forbidden');
   }
-  const treatment = String(formData.get('spendTreatment') ?? '');
-  const note = String(formData.get('classificationNote') ?? '').trim();
-  const requestedAssetId = optionalId(formData, 'fixedAssetId');
-  const requestedInventoryItemId = optionalId(formData, 'inventoryItemId');
-  if (!VALID_TREATMENTS.has(treatment) || !note) throw new Error('invalid');
+  const input = SpendReclassificationCommandSchema.parse(rawInput);
+  const { entryId, lineId, spendTreatment: treatment } = input;
+  const note = input.classificationNote;
+  const requestedAssetId = input.fixedAssetId ?? null;
+  const requestedInventoryItemId = input.inventoryItemId ?? null;
   const touchedInventoryItemIds = new Set<string>();
 
-  await prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async (tx) => {
+    await options.precondition?.(tx);
     const before = await tx.ledgerEntryLine.findFirst({
       where: { id: lineId, financeEntryId: entryId },
       include: {
@@ -298,6 +327,31 @@ export async function reclassifyLedgerLine(
     for (const inventoryItemId of touchedInventoryItemIds) {
       await syncActiveCost(inventoryItemId, tx);
     }
+    const result = {
+      recordId: lineId,
+      entryId,
+      treatment,
+    };
+    await options.onCommitted?.(tx, result);
+    return result;
+  }, COMMAND_TRANSACTION_OPTIONS);
+}
+
+export async function reclassifyLedgerLine(
+  entryId: string,
+  lineId: string,
+  formData: FormData,
+): Promise<void> {
+  const treatment = String(formData.get('spendTreatment') ?? '');
+  const note = String(formData.get('classificationNote') ?? '').trim();
+  if (!VALID_TREATMENTS.has(treatment) || !note) throw new Error('invalid');
+  await reclassifyLedgerLineFromInput({
+    entryId,
+    lineId,
+    spendTreatment: treatment as 'CAPEX' | 'INVENTORY' | 'OPEX' | 'REVIEW',
+    classificationNote: note,
+    fixedAssetId: optionalId(formData, 'fixedAssetId'),
+    inventoryItemId: optionalId(formData, 'inventoryItemId'),
   });
 
   revalidatePath('/[locale]/(dashboard)/finance', 'page');

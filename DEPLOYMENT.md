@@ -66,7 +66,7 @@ Once you're in, you can **delete `ADMIN_PASSWORD`** from Vercel to turn the env-
 
 ## 6. Optional extras
 
-- **Scheduled report/connector crons** are declared in `vercel.json` (all run at most once/day, so they work on Vercel's free Hobby plan). They authenticate with `CRON_SECRET`.
+- **Scheduled report, connector, cleanup, and AI automation crons** are declared in `vercel.json` (all run at most once/day, so they work on Vercel's free Hobby plan). The AI automation runner checks due work daily at 03:07 UTC (06:07 Baghdad). They authenticate with `CRON_SECRET`.
 - **Emailed reports:** set `RESEND_API_KEY` + a verified `REPORT_FROM` domain; otherwise reports generate but only log.
 - **Connectors:** configure the credentialed HTTP-CSV connector at **/admin/connectors**; tokens are encrypted with `ENCRYPTION_KEY`.
 - **Atlas AI Assistant:** add the five AI variables above separately to Vercel Preview and Production. Chats remain private in Atlas, expire after the configured retention period, and OpenAI requests use `store: false`.

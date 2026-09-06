@@ -1,13 +1,19 @@
 import { Bot, ShieldCheck } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
 import { AssistantWorkspace } from '@/components/ai-assistant/AssistantWorkspace';
+import { AutomationPreferences } from '@/components/ai-assistant/AutomationPreferences';
+import { CapabilityControls } from '@/components/ai-assistant/CapabilityControls';
 import { Card, CardContent, PageHeader } from '@/components/ui/primitives';
 import { getAiAssistantConfig } from '@/server/ai/config';
+import { getAiAutomationPreferences } from '@/server/ai/automations';
+import { getUserAiDeliveryHealth } from '@/server/ai/deliveries';
+import { getAiCapabilityStates } from '@/server/ai/capabilities';
 import { prisma } from '@/server/db/client';
 import { getPageContext } from '@/server/page-context';
 import { getOrderCatalog } from '@/server/records/order-catalog';
 import { getListOptions } from '@/server/lists/resolver';
 import { getOrderOperationalDefaults } from '@/server/records/order-defaults';
+import { resolveAiPageContext } from '@/lib/ai-page-context';
 
 export default async function AiAssistantPage({
   params,
@@ -16,10 +22,44 @@ export default async function AiAssistantPage({
   params: Promise<{ locale: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { locale, user } = await getPageContext(params, searchParams, 'use:ai-assistant');
+  const resolvedSearchParams = await searchParams;
+  const { locale, user } = await getPageContext(params, Promise.resolve(resolvedSearchParams), 'use:ai-assistant');
   const t = await getTranslations('aiAssistant');
   const config = getAiAssistantConfig();
   const available = config.enabled && config.apiKeyConfigured;
+  const rawPageContext = Array.isArray(resolvedSearchParams.context)
+    ? resolvedSearchParams.context[0]
+    : resolvedSearchParams.context;
+  const pageContext = resolveAiPageContext(rawPageContext);
+  const automationStatePromise = available
+    ? Promise.all([
+      getAiAutomationPreferences(user.id),
+      prisma.telegramIdentity.findFirst({
+        where: { userId: user.id, status: 'ACTIVE', privateChatId: { not: null } },
+        select: { id: true },
+      }),
+      getUserAiDeliveryHealth(user.id),
+    ]).then(([preferences, telegramIdentity, health]) => ({
+      preferences,
+      telegramLinked: Boolean(telegramIdentity),
+      health,
+    }))
+    : Promise.resolve({
+      preferences: [],
+      telegramLinked: false,
+      health: {
+        pendingDocuments: 0,
+        failedDocuments: 0,
+        pendingReports: 0,
+        failedReports: 0,
+        failedAutomations: 0,
+        enabledAutomations: 0,
+        retryable: 0,
+      },
+    });
+  const capabilityStatesPromise = available && user.role === 'OWNER'
+    ? getAiCapabilityStates()
+    : Promise.resolve([]);
   const [rows, catalog, customers, channels, governorates, fulfillment, statuses, defaults] = available ? await Promise.all([prisma.aiConversation.findMany({
     where: { userId: user.id, status: 'ACTIVE', expiresAt: { gt: new Date() } },
     select: {
@@ -57,6 +97,10 @@ export default async function AiAssistantPage({
   getListOptions('orderStatus', locale),
   getOrderOperationalDefaults(),
   ]) : [[], [], [], [], [], [], [], await getOrderOperationalDefaults()];
+  const [automationState, capabilityStates] = await Promise.all([
+    automationStatePromise,
+    capabilityStatesPromise,
+  ]);
 
   return (
     <>
@@ -72,33 +116,48 @@ export default async function AiAssistantPage({
         )}
       />
       {available ? (
-        <AssistantWorkspace
-          locale={locale}
-          retentionDays={config.historyRetentionDays}
-          initialConversations={rows.map((row) => ({
-            id: row.id,
-            title: row.title,
-            locale: row.locale,
-            channel: row.channel,
-            lastMessageAt: row.lastMessageAt.toISOString(),
-            messageCount: row._count.messages,
-          }))}
-          quickOrder={{
-            catalog,
-            customers: customers.map((customer) => ({
-              externalId: customer.externalId!,
-              label: `${locale === 'ar' ? customer.nameAr || customer.nameEn || customer.phone || customer.externalId : customer.nameEn || customer.nameAr || customer.phone || customer.externalId} (${customer.externalId})`,
-              phone: customer.phone,
-              governorate: customer.governorate,
-              recentOrder: customer.orders[0] ?? null,
-            })),
-            channelOptions: channels,
-            governorateOptions: governorates,
-            fulfillmentOptions: fulfillment,
-            statusOptions: statuses,
-            defaults,
-          }}
-        />
+        <>
+          {user.role === 'OWNER' ? <CapabilityControls initialCapabilities={capabilityStates} /> : null}
+          <AutomationPreferences
+            locale={locale}
+            initialPreferences={automationState.preferences.map((preference) => ({
+              ...preference,
+              nextRunAt: preference.nextRunAt?.toISOString() ?? null,
+              lastRunAt: preference.lastRunAt?.toISOString() ?? null,
+              updatedAt: preference.updatedAt.toISOString(),
+            }))}
+            initialHealth={automationState.health}
+            initialTelegramLinked={automationState.telegramLinked}
+          />
+          <AssistantWorkspace
+            locale={locale}
+            pageContext={pageContext ?? undefined}
+            retentionDays={config.historyRetentionDays}
+            initialConversations={rows.map((row) => ({
+              id: row.id,
+              title: row.title,
+              locale: row.locale,
+              channel: row.channel,
+              lastMessageAt: row.lastMessageAt.toISOString(),
+              messageCount: row._count.messages,
+            }))}
+            quickOrder={{
+              catalog,
+              customers: customers.map((customer) => ({
+                externalId: customer.externalId!,
+                label: `${locale === 'ar' ? customer.nameAr || customer.nameEn || customer.phone || customer.externalId : customer.nameEn || customer.nameAr || customer.phone || customer.externalId} (${customer.externalId})`,
+                phone: customer.phone,
+                governorate: customer.governorate,
+                recentOrder: customer.orders[0] ?? null,
+              })),
+              channelOptions: channels,
+              governorateOptions: governorates,
+              fulfillmentOptions: fulfillment,
+              statusOptions: statuses,
+              defaults,
+            }}
+          />
+        </>
       ) : (
         <Card variant="surface">
           <CardContent className="flex min-h-72 flex-col items-center justify-center text-center">

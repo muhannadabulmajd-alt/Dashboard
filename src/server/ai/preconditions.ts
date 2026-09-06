@@ -1,19 +1,33 @@
 import 'server-only';
 import type { AiPendingActionType, Prisma } from '@prisma/client';
+import { z } from 'zod';
 import { normalizeIraqiPhone } from '@/lib/phone';
 import { decimalNumber } from '@/lib/decimal';
+import { toMinor } from '@/lib/money';
 import { CHANNELS, FULFILLMENT_METHODS, GOVERNORATES, ORDER_STATUSES } from '@/lib/enums';
 import { effectivePrice } from '@/lib/metrics/pricing';
 import { orderStatusRole, type OrderMetricRole } from '@/lib/metrics/status';
 import { invoicePaymentSnapshot } from '@/lib/invoice';
 import { prisma } from '@/server/db/client';
+import { compatibleCustomerMatches, normalizeCustomerName } from '@/server/commands/customers';
 import {
   ACTION_DATA_SCHEMAS,
   ResolvedCustomerActionSchema,
+  ResolvedCustomerUpdateActionSchema,
+  ResolvedDashboardDraftActionSchema,
   ResolvedExpenseActionSchema,
+  ResolvedInventoryAdjustmentActionSchema,
   ResolvedOrderActionSchema,
   ResolvedOrderStatusActionSchema,
+  ResolvedPartyActionSchema,
+  ResolvedPartyUpdateActionSchema,
+  ResolvedPaymentActionSchema,
   ResolvedPurchaseActionSchema,
+  ResolvedRefundActionSchema,
+  ResolvedReversalActionSchema,
+  ResolvedRoastBatchActionSchema,
+  ResolvedSpendReclassificationActionSchema,
+  ResolvedTransferActionSchema,
 } from './action-data';
 
 type Db = typeof prisma | Prisma.TransactionClient;
@@ -44,10 +58,12 @@ async function managedListState(
   };
 }
 
-async function lockById(tx: Prisma.TransactionClient, table: 'Product' | 'Customer' | 'FinanceAccount' | 'Party' | 'Branch' | 'InventoryItem' | 'Order', id: string) {
+async function lockById(tx: Prisma.TransactionClient, table: 'Product' | 'Customer' | 'FinanceAccount' | 'FinanceEntry' | 'LedgerEntryLine' | 'Party' | 'Branch' | 'InventoryItem' | 'Order', id: string) {
   if (table === 'Product') await tx.$queryRaw`SELECT "id" FROM "Product" WHERE "id" = ${id} FOR UPDATE`;
   if (table === 'Customer') await tx.$queryRaw`SELECT "id" FROM "Customer" WHERE "id" = ${id} FOR UPDATE`;
   if (table === 'FinanceAccount') await tx.$queryRaw`SELECT "id" FROM "FinanceAccount" WHERE "id" = ${id} FOR UPDATE`;
+  if (table === 'FinanceEntry') await tx.$queryRaw`SELECT "id" FROM "FinanceEntry" WHERE "id" = ${id} FOR UPDATE`;
+  if (table === 'LedgerEntryLine') await tx.$queryRaw`SELECT "id" FROM "LedgerEntryLine" WHERE "id" = ${id} FOR UPDATE`;
   if (table === 'Party') await tx.$queryRaw`SELECT "id" FROM "Party" WHERE "id" = ${id} FOR UPDATE`;
   if (table === 'Branch') await tx.$queryRaw`SELECT "id" FROM "Branch" WHERE "id" = ${id} FOR UPDATE`;
   if (table === 'InventoryItem') await tx.$queryRaw`SELECT "id" FROM "InventoryItem" WHERE "id" = ${id} FOR UPDATE`;
@@ -78,6 +94,10 @@ async function lockActionRows(tx: Prisma.TransactionClient, type: AiPendingActio
       const phone = normalizeIraqiPhone(input.newCustomer.phone);
       if (phone) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`customer-phone:${phone}`}))`;
     }
+    if (input.customerEnrichment?.phone) {
+      const phone = normalizeIraqiPhone(input.customerEnrichment.phone);
+      if (phone) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`customer-phone:${phone}`}))`;
+    }
     if (input.financeAccountId) await lockById(tx, 'FinanceAccount', input.financeAccountId);
     if (input.financeProviderId) await lockById(tx, 'Party', input.financeProviderId);
     const status = await managedListState(tx, 'orderStatus', input.status, ORDER_STATUSES);
@@ -93,17 +113,89 @@ async function lockActionRows(tx: Prisma.TransactionClient, type: AiPendingActio
     const input = ResolvedExpenseActionSchema.parse(raw);
     await lockById(tx, 'FinanceAccount', input.accountId);
     if (input.partyId) await lockById(tx, 'Party', input.partyId);
+    if (input.newParty) await lockNewParty(tx, input.newParty);
     if (input.branchId) await lockById(tx, 'Branch', input.branchId);
+    for (const line of input.lines ?? []) {
+      if (line.inventoryItemId) await lockById(tx, 'InventoryItem', line.inventoryItemId);
+      if (line.branchId) await lockById(tx, 'Branch', line.branchId);
+    }
     return;
   }
   if (type === 'CREATE_PURCHASE') {
     const input = ResolvedPurchaseActionSchema.parse(raw);
     if (input.inventoryItemId) await lockById(tx, 'InventoryItem', input.inventoryItemId);
-    await lockById(tx, 'Party', input.supplierId);
+    if (input.supplierId) await lockById(tx, 'Party', input.supplierId);
+    if (input.newSupplier) await lockNewParty(tx, input.newSupplier);
     if (input.accountId) await lockById(tx, 'FinanceAccount', input.accountId);
+    if (input.branchId) await lockById(tx, 'Branch', input.branchId);
+    for (const line of input.lines ?? []) {
+      if (line.inventoryItemId) await lockById(tx, 'InventoryItem', line.inventoryItemId);
+      if (line.branchId) await lockById(tx, 'Branch', line.branchId);
+    }
+    return;
+  }
+  if (type === 'CREATE_TRANSFER') {
+    const input = ResolvedTransferActionSchema.parse(raw);
+    for (const id of [input.fromAccountId, input.toAccountId].sort()) {
+      await lockById(tx, 'FinanceAccount', id);
+    }
+    return;
+  }
+  if (type === 'UPDATE_CUSTOMER') {
+    const input = ResolvedCustomerUpdateActionSchema.parse(raw);
+    await lockById(tx, 'Customer', input.customerId);
+    const phone = normalizeIraqiPhone(input.phone);
+    if (phone) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`customer-phone:${phone}`}))`;
+    return;
+  }
+  if (type === 'UPDATE_PARTY') {
+    const input = ResolvedPartyUpdateActionSchema.parse(raw);
+    await lockById(tx, 'Party', input.partyId);
+    return;
+  }
+  if (type === 'ADJUST_INVENTORY') {
+    const input = ResolvedInventoryAdjustmentActionSchema.parse(raw);
+    await lockById(tx, 'InventoryItem', input.inventoryItemId);
+    return;
+  }
+  if (type === 'CREATE_ROAST_BATCH') {
+    const input = ResolvedRoastBatchActionSchema.parse(raw);
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`roast-batch:${input.batchNumber}`}))`;
+    if (input.greenInventoryItemId) await lockById(tx, 'InventoryItem', input.greenInventoryItemId);
+    if (input.roastedInventoryItemId) await lockById(tx, 'InventoryItem', input.roastedInventoryItemId);
     if (input.branchId) await lockById(tx, 'Branch', input.branchId);
     return;
   }
+  if (type === 'RECORD_PAYMENT') {
+    const input = ResolvedPaymentActionSchema.parse(raw);
+    await lockById(tx, input.targetType === 'ORDER' ? 'Order' : 'FinanceEntry', input.targetId);
+    await lockById(tx, 'FinanceAccount', input.accountId);
+    return;
+  }
+  if (type === 'RECORD_REFUND') {
+    const input = ResolvedRefundActionSchema.parse(raw);
+    await lockById(tx, 'Order', input.orderId);
+    await lockById(tx, 'FinanceAccount', input.accountId);
+    return;
+  }
+  if (type === 'REVERSE_RECORD') {
+    const input = ResolvedReversalActionSchema.parse(raw);
+    await lockById(tx, 'FinanceEntry', input.financeEntryId);
+    return;
+  }
+  if (type === 'RECLASSIFY_SPEND') {
+    const input = ResolvedSpendReclassificationActionSchema.parse(raw);
+    await lockById(tx, 'FinanceEntry', input.entryId);
+    await lockById(tx, 'LedgerEntryLine', input.lineId);
+    if (input.inventoryItemId) await lockById(tx, 'InventoryItem', input.inventoryItemId);
+    return;
+  }
+  if (type === 'CREATE_DASHBOARD_DRAFT') {
+    const input = ResolvedDashboardDraftActionSchema.parse(raw);
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`dashboard-draft:${input.name}`}))`;
+    return;
+  }
+  if (type !== 'UPDATE_ORDER_STATUS') throw new Error('action_not_supported');
   const input = ResolvedOrderStatusActionSchema.parse(raw);
   await lockById(tx, 'Order', input.orderId);
   const order = await tx.order.findUnique({
@@ -149,6 +241,47 @@ async function lockActionRows(tx: Prisma.TransactionClient, type: AiPendingActio
   for (const entry of entries) {
     await tx.$queryRaw`SELECT "id" FROM "FinanceEntry" WHERE "id" = ${entry.id} FOR UPDATE`;
   }
+}
+
+async function lockNewParty(
+  tx: Prisma.TransactionClient,
+  raw: z.infer<typeof ResolvedPartyActionSchema>,
+) {
+  const party = ResolvedPartyActionSchema.parse(raw);
+  const key = normalizeIraqiPhone(party.phone) || normalizeCustomerName(party.name);
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`party:${party.type}:${key}`}))`;
+}
+
+async function newPartyPreconditions(
+  raw: z.infer<typeof ResolvedPartyActionSchema> | null,
+  db: Db,
+) {
+  if (!raw) return { matches: [], branch: null, settlementAccount: null };
+  const party = ResolvedPartyActionSchema.parse(raw);
+  const normalizedName = normalizeCustomerName(party.name);
+  const normalizedPhone = normalizeIraqiPhone(party.phone);
+  const candidates = await db.party.findMany({
+    where: { type: party.type, isActive: true },
+    select: { id: true, name: true, phone: true },
+    orderBy: { createdAt: 'asc' },
+  });
+  const matches = candidates.filter((candidate) => {
+    const candidatePhone = normalizeIraqiPhone(candidate.phone);
+    return normalizeCustomerName(candidate.name) === normalizedName
+      && (!normalizedPhone || !candidatePhone || normalizedPhone === candidatePhone);
+  });
+  const [branch, settlementAccount] = await Promise.all([
+    party.branchId
+      ? db.branch.findUnique({ where: { id: party.branchId }, select: { id: true, isActive: true } })
+      : Promise.resolve(null),
+    party.defaultSettlementAccountId
+      ? db.financeAccount.findUnique({
+          where: { id: party.defaultSettlementAccountId },
+          select: { id: true, isActive: true, currency: true, type: true },
+        })
+      : Promise.resolve(null),
+  ]);
+  return { matches, branch, settlementAccount };
 }
 
 async function customerPreconditions(raw: unknown, db: Db) {
@@ -265,7 +398,22 @@ async function orderPreconditions(raw: unknown, db: Db) {
     input.customerExternalId
       ? db.customer.findUnique({
           where: { externalId: input.customerExternalId },
-          select: { id: true, externalId: true, isActive: true, normalizedPhone: true },
+          select: {
+            id: true,
+            externalId: true,
+            isActive: true,
+            nameEn: true,
+            nameAr: true,
+            phone: true,
+            normalizedPhone: true,
+            email: true,
+            governorate: true,
+            address1: true,
+            street: true,
+            notes: true,
+            campaignSource: true,
+            segment: true,
+          },
         })
       : Promise.resolve(null),
     input.financeAccountId
@@ -284,17 +432,37 @@ async function orderPreconditions(raw: unknown, db: Db) {
   const possibleNewCustomerDuplicates = newCustomerPhone
     ? await db.customer.findMany({
         where: { isActive: true, normalizedPhone: newCustomerPhone },
-        select: { id: true, externalId: true, normalizedPhone: true, isActive: true },
+        select: { id: true, externalId: true, nameEn: true, nameAr: true, normalizedPhone: true, isActive: true },
+        orderBy: { id: 'asc' },
+      })
+    : [];
+  const enrichmentPhone = normalizeIraqiPhone(input.customerEnrichment?.phone);
+  const possibleCustomerEnrichmentDuplicates = enrichmentPhone && customer
+    ? await db.customer.findMany({
+        where: { isActive: true, normalizedPhone: enrichmentPhone, id: { not: customer.id } },
+        select: { id: true, externalId: true, nameEn: true, nameAr: true, normalizedPhone: true, isActive: true },
         orderBy: { id: 'asc' },
       })
     : [];
   const automaticFinance = await automaticFinanceState(input, status.role ?? 'UNKNOWN', db);
-  return { products, customer, possibleNewCustomerDuplicates, account, provider, automaticFinance, status, channel, governorate, fulfillment };
+  return {
+    products,
+    customer,
+    possibleNewCustomerDuplicates,
+    possibleCustomerEnrichmentDuplicates,
+    account,
+    provider,
+    automaticFinance,
+    status,
+    channel,
+    governorate,
+    fulfillment,
+  };
 }
 
 async function expensePreconditions(raw: unknown, db: Db) {
   const input = ResolvedExpenseActionSchema.parse(raw);
-  const [account, party, branch] = await Promise.all([
+  const [account, party, branch, newParty, lines] = await Promise.all([
     db.financeAccount.findUnique({
       where: { id: input.accountId },
       select: { id: true, currency: true, type: true, isActive: true },
@@ -305,20 +473,34 @@ async function expensePreconditions(raw: unknown, db: Db) {
     input.branchId
       ? db.branch.findUnique({ where: { id: input.branchId }, select: { id: true, isActive: true } })
       : Promise.resolve(null),
+    newPartyPreconditions(input.newParty, db),
+    Promise.all((input.lines ?? []).map(async (line) => ({
+      item: line.inventoryItemId
+        ? await db.inventoryItem.findUnique({
+            where: { id: line.inventoryItemId },
+            select: { id: true, isActive: true, unit: true, branchId: true },
+          })
+        : null,
+      branch: line.branchId
+        ? await db.branch.findUnique({ where: { id: line.branchId }, select: { id: true, isActive: true } })
+        : null,
+    }))),
   ]);
-  return { account, party, branch };
+  return { account, party, branch, newParty, lines };
 }
 
 async function purchasePreconditions(raw: unknown, db: Db) {
   const input = ResolvedPurchaseActionSchema.parse(raw);
-  const [item, supplier, account, branch] = await Promise.all([
+  const [item, supplier, account, branch, newSupplier, lines] = await Promise.all([
     input.inventoryItemId
       ? db.inventoryItem.findUnique({
           where: { id: input.inventoryItemId },
           select: { id: true, category: true, unit: true, branchId: true, unitCost: true, isActive: true },
         })
       : Promise.resolve(null),
-    db.party.findUnique({ where: { id: input.supplierId }, select: { id: true, type: true, isActive: true } }),
+    input.supplierId
+      ? db.party.findUnique({ where: { id: input.supplierId }, select: { id: true, type: true, isActive: true } })
+      : Promise.resolve(null),
     input.accountId
       ? db.financeAccount.findUnique({
           where: { id: input.accountId },
@@ -328,8 +510,289 @@ async function purchasePreconditions(raw: unknown, db: Db) {
     input.branchId
       ? db.branch.findUnique({ where: { id: input.branchId }, select: { id: true, isActive: true } })
       : Promise.resolve(null),
+    newPartyPreconditions(input.newSupplier, db),
+    Promise.all((input.lines ?? []).map(async (line) => ({
+      item: line.inventoryItemId
+        ? await db.inventoryItem.findUnique({
+            where: { id: line.inventoryItemId },
+            select: { id: true, isActive: true, unit: true, branchId: true },
+          })
+        : null,
+      branch: line.branchId
+        ? await db.branch.findUnique({ where: { id: line.branchId }, select: { id: true, isActive: true } })
+        : null,
+    }))),
   ]);
-  return { item, supplier, account, branch };
+  return { item, supplier, account, branch, newSupplier, lines };
+}
+
+async function transferPreconditions(raw: unknown, db: Db) {
+  const input = ResolvedTransferActionSchema.parse(raw);
+  const [fromAccount, toAccount] = await Promise.all([
+    db.financeAccount.findUnique({
+      where: { id: input.fromAccountId },
+      select: { id: true, name: true, currency: true, type: true, isActive: true },
+    }),
+    db.financeAccount.findUnique({
+      where: { id: input.toAccountId },
+      select: { id: true, name: true, currency: true, type: true, isActive: true },
+    }),
+  ]);
+  return { fromAccount, toAccount };
+}
+
+async function customerUpdatePreconditions(raw: unknown, db: Db) {
+  const input = ResolvedCustomerUpdateActionSchema.parse(raw);
+  const customer = await db.customer.findUnique({
+    where: { id: input.customerId },
+    select: {
+      id: true,
+      externalId: true,
+      isActive: true,
+      nameEn: true,
+      nameAr: true,
+      phone: true,
+      normalizedPhone: true,
+      email: true,
+      governorate: true,
+      address1: true,
+      street: true,
+      notes: true,
+      segment: true,
+      campaignSource: true,
+    },
+  });
+  const normalizedPhone = input.phone === undefined ? undefined : normalizeIraqiPhone(input.phone);
+  const samePhone = normalizedPhone
+    ? await db.customer.findMany({
+        where: { normalizedPhone, isActive: true, id: { not: input.customerId } },
+        select: { id: true, nameEn: true, nameAr: true },
+        orderBy: { createdAt: 'asc' },
+      })
+    : [];
+  return { customer, normalizedPhone, samePhone };
+}
+
+async function partyUpdatePreconditions(raw: unknown, db: Db) {
+  const input = ResolvedPartyUpdateActionSchema.parse(raw);
+  const [party, branch, settlementAccount] = await Promise.all([
+    db.party.findUnique({ where: { id: input.partyId } }),
+    input.branchId
+      ? db.branch.findUnique({ where: { id: input.branchId }, select: { id: true, isActive: true } })
+      : Promise.resolve(null),
+    input.defaultSettlementAccountId
+      ? db.financeAccount.findUnique({
+          where: { id: input.defaultSettlementAccountId },
+          select: { id: true, isActive: true, currency: true, type: true },
+        })
+      : Promise.resolve(null),
+  ]);
+  return { party, branch, settlementAccount };
+}
+
+async function inventoryAdjustmentPreconditions(raw: unknown, db: Db) {
+  const input = ResolvedInventoryAdjustmentActionSchema.parse(raw);
+  const item = await db.inventoryItem.findUnique({
+    where: { id: input.inventoryItemId },
+    select: {
+      id: true,
+      nameEn: true,
+      nameAr: true,
+      unit: true,
+      isActive: true,
+      movements: {
+        where: {
+          OR: [
+            { financeEntryId: null },
+            { financeEntry: { archivedAt: null, reversedAt: null, reversalOfId: null } },
+          ],
+        },
+        select: { quantity: true },
+      },
+    },
+  });
+  const currentQuantity = item?.movements.reduce(
+    (sum, movement) => sum + decimalNumber(movement.quantity),
+    0,
+  ) ?? null;
+  return { item: item ? { ...item, movements: undefined } : null, currentQuantity };
+}
+
+async function roastBatchPreconditions(raw: unknown, db: Db) {
+  const input = ResolvedRoastBatchActionSchema.parse(raw);
+  const [existing, green, roasted, branch] = await Promise.all([
+    db.roastBatch.findUnique({ where: { batchNumber: input.batchNumber }, select: { id: true } }),
+    input.greenInventoryItemId
+      ? db.inventoryItem.findUnique({
+          where: { id: input.greenInventoryItemId },
+          select: { id: true, category: true, unit: true, isActive: true, movements: { select: { quantity: true } } },
+        })
+      : Promise.resolve(null),
+    input.roastedInventoryItemId
+      ? db.inventoryItem.findUnique({
+          where: { id: input.roastedInventoryItemId },
+          select: { id: true, category: true, unit: true, isActive: true },
+        })
+      : Promise.resolve(null),
+    input.branchId
+      ? db.branch.findUnique({ where: { id: input.branchId }, select: { id: true, isActive: true } })
+      : Promise.resolve(null),
+  ]);
+  const greenAvailable = green?.movements.reduce(
+    (sum, movement) => sum + decimalNumber(movement.quantity),
+    0,
+  ) ?? null;
+  return {
+    existing,
+    green: green ? { ...green, movements: undefined } : null,
+    greenAvailable,
+    roasted,
+    branch,
+  };
+}
+
+const invoiceEntrySelect = {
+  id: true,
+  orderId: true,
+  type: true,
+  amount: true,
+  obligation: true,
+  obligationKind: true,
+  settlesId: true,
+  archivedAt: true,
+  reversedAt: true,
+  reversalOfId: true,
+  date: true,
+  paymentMethod: true,
+  account: { select: { name: true } },
+  party: { select: { id: true, name: true, collectsOrderPayments: true } },
+} satisfies Prisma.FinanceEntrySelect;
+
+async function paymentPreconditions(raw: unknown, db: Db) {
+  const input = ResolvedPaymentActionSchema.parse(raw);
+  const account = await db.financeAccount.findUnique({
+    where: { id: input.accountId },
+    select: { id: true, isActive: true, currency: true, type: true },
+  });
+  if (input.targetType === 'ORDER') {
+    const order = await db.order.findUnique({
+      where: { id: input.targetId },
+      select: {
+        id: true,
+        orderNumber: true,
+        status: true,
+        grossAmount: true,
+        discountAmount: true,
+        refundAmount: true,
+        deliveryFee: true,
+        extraCharges: true,
+        currency: true,
+      },
+    });
+    const entries = order
+      ? await db.financeEntry.findMany({
+          where: { OR: [{ orderId: order.id }, { settles: { is: { orderId: order.id } } }] },
+          select: invoiceEntrySelect,
+          orderBy: { id: 'asc' },
+        })
+      : [];
+    return { account, order, payment: order ? invoicePaymentSnapshot(order, entries) : null, obligation: null, outstanding: null };
+  }
+  const obligation = await db.financeEntry.findUnique({
+    where: { id: input.targetId },
+    include: {
+      settlements: {
+        where: { archivedAt: null, reversedAt: null, reversalOfId: null },
+        select: { amount: true },
+      },
+    },
+  });
+  const outstanding = obligation
+    ? Math.max(0, obligation.amount - obligation.settlements.reduce((sum, row) => sum + row.amount, 0))
+    : null;
+  return { account, order: null, payment: null, obligation, outstanding };
+}
+
+async function refundPreconditions(raw: unknown, db: Db) {
+  const input = ResolvedRefundActionSchema.parse(raw);
+  const [order, account] = await Promise.all([
+    db.order.findUnique({
+      where: { id: input.orderId },
+      select: {
+        id: true,
+        orderNumber: true,
+        status: true,
+        grossAmount: true,
+        discountAmount: true,
+        refundAmount: true,
+        deliveryFee: true,
+        extraCharges: true,
+        currency: true,
+      },
+    }),
+    db.financeAccount.findUnique({
+      where: { id: input.accountId },
+      select: { id: true, isActive: true, currency: true, type: true },
+    }),
+  ]);
+  const entries = order
+    ? await db.financeEntry.findMany({
+        where: { OR: [{ orderId: order.id }, { settles: { is: { orderId: order.id } } }] },
+        select: invoiceEntrySelect,
+        orderBy: { id: 'asc' },
+      })
+    : [];
+  const payment = order ? invoicePaymentSnapshot(order, entries) : null;
+  const originalTotal = order
+    ? Math.max(0, order.grossAmount - order.discountAmount + order.deliveryFee + order.extraCharges)
+    : 0;
+  const refundable = order && payment
+    ? Math.min(payment.paidRaw, Math.max(0, originalTotal - order.refundAmount))
+    : 0;
+  return { order, account, payment, refundable };
+}
+
+async function reversalPreconditions(raw: unknown, db: Db) {
+  const input = ResolvedReversalActionSchema.parse(raw);
+  const entry = await db.financeEntry.findUnique({
+    where: { id: input.financeEntryId },
+    select: {
+      id: true,
+      recordKey: true,
+      importKey: true,
+      reversedAt: true,
+      reversalOfId: true,
+      archivedAt: true,
+      settlements: { where: { archivedAt: null, reversedAt: null, reversalOfId: null }, select: { id: true } },
+    },
+  });
+  return { entry };
+}
+
+async function reclassificationPreconditions(raw: unknown, db: Db) {
+  const input = ResolvedSpendReclassificationActionSchema.parse(raw);
+  const [line, asset, item] = await Promise.all([
+    db.ledgerEntryLine.findFirst({
+      where: { id: input.lineId, financeEntryId: input.entryId },
+      select: {
+        id: true,
+        financeEntryId: true,
+        itemName: true,
+        spendTreatment: true,
+        classificationStatus: true,
+        inventoryItemId: true,
+        lineTotal: true,
+        createdAt: true,
+      },
+    }),
+    input.fixedAssetId
+      ? db.fixedAsset.findUnique({ where: { id: input.fixedAssetId }, select: { id: true, isActive: true } })
+      : Promise.resolve(null),
+    input.inventoryItemId
+      ? db.inventoryItem.findUnique({ where: { id: input.inventoryItemId }, select: { id: true, isActive: true } })
+      : Promise.resolve(null),
+  ]);
+  return { line, asset, item };
 }
 
 async function orderStatusPreconditions(raw: unknown, db: Db) {
@@ -407,7 +870,9 @@ export async function loadActionPreconditions(
   db: Db = prisma,
   options: { lock?: boolean } = {},
 ) {
-  ACTION_DATA_SCHEMAS[type].parse(raw);
+  const schema = ACTION_DATA_SCHEMAS[type];
+  if (!schema) throw new Error('action_not_supported');
+  schema.parse(raw);
   if (options.lock) await lockActionRows(db as Prisma.TransactionClient, type, raw);
   switch (type) {
     case 'CREATE_CUSTOMER':
@@ -418,8 +883,30 @@ export async function loadActionPreconditions(
       return expensePreconditions(raw, db);
     case 'CREATE_PURCHASE':
       return purchasePreconditions(raw, db);
+    case 'CREATE_TRANSFER':
+      return transferPreconditions(raw, db);
     case 'UPDATE_ORDER_STATUS':
       return orderStatusPreconditions(raw, db);
+    case 'UPDATE_CUSTOMER':
+      return customerUpdatePreconditions(raw, db);
+    case 'UPDATE_PARTY':
+      return partyUpdatePreconditions(raw, db);
+    case 'ADJUST_INVENTORY':
+      return inventoryAdjustmentPreconditions(raw, db);
+    case 'CREATE_ROAST_BATCH':
+      return roastBatchPreconditions(raw, db);
+    case 'RECORD_PAYMENT':
+      return paymentPreconditions(raw, db);
+    case 'RECORD_REFUND':
+      return refundPreconditions(raw, db);
+    case 'REVERSE_RECORD':
+      return reversalPreconditions(raw, db);
+    case 'RECLASSIFY_SPEND':
+      return reclassificationPreconditions(raw, db);
+    case 'CREATE_DASHBOARD_DRAFT':
+      return { name: ResolvedDashboardDraftActionSchema.parse(raw).name };
+    default:
+      throw new Error('action_not_supported');
   }
 }
 
@@ -496,10 +983,19 @@ export function actionPreconditionIssues(
   raw: unknown,
   preconditions: Awaited<ReturnType<typeof loadActionPreconditions>>,
 ): ActionPreconditionIssue[] {
+  if (!ACTION_DATA_SCHEMAS[type]) {
+    return [{ field: 'action', code: 'action_not_supported' }];
+  }
   const state = preconditions as Record<string, unknown>;
   const issues: ActionPreconditionIssue[] = [];
   if (type === 'CREATE_CUSTOMER') {
-    if (Array.isArray(state.possibleDuplicates) && state.possibleDuplicates.length) issues.push({ field: 'phone', code: 'customer_duplicate' });
+    const input = ResolvedCustomerActionSchema.parse(raw);
+    const candidates = Array.isArray(state.possibleDuplicates)
+      ? state.possibleDuplicates as Array<{ id: string; nameEn: string | null; nameAr: string | null }>
+      : [];
+    if (compatibleCustomerMatches(input, candidates).length > 1) {
+      issues.push({ field: 'phone', code: 'customer_match_ambiguous' });
+    }
     return issues;
   }
   if (type === 'CREATE_ORDER') {
@@ -513,9 +1009,29 @@ export function actionPreconditionIssues(
     if (!(state.governorate as ManagedListState | undefined)?.active) issues.push({ field: 'governorate', code: 'governorate_invalid' });
     if (!(state.fulfillment as ManagedListState | undefined)?.active) issues.push({ field: 'fulfillmentMethod', code: 'fulfillment_invalid' });
     if (!status?.active || status.role === 'UNKNOWN') issues.push({ field: 'status', code: 'status_invalid' });
-    const customer = state.customer as { isActive?: boolean } | null;
+    const customer = state.customer as {
+      id: string;
+      isActive: boolean;
+      nameEn: string | null;
+      nameAr: string | null;
+    } | null;
     if (input.customerExternalId && (!customer || !customer.isActive)) issues.push({ field: 'customerQuery', code: 'customer_inactive' });
-    if (Array.isArray(state.possibleNewCustomerDuplicates) && state.possibleNewCustomerDuplicates.length) {
+    const possibleCustomers = Array.isArray(state.possibleNewCustomerDuplicates)
+      ? state.possibleNewCustomerDuplicates as Array<{ id: string; nameEn: string | null; nameAr: string | null }>
+      : [];
+    if (input.newCustomer && compatibleCustomerMatches(input.newCustomer, possibleCustomers).length > 1) {
+      issues.push({ field: 'newCustomer.phone', code: 'customer_match_ambiguous' });
+    }
+    if (input.customerEnrichment && customer && compatibleCustomerMatches(input.customerEnrichment, [customer]).length !== 1) {
+      issues.push({ field: 'newCustomer', code: 'customer_name_conflict' });
+    }
+    const enrichmentDuplicates = Array.isArray(state.possibleCustomerEnrichmentDuplicates)
+      ? state.possibleCustomerEnrichmentDuplicates as Array<{ id: string; nameEn: string | null; nameAr: string | null }>
+      : [];
+    if (input.customerEnrichment && compatibleCustomerMatches({
+      nameEn: input.customerEnrichment.nameEn ?? customer?.nameEn ?? undefined,
+      nameAr: input.customerEnrichment.nameAr ?? customer?.nameAr ?? undefined,
+    }, enrichmentDuplicates).length) {
       issues.push({ field: 'newCustomer.phone', code: 'customer_duplicate' });
     }
     if (input.financeMode === 'PAID' || input.financeMode === 'PARTIAL') {
@@ -555,8 +1071,36 @@ export function actionPreconditionIssues(
     if (code) issues.push({ field: 'accountQuery', code });
     const party = state.party as { isActive?: boolean } | null;
     if (input.partyId && !party?.isActive) issues.push({ field: 'partyQuery', code: 'party_inactive' });
+    const newParty = state.newParty as {
+      matches?: unknown[];
+      branch?: { isActive?: boolean } | null;
+      settlementAccount?: Parameters<typeof invalidAccount>[0];
+    } | undefined;
+    if ((newParty?.matches?.length ?? 0) > 1) issues.push({ field: 'partyQuery', code: 'party_match_ambiguous' });
+    if (input.newParty?.branchId && !newParty?.branch?.isActive) issues.push({ field: 'partyQuery', code: 'branch_inactive' });
+    if (input.newParty?.defaultSettlementAccountId && invalidAccount(newParty?.settlementAccount)) {
+      issues.push({ field: 'partyQuery', code: 'account_invalid' });
+    }
     const branch = state.branch as { isActive?: boolean } | null;
     if (input.branchId && !branch?.isActive) issues.push({ field: 'branchQuery', code: 'branch_inactive' });
+    const lineStates = Array.isArray(state.lines)
+      ? state.lines as Array<{ item?: { id?: string; isActive?: boolean; unit?: string; branchId?: string | null } | null; branch?: { isActive?: boolean } | null }>
+      : [];
+    input.lines?.forEach((line, index) => {
+      const lineState = lineStates[index];
+      if (line.inventoryItemId && (!lineState?.item?.id || !lineState.item.isActive)) {
+        issues.push({ field: `lines.${index}.inventoryItemQuery`, code: 'inventory_item_missing' });
+      }
+      if (line.inventoryItemId && lineState?.item?.unit !== line.unit) {
+        issues.push({ field: `lines.${index}.unit`, code: 'inventory_unit_mismatch' });
+      }
+      if (line.branchId && !lineState?.branch?.isActive) {
+        issues.push({ field: `lines.${index}.branchQuery`, code: 'branch_inactive' });
+      }
+      if (line.inventoryItemId && line.branchId && lineState?.item?.branchId && lineState.item.branchId !== line.branchId) {
+        issues.push({ field: `lines.${index}.branchQuery`, code: 'inventory_branch_mismatch' });
+      }
+    });
     return issues;
   }
   if (type === 'CREATE_PURCHASE') {
@@ -568,13 +1112,27 @@ export function actionPreconditionIssues(
       issues.push({ field: 'branchQuery', code: 'inventory_branch_mismatch' });
     }
     const supplier = state.supplier as { isActive?: boolean; type?: string } | null;
-    if (!supplier?.isActive || supplier.type !== 'SUPPLIER') issues.push({ field: 'supplierQuery', code: 'supplier_invalid' });
+    if (input.supplierId && (!supplier?.isActive || supplier.type !== 'SUPPLIER')) issues.push({ field: 'supplierQuery', code: 'supplier_invalid' });
+    const newSupplier = state.newSupplier as {
+      matches?: unknown[];
+      branch?: { isActive?: boolean } | null;
+      settlementAccount?: Parameters<typeof invalidAccount>[0];
+    } | undefined;
+    if ((newSupplier?.matches?.length ?? 0) > 1) issues.push({ field: 'supplierQuery', code: 'party_match_ambiguous' });
+    if (input.newSupplier?.branchId && !newSupplier?.branch?.isActive) issues.push({ field: 'supplierQuery', code: 'branch_inactive' });
+    if (input.newSupplier?.defaultSettlementAccountId && invalidAccount(newSupplier?.settlementAccount)) {
+      issues.push({ field: 'supplierQuery', code: 'account_invalid' });
+    }
     if (input.paidMode === 'PAID' || input.paidMode === 'PARTIAL') {
       const code = invalidAccount(state.account as Parameters<typeof invalidAccount>[0]);
       if (code) issues.push({ field: 'accountQuery', code });
       if (!input.paymentDate) issues.push({ field: 'paymentDate', code: 'payment_date_required' });
     }
-    if (input.paidMode === 'PARTIAL' && (!input.paidAmount || input.paidAmount >= input.totalAmount)) {
+    const totalAmount = input.totalAmount ?? input.lines?.reduce(
+      (sum, line) => sum + Math.max(0, line.quantity * line.unitCost - line.discount + line.extra),
+      0,
+    ) ?? 0;
+    if (input.paidMode === 'PARTIAL' && (!input.paidAmount || input.paidAmount >= totalAmount)) {
       issues.push({ field: 'paidAmount', code: 'partial_payment_invalid' });
     }
     if ((input.paidMode === 'CREDIT' || input.paidMode === 'PARTIAL') && !input.dueDate) {
@@ -582,8 +1140,153 @@ export function actionPreconditionIssues(
     }
     const branch = state.branch as { isActive?: boolean } | null;
     if (input.branchId && !branch?.isActive) issues.push({ field: 'branchQuery', code: 'branch_inactive' });
+    const lineStates = Array.isArray(state.lines)
+      ? state.lines as Array<{ item?: { id?: string; isActive?: boolean; unit?: string; branchId?: string | null } | null; branch?: { isActive?: boolean } | null }>
+      : [];
+    input.lines?.forEach((line, index) => {
+      const lineState = lineStates[index];
+      if (line.inventoryItemId && (!lineState?.item?.id || !lineState.item.isActive)) {
+        issues.push({ field: `lines.${index}.inventoryItemQuery`, code: 'inventory_item_missing' });
+      }
+      if (line.inventoryItemId && lineState?.item?.unit !== line.unit) {
+        issues.push({ field: `lines.${index}.unit`, code: 'inventory_unit_mismatch' });
+      }
+      if (line.branchId && !lineState?.branch?.isActive) {
+        issues.push({ field: `lines.${index}.branchQuery`, code: 'branch_inactive' });
+      }
+      if (line.inventoryItemId && line.branchId && lineState?.item?.branchId && lineState.item.branchId !== line.branchId) {
+        issues.push({ field: `lines.${index}.branchQuery`, code: 'inventory_branch_mismatch' });
+      }
+    });
     return issues;
   }
+  if (type === 'CREATE_TRANSFER') {
+    const input = ResolvedTransferActionSchema.parse(raw);
+    const fromCode = invalidAccount(state.fromAccount as Parameters<typeof invalidAccount>[0]);
+    const toCode = invalidAccount(state.toAccount as Parameters<typeof invalidAccount>[0]);
+    if (fromCode) issues.push({ field: 'fromAccountQuery', code: fromCode });
+    if (toCode) issues.push({ field: 'toAccountQuery', code: toCode });
+    if (input.fromAccountId === input.toAccountId) {
+      issues.push({ field: 'toAccountQuery', code: 'transfer_same_account' });
+    }
+    return issues;
+  }
+  if (type === 'UPDATE_CUSTOMER') {
+    const input = ResolvedCustomerUpdateActionSchema.parse(raw);
+    const customer = state.customer as { id?: string; isActive?: boolean; nameEn?: string | null; nameAr?: string | null } | null;
+    if (!customer?.id || !customer.isActive) issues.push({ field: 'customerQuery', code: 'customer_inactive' });
+    const samePhone = Array.isArray(state.samePhone)
+      ? state.samePhone as Array<{ id: string; nameEn: string | null; nameAr: string | null }>
+      : [];
+    const proposedNames = {
+      nameEn: input.nameEn === undefined ? customer?.nameEn ?? undefined : input.nameEn ?? undefined,
+      nameAr: input.nameAr === undefined ? customer?.nameAr ?? undefined : input.nameAr ?? undefined,
+    };
+    if (compatibleCustomerMatches(proposedNames, samePhone).length) {
+      issues.push({ field: 'phone', code: 'customer_duplicate' });
+    }
+    return issues;
+  }
+  if (type === 'UPDATE_PARTY') {
+    const input = ResolvedPartyUpdateActionSchema.parse(raw);
+    const party = state.party as { id?: string; isActive?: boolean } | null;
+    if (!party?.id || !party.isActive) issues.push({ field: 'partyQuery', code: 'party_inactive' });
+    const branch = state.branch as { isActive?: boolean } | null;
+    if (input.branchId && !branch?.isActive) issues.push({ field: 'branchId', code: 'branch_inactive' });
+    if (input.defaultSettlementAccountId) {
+      const code = invalidAccount(state.settlementAccount as Parameters<typeof invalidAccount>[0]);
+      if (code) issues.push({ field: 'defaultSettlementAccountId', code });
+    }
+    return issues;
+  }
+  if (type === 'ADJUST_INVENTORY') {
+    const input = ResolvedInventoryAdjustmentActionSchema.parse(raw);
+    const item = state.item as { id?: string; isActive?: boolean } | null;
+    if (!item?.id || !item.isActive) issues.push({ field: 'inventoryItemQuery', code: 'inventory_item_missing' });
+    if (state.currentQuantity === input.targetQuantity) issues.push({ field: 'targetQuantity', code: 'no_change' });
+    return issues;
+  }
+  if (type === 'CREATE_ROAST_BATCH') {
+    const input = ResolvedRoastBatchActionSchema.parse(raw);
+    if (state.existing) issues.push({ field: 'batchNumber', code: 'batch_exists' });
+    const green = state.green as { isActive?: boolean; category?: string; unit?: string } | null;
+    const roasted = state.roasted as { isActive?: boolean; category?: string } | null;
+    if (input.greenInventoryItemId && (!green?.isActive || green.category !== 'GREEN_COFFEE')) {
+      issues.push({ field: 'greenInventoryItemQuery', code: 'green_inventory_invalid' });
+    }
+    if (input.roastedInventoryItemId && (!roasted?.isActive || roasted.category !== 'ROASTED')) {
+      issues.push({ field: 'roastedInventoryItemQuery', code: 'roasted_inventory_invalid' });
+    }
+    if (green?.unit && typeof state.greenAvailable === 'number') {
+      const required = green.unit.toLowerCase() === 'kg' ? input.greenInputGrams / 1000 : input.greenInputGrams;
+      if (state.greenAvailable < required) issues.push({ field: 'greenInputGrams', code: 'stock_insufficient' });
+    }
+    const branch = state.branch as { isActive?: boolean } | null;
+    if (input.branchId && !branch?.isActive) issues.push({ field: 'branchQuery', code: 'branch_inactive' });
+    return issues;
+  }
+  if (type === 'RECORD_PAYMENT') {
+    const input = ResolvedPaymentActionSchema.parse(raw);
+    const account = state.account as { isActive?: boolean; currency?: string; type?: string } | null;
+    const accountCode = invalidAccount(account);
+    if (accountCode) issues.push({ field: 'accountQuery', code: accountCode });
+    if (input.targetType === 'ORDER') {
+      const order = state.order as { id?: string; currency?: string } | null;
+      const payment = state.payment as { remaining?: number } | null;
+      if (!order?.id) issues.push({ field: 'targetQuery', code: 'order_missing' });
+      if (order?.currency && account?.currency !== order.currency) issues.push({ field: 'accountQuery', code: 'account_currency' });
+      const amount = toMinor(input.amount, (order?.currency ?? 'IQD') as 'IQD' | 'USD');
+      if (!payment?.remaining || amount > payment.remaining) issues.push({ field: 'amount', code: 'payment_amount_invalid' });
+    } else {
+      const obligation = state.obligation as { id?: string; obligation?: boolean; obligationKind?: string | null; currency?: string; archivedAt?: Date | null; reversedAt?: Date | null; reversalOfId?: string | null } | null;
+      if (!obligation?.id || !obligation.obligation || !obligation.obligationKind || obligation.archivedAt || obligation.reversedAt || obligation.reversalOfId) {
+        issues.push({ field: 'targetQuery', code: 'obligation_not_found' });
+      }
+      if (obligation?.currency && account?.currency !== obligation.currency) issues.push({ field: 'accountQuery', code: 'account_currency' });
+      const amount = toMinor(input.amount, (obligation?.currency ?? 'IQD') as 'IQD' | 'USD');
+      if (typeof state.outstanding !== 'number' || state.outstanding <= 0 || amount > state.outstanding) {
+        issues.push({ field: 'amount', code: 'payment_amount_invalid' });
+      }
+    }
+    return issues;
+  }
+  if (type === 'RECORD_REFUND') {
+    const input = ResolvedRefundActionSchema.parse(raw);
+    const order = state.order as { id?: string; currency?: string } | null;
+    const account = state.account as { isActive?: boolean; currency?: string; type?: string } | null;
+    if (!order?.id) issues.push({ field: 'orderQuery', code: 'order_missing' });
+    const accountCode = invalidAccount(account);
+    if (accountCode) issues.push({ field: 'accountQuery', code: accountCode });
+    if (order?.currency && account?.currency !== order.currency) issues.push({ field: 'accountQuery', code: 'account_currency' });
+    const amount = toMinor(input.amount, (order?.currency ?? 'IQD') as 'IQD' | 'USD');
+    if (typeof state.refundable !== 'number' || state.refundable <= 0 || amount > state.refundable) {
+      issues.push({ field: 'amount', code: 'refund_amount_invalid' });
+    }
+    return issues;
+  }
+  if (type === 'REVERSE_RECORD') {
+    const entry = state.entry as { id?: string; importKey?: string | null; reversedAt?: Date | null; reversalOfId?: string | null; archivedAt?: Date | null; settlements?: unknown[] } | null;
+    if (!entry?.id || entry.importKey || entry.reversedAt || entry.reversalOfId || entry.archivedAt) {
+      issues.push({ field: 'recordQuery', code: 'entry_not_reversible' });
+    }
+    if (entry?.settlements?.length) issues.push({ field: 'recordQuery', code: 'entry_has_settlements' });
+    return issues;
+  }
+  if (type === 'RECLASSIFY_SPEND') {
+    const input = ResolvedSpendReclassificationActionSchema.parse(raw);
+    const line = state.line as { id?: string; spendTreatment?: string } | null;
+    if (!line?.id) issues.push({ field: 'lineQuery', code: 'ledger_line_missing' });
+    if (line?.spendTreatment === input.spendTreatment) issues.push({ field: 'spendTreatment', code: 'no_change' });
+    if (input.spendTreatment === 'CAPEX' && input.fixedAssetId && !(state.asset as { isActive?: boolean } | null)?.isActive) {
+      issues.push({ field: 'fixedAssetQuery', code: 'asset_invalid' });
+    }
+    if (input.spendTreatment === 'INVENTORY' && !(state.item as { isActive?: boolean } | null)?.isActive) {
+      issues.push({ field: 'inventoryItemQuery', code: 'inventory_item_missing' });
+    }
+    return issues;
+  }
+  if (type === 'CREATE_DASHBOARD_DRAFT') return issues;
+  if (type !== 'UPDATE_ORDER_STATUS') return [{ field: 'action', code: 'action_not_supported' }];
   const input = ResolvedOrderStatusActionSchema.parse(raw);
   const order = state.order as {
     id?: string;

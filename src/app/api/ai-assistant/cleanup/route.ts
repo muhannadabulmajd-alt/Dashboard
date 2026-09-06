@@ -1,16 +1,15 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { getAiAssistantConfig } from '@/server/ai/config';
+import { replayDueAiDocuments } from '@/server/ai/documents';
+import { replayDueAiReports } from '@/server/ai/reports';
 import { prisma } from '@/server/db/client';
+import { isCronAuthorized } from '@/server/http/cron';
 
 export const runtime = 'nodejs';
-
-function authorized(request: NextRequest): boolean {
-  const secret = process.env.CRON_SECRET;
-  return Boolean(secret && request.headers.get('authorization') === `Bearer ${secret}`);
-}
+export const maxDuration = 60;
 
 export async function GET(request: NextRequest) {
-  if (!authorized(request)) return new NextResponse('Unauthorized', { status: 401 });
+  if (!isCronAuthorized(request)) return new NextResponse('Unauthorized', { status: 401 });
   const now = new Date();
   const retentionCutoff = new Date(now);
   retentionCutoff.setUTCDate(retentionCutoff.getUTCDate() - getAiAssistantConfig().historyRetentionDays);
@@ -63,8 +62,27 @@ export async function GET(request: NextRequest) {
     const requestLogs = await tx.aiRequestLog.deleteMany({ where: { createdAt: { lt: retentionCutoff } } });
     const buckets = await tx.aiRateLimitBucket.deleteMany({ where: { bucketStart: { lt: bucketCutoff } } });
     const telegramUpdates = await tx.telegramUpdate.deleteMany({ where: { expiresAt: { lte: now } } });
-    return { expiredActions, interruptedRequests, conversations, requestLogs, buckets, telegramUpdates };
+    const attachments = await tx.aiAttachment.deleteMany({ where: { expiresAt: { lte: now } } });
+    const reportSnapshots = await tx.aiReportSnapshot.deleteMany({ where: { expiresAt: { lte: now } } });
+    const notifications = await tx.aiNotificationLog.deleteMany({
+      where: { createdAt: { lt: retentionCutoff }, status: { in: ['SENT', 'SKIPPED'] } },
+    });
+    return {
+      expiredActions,
+      interruptedRequests,
+      conversations,
+      requestLogs,
+      buckets,
+      telegramUpdates,
+      attachments,
+      reportSnapshots,
+      notifications,
+    };
   });
+  const [documents, reports] = await Promise.all([
+    replayDueAiDocuments(10),
+    replayDueAiReports(10),
+  ]);
 
   return NextResponse.json({
     ok: true,
@@ -74,5 +92,10 @@ export async function GET(request: NextRequest) {
     requestLogsDeleted: result.requestLogs.count,
     rateLimitBucketsDeleted: result.buckets.count,
     telegramUpdatesDeleted: result.telegramUpdates.count,
+    attachmentsDeleted: result.attachments.count,
+    reportSnapshotsDeleted: result.reportSnapshots.count,
+    notificationLogsDeleted: result.notifications.count,
+    documentDeliveriesReplayed: documents.processed,
+    reportDeliveriesReplayed: reports.processed,
   });
 }

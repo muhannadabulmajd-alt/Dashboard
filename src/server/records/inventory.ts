@@ -8,7 +8,18 @@ import { INVENTORY_CATEGORIES } from '@/lib/enums';
 import { decimalNumber } from '@/lib/decimal';
 import { syncActiveCost, recomputeProductsForItem } from '@/server/inventory/fifo';
 import { syncInventoryReceiptFinance } from '@/server/finance/sync';
-import { requireCap, audit, reqField, optField, type ActionState } from './shared';
+import type { TrustedCommandContext } from '@/server/commands/actor-context';
+import { COMMAND_TRANSACTION_OPTIONS } from '@/server/commands/transaction-checkpoints';
+import {
+  requireCap,
+  resolveCommandActor,
+  audit,
+  reqField,
+  optField,
+  type ActionState,
+  type CommandCommitHook,
+  type CommandPreconditionHook,
+} from './shared';
 
 const LIST = '/[locale]/(dashboard)/admin/records/inventory';
 const FINANCE = '/[locale]/(dashboard)/finance';
@@ -22,6 +33,97 @@ const adjustmentSchema = z.object({
   occurredAt: z.coerce.date(),
   reason: z.string().min(3),
 });
+
+const InventoryAdjustmentCommandSchema = z.object({
+  inventoryItemId: z.string().min(1),
+  targetQuantity: decimal3,
+  occurredAt: z.coerce.date(),
+  reason: z.string().trim().min(3),
+});
+
+export type InventoryAdjustmentCommandInput = z.input<typeof InventoryAdjustmentCommandSchema>;
+
+export async function adjustInventoryFromInput(
+  input: InventoryAdjustmentCommandInput,
+  options: {
+    actorContext?: TrustedCommandContext;
+    precondition?: CommandPreconditionHook;
+    onCommitted?: CommandCommitHook<{
+      recordId: string;
+      beforeQuantity: number;
+      targetQuantity: number;
+      adjustment: number;
+    }>;
+  } = {},
+) {
+  const user = await resolveCommandActor(CAP, options.actorContext);
+  if (!user || (user.role !== 'OWNER' && user.role !== 'ADMIN')) {
+    throw new Error('forbidden');
+  }
+  const parsed = InventoryAdjustmentCommandSchema.parse(input);
+
+  return prisma.$transaction(async (tx) => {
+    await options.precondition?.(tx);
+    const item = await tx.inventoryItem.findUnique({
+      where: { id: parsed.inventoryItemId },
+      include: { movements: { select: { quantity: true } } },
+    });
+    if (!item || !item.isActive) throw new Error('inventory-not-found');
+    const current = item.movements.reduce(
+      (sum, movement) => sum + decimalNumber(movement.quantity),
+      0,
+    );
+    const delta = Number((parsed.targetQuantity - current).toFixed(3));
+
+    if (delta !== 0) {
+      await tx.stockMovement.create({
+        data: {
+          inventoryItemId: item.id,
+          occurredAt: parsed.occurredAt,
+          reason: 'ADJUSTMENT',
+          quantity: delta.toFixed(3),
+          reference: `Owner/Admin stock correction: ${parsed.reason}`,
+          branchId: item.branchId,
+        },
+      });
+      if (delta > 0) {
+        await tx.inventoryCostLayer.create({
+          data: {
+            inventoryItemId: item.id,
+            qtyReceived: delta.toFixed(3),
+            unitCost: (item.unitCost ?? 0).toString(),
+            receivedAt: parsed.occurredAt,
+          },
+        });
+      }
+      await syncActiveCost(item.id, tx);
+    }
+
+    const result = {
+      recordId: item.id,
+      beforeQuantity: current,
+      targetQuantity: parsed.targetQuantity,
+      adjustment: delta,
+    };
+    await tx.auditLog.create({
+      data: {
+        userId: user.id,
+        action: 'ADJUST_QUANTITY',
+        entity: 'InventoryItem',
+        entityId: item.id,
+        metadata: {
+          reason: parsed.reason,
+          beforeQuantity: current.toFixed(3),
+          targetQuantity: parsed.targetQuantity.toFixed(3),
+          adjustment: delta.toFixed(3),
+          occurredAt: parsed.occurredAt.toISOString(),
+        },
+      },
+    });
+    await options.onCommitted?.(tx, result);
+    return result;
+  }, COMMAND_TRANSACTION_OPTIONS);
+}
 
 const schema = z.object({
   nameEn: z.string().min(1),
@@ -95,8 +197,6 @@ export async function setInventoryQuantity(
   _prev: ActionState,
   fd: FormData,
 ): Promise<ActionState> {
-  const user = await requireCap(CAP);
-  if (!user || (user.role !== 'OWNER' && user.role !== 'ADMIN')) return { error: 'forbidden' };
   const parsed = adjustmentSchema.safeParse({
     targetQuantity: reqField(fd, 'targetQuantity'),
     occurredAt: reqField(fd, 'occurredAt'),
@@ -104,56 +204,11 @@ export async function setInventoryQuantity(
   });
   if (!parsed.success) return { error: 'invalid' };
   const locale = reqField(fd, 'locale') || 'ar';
-
-  let changed = false;
-  await prisma.$transaction(async (tx) => {
-    const item = await tx.inventoryItem.findUnique({
-      where: { id },
-      include: { movements: { select: { quantity: true } } },
-    });
-    if (!item) throw new Error('inventory-not-found');
-    const current = item.movements.reduce((sum, movement) => sum + decimalNumber(movement.quantity), 0);
-    const delta = Number((parsed.data.targetQuantity - current).toFixed(3));
-    if (delta === 0) return;
-    changed = true;
-
-    await tx.stockMovement.create({
-      data: {
-        inventoryItemId: id,
-        occurredAt: parsed.data.occurredAt,
-        reason: 'ADJUSTMENT',
-        quantity: delta.toFixed(3),
-        reference: `Owner/Admin stock correction: ${parsed.data.reason}`,
-        branchId: item.branchId,
-      },
-    });
-    if (delta > 0) {
-      await tx.inventoryCostLayer.create({
-        data: {
-          inventoryItemId: id,
-          qtyReceived: delta.toFixed(3),
-          unitCost: (item.unitCost ?? 0).toString(),
-          receivedAt: parsed.data.occurredAt,
-        },
-      });
-    }
-    await tx.auditLog.create({
-      data: {
-        userId: user.id,
-        action: 'ADJUST_QUANTITY',
-        entity: 'InventoryItem',
-        entityId: id,
-        metadata: {
-          reason: parsed.data.reason,
-          beforeQuantity: current.toFixed(3),
-          targetQuantity: parsed.data.targetQuantity.toFixed(3),
-          adjustment: delta.toFixed(3),
-          occurredAt: parsed.data.occurredAt.toISOString(),
-        },
-      },
-    });
-  });
-  if (changed) await syncActiveCost(id);
+  try {
+    await adjustInventoryFromInput({ inventoryItemId: id, ...parsed.data });
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'invalid' };
+  }
   revalidatePath(LIST, 'page');
   revalidatePath(FINANCE, 'page');
   revalidatePath(LEDGER, 'page');

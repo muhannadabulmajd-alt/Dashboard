@@ -1,15 +1,22 @@
 import { z } from 'zod';
+import { AiPageContextPathSchema } from './ai-page-context';
 
 export const AI_MESSAGE_MAX_LENGTH = 4_000;
 export const AI_CONTEXT_MESSAGE_LIMIT = 12;
 export const AI_TOOL_ROUND_LIMIT = 4;
 export const AI_PENDING_ACTION_MINUTES = 15;
+export const AI_ATTACHMENT_MAX_COUNT = 4;
 
 export const AiChatRequestSchema = z.object({
   conversationId: z.string().cuid().optional(),
-  message: z.string().trim().min(1).max(AI_MESSAGE_MAX_LENGTH),
+  message: z.string().trim().max(AI_MESSAGE_MAX_LENGTH).optional(),
+  attachmentIds: z.array(z.string().cuid()).max(AI_ATTACHMENT_MAX_COUNT).optional(),
+  pageContextPath: AiPageContextPathSchema.optional(),
   locale: z.enum(['ar', 'en']),
-}).strict();
+}).strict().refine((data) => Boolean(data.message || data.attachmentIds?.length), {
+  message: 'A message or attachment is required.',
+  path: ['message'],
+});
 
 export type AiResultMetric = {
   label: string;
@@ -25,6 +32,11 @@ export type AiResultRow = {
   href?: string;
 };
 
+export type AiResultDownload = {
+  format: 'PDF' | 'XLSX' | 'CSV';
+  href: string;
+};
+
 export type AiResultCard = {
   title: string;
   answer?: string;
@@ -33,6 +45,8 @@ export type AiResultCard = {
   metrics?: AiResultMetric[];
   rows?: AiResultRow[];
   href?: string;
+  reportId?: string;
+  downloads?: AiResultDownload[];
 };
 
 export type AiClarification = {
@@ -44,10 +58,12 @@ export type AiClarification = {
 export type AiActionPreview = {
   id: string;
   type: string;
+  risk: 'MEDIUM' | 'HIGH';
   title: string;
   summary: string;
   fields: Array<{ label: string; value: string }>;
   warnings: string[];
+  confirmationChallenge?: string;
   expiresAt: string;
   status: string;
 };
@@ -58,7 +74,19 @@ export type AiStreamEvent =
   | { type: 'clarification'; clarification: AiClarification }
   | { type: 'result_card'; card: AiResultCard }
   | { type: 'action_preview'; action: AiActionPreview }
-  | { type: 'action_result'; actionId: string; status: string; message: string; href?: string; invoiceHref?: string }
+  | {
+      type: 'action_result';
+      actionId: string;
+      status: string;
+      message: string;
+      href?: string;
+      invoiceHref?: string;
+      documentHref?: string;
+      documentStatus?: 'READY' | 'PENDING';
+      committed?: boolean;
+      requiresSecondConfirmation?: boolean;
+      confirmationChallenge?: string;
+    }
   | { type: 'error'; message: string; debugId: string; retryable: boolean }
   | { type: 'completion'; conversationId: string; messageId?: string };
 

@@ -1,5 +1,6 @@
 import 'server-only';
-import { getTranslations } from 'next-intl/server';
+import arMessages from '@/i18n/messages/ar.json';
+import enMessages from '@/i18n/messages/en.json';
 
 const LABEL_KEYS = [
   'title',
@@ -23,6 +24,9 @@ const LABEL_KEYS = [
   'governorate',
   'address',
   'street',
+  'source',
+  'segment',
+  'customerNotes',
   'deliveryDetails',
   'fulfillment',
   'branch',
@@ -60,6 +64,13 @@ const LABEL_KEYS = [
 ] as const;
 
 export async function getInvoiceLabels(locale: string): Promise<Record<string, string>> {
-  const t = await getTranslations({ locale, namespace: 'invoice' });
-  return Object.fromEntries(LABEL_KEYS.map((key) => [key, t(key)]));
+  const invoice = locale === 'ar' ? arMessages.invoice : enMessages.invoice;
+  return Object.fromEntries(LABEL_KEYS.map((key) => {
+    const value = key.split('.').reduce<unknown>((current, segment) => {
+      if (!current || typeof current !== 'object') return undefined;
+      return (current as Record<string, unknown>)[segment];
+    }, invoice);
+    if (typeof value !== 'string') throw new Error(`missing_invoice_label:${key}`);
+    return [key, value];
+  }));
 }

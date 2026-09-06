@@ -5,8 +5,11 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { prisma } from '@/server/db/client';
 import { CUSTOMER_SEGMENTS } from '@/lib/enums';
-import { normalizeIraqiPhone } from '@/lib/phone';
-import { createCustomerCommand, customerDisplayLabel } from '@/server/commands/customers';
+import {
+  createCustomerCommand,
+  customerDisplayLabel,
+  updateCustomerCommand,
+} from '@/server/commands/customers';
 import { requireCap, audit, reqField, optField, type ActionState } from './shared';
 
 const LIST = '/[locale]/(dashboard)/admin/records/customers';
@@ -85,11 +88,10 @@ export async function updateCustomer(
   // externalId is immutable after creation (CR-4) — never update it.
   const { externalId, ...data } = r.data;
   void externalId;
-  await prisma.customer.update({
-    where: { id },
-    data: { ...data, normalizedPhone: normalizeIraqiPhone(data.phone) },
-  });
-  await audit(user.id, 'UPDATE', 'Customer', { id });
+  await updateCustomerCommand(
+    { customerId: id, ...data, reason: 'Customer form update' },
+    { actorId: user.id, source: 'customer-form' },
+  );
   revalidatePath(LIST, 'page');
   redirect(`/${locale}/admin/records/customers/${id}`);
 }

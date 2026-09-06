@@ -8,11 +8,14 @@ import { cancelPendingAction, confirmPendingAction } from '@/server/ai/actions';
 import { getAiAssistantConfig } from '@/server/ai/config';
 import { aiDebugId } from '@/server/ai/hash';
 import { processAssistantMessage } from '@/server/ai/service';
-import { renderInvoicePdf } from '@/server/invoice/pdf';
+import { storeAiAttachment } from '@/server/ai/attachments';
+import { aiDeliveryStatusText, getUserAiDeliveryHealth, replayUserAiDeliveries } from '@/server/ai/deliveries';
+import { deliverAiReportsToTelegram } from '@/server/ai/reports';
+import { assertAiCapabilityEnabled } from '@/server/ai/capabilities';
 import {
   answerTelegramCallback,
+  downloadTelegramFile,
   editTelegramMessage,
-  sendTelegramDocument,
   sendTelegramMessage,
   sendTelegramTyping,
 } from './api';
@@ -21,12 +24,13 @@ import {
   parseTelegramCallback,
   quickActionKeyboard,
   renderAssistantEvents,
+  statusKeyboard,
   TELEGRAM_QUICK_PROMPTS,
   type TelegramRenderedReply,
 } from './render';
 import { supportedTelegramUpdate, telegramLocale, TelegramUpdateSchema, type SupportedTelegramUpdate } from './schemas';
 
-function currentUser(record: { id: string; email: string; name: string; role: CurrentUser['role']; branchId: string | null }): CurrentUser {
+function currentUser(record: { id: string; email: string; name: string; role: CurrentUser['role']; branchId: string | null; defaultFinanceAccountId?: string | null }): CurrentUser {
   return record;
 }
 
@@ -76,7 +80,7 @@ async function updateIdentity(input: SupportedTelegramUpdate) {
     },
     include: {
       user: {
-        select: { id: true, email: true, name: true, role: true, branchId: true, isActive: true },
+        select: { id: true, email: true, name: true, role: true, branchId: true, defaultFinanceAccountId: true, isActive: true },
       },
     },
   });
@@ -127,49 +131,6 @@ async function deliverReply(input: {
       keyboard: index === chunks.length - 1 ? input.rendered.keyboard : undefined,
     });
   }
-}
-
-async function deliverCreatedOrderInvoice(input: {
-  chatId: string;
-  orderId: string;
-  userId: string;
-  locale: 'ar' | 'en';
-}): Promise<void> {
-  const delivered = await prisma.auditLog.findFirst({
-    where: {
-      action: 'TELEGRAM_INVOICE_PDF_SENT',
-      entity: 'Order',
-      entityId: input.orderId,
-    },
-    select: { id: true },
-  });
-  if (delivered) return;
-
-  const pdf = await renderInvoicePdf(input.orderId, input.locale);
-  if (!pdf) throw new Error('invoice_pdf_not_found');
-
-  const sent = await sendTelegramDocument({
-    chatId: input.chatId,
-    document: pdf.bytes,
-    filename: pdf.filename,
-    caption: input.locale === 'ar'
-      ? `تم إنشاء الطلب بنجاح. فاتورة ${pdf.orderNumber}`
-      : `Order recorded successfully. Invoice ${pdf.orderNumber}`,
-  });
-
-  await prisma.auditLog.create({
-    data: {
-      userId: input.userId,
-      action: 'TELEGRAM_INVOICE_PDF_SENT',
-      entity: 'Order',
-      entityId: input.orderId,
-      metadata: {
-        orderNumber: pdf.orderNumber,
-        telegramChatId: input.chatId,
-        telegramMessageId: sent.message_id,
-      },
-    },
-  });
 }
 
 function storedEvents(message: { content: string | null; payload: Prisma.JsonValue | null }): AiStreamEvent[] {
@@ -297,13 +258,21 @@ export async function processTelegramUpdate(telegramUpdateId: string): Promise<v
     }
 
     const command = commandName(telegram.text);
-    if (command === '/start' || command === '/help' || command === '/status') {
-      const text = command === '/status'
-        ? locale === 'ar'
-          ? `تم ربط تيليغرام بحساب أطلس: ${user.name}\nالدور: ${user.role}`
-          : `Telegram is linked to Atlas user ${user.name}.\nRole: ${user.role}`
-        : helpMessage(locale, user.name);
-      await sendTelegramMessage({ chatId: telegram.chatId, text, keyboard: quickActionKeyboard(locale) });
+    if (command === '/status') {
+      const health = await getUserAiDeliveryHealth(user.id);
+      const linked = locale === 'ar'
+        ? `مرتبط بحساب أطلس: ${user.name}\nالدور: ${user.role}`
+        : `Linked Atlas user: ${user.name}\nRole: ${user.role}`;
+      await sendTelegramMessage({
+        chatId: telegram.chatId,
+        text: `${linked}\n\n${aiDeliveryStatusText(health, locale)}`,
+        keyboard: statusKeyboard(locale, health.retryable),
+      });
+      await markComplete(receipt.id, 'SUCCEEDED');
+      return;
+    }
+    if (command === '/start' || command === '/help') {
+      await sendTelegramMessage({ chatId: telegram.chatId, text: helpMessage(locale, user.name), keyboard: quickActionKeyboard(locale) });
       await markComplete(receipt.id, 'SUCCEEDED');
       return;
     }
@@ -322,11 +291,41 @@ export async function processTelegramUpdate(telegramUpdateId: string): Promise<v
     }
 
     const callback = parseTelegramCallback(telegram.callbackData);
+    if (callback?.type === 'delivery-replay') {
+      const replay = await replayUserAiDeliveries({ userId: user.id });
+      const health = await getUserAiDeliveryHealth(user.id);
+      const text = locale === 'ar'
+        ? `تمت محاولة ${replay.attempted} عملية تسليم؛ اكتملت ${replay.completed} وتعذر ${replay.failed}.\n\n${aiDeliveryStatusText(health, locale)}`
+        : `Attempted ${replay.attempted} deliveries; ${replay.completed} completed and ${replay.failed} failed.\n\n${aiDeliveryStatusText(health, locale)}`;
+      await deliverReply({
+        updateRecordId: receipt.id,
+        chatId: telegram.chatId,
+        replyMessageId: telegram.messageId,
+        existingReplyMessageId: receipt.replyMessageId,
+        locale,
+        rendered: { chunks: [text], keyboard: statusKeyboard(locale, health.retryable) },
+      });
+      await markComplete(receipt.id, 'SUCCEEDED');
+      return;
+    }
     if (callback?.type === 'action') {
       const chatId = telegram.chatId;
-      const result = callback.command === 'confirm'
-        ? await confirmPendingAction({ actionId: callback.actionId, user, locale })
-        : await cancelPendingAction({ actionId: callback.actionId, user, locale });
+      const confirmationChallenge = callback.command === 'high-confirm'
+        ? await prisma.aiPendingAction.findFirst({
+            where: { id: callback.actionId, userId: user.id, status: 'PENDING' },
+            select: { confirmationChallenge: true },
+          })
+        : null;
+      const result = callback.command === 'cancel'
+        ? await cancelPendingAction({ actionId: callback.actionId, user, locale })
+        : await confirmPendingAction({
+            actionId: callback.actionId,
+            user,
+            locale,
+            confirmationText: callback.command === 'high-confirm'
+              ? confirmationChallenge?.confirmationChallenge ?? undefined
+              : undefined,
+          });
       const events: AiStreamEvent[] = [{
         type: 'action_result',
         actionId: result.actionId,
@@ -334,6 +333,11 @@ export async function processTelegramUpdate(telegramUpdateId: string): Promise<v
         message: result.message,
         href: result.href,
         invoiceHref: result.invoiceHref,
+        documentHref: result.documentHref,
+        documentStatus: result.documentStatus,
+        committed: result.committed,
+        requiresSecondConfirmation: result.requiresSecondConfirmation,
+        confirmationChallenge: result.confirmationChallenge,
       }];
       await deliverReply({
         updateRecordId: receipt.id,
@@ -343,41 +347,28 @@ export async function processTelegramUpdate(telegramUpdateId: string): Promise<v
         locale,
         rendered: renderAssistantEvents(events, { locale, origin: receipt.origin }),
       });
-      if (callback.command === 'confirm' && result.status === 'EXECUTED' && result.invoiceHref && result.recordId) {
-        await deliverCreatedOrderInvoice({
-          chatId,
-          orderId: result.recordId,
-          userId: user.id,
-          locale,
-        }).catch(async (error) => {
-          const errorCode = error instanceof Error ? error.message.slice(0, 120) : 'invoice_pdf_delivery_failed';
-          console.error('Telegram invoice PDF delivery failed', {
-            actionId: result.actionId,
-            orderId: result.recordId,
-            errorCode,
-          });
-          await prisma.auditLog.create({
-            data: {
-              userId: user.id,
-              action: 'TELEGRAM_INVOICE_PDF_FAILED',
-              entity: 'Order',
-              entityId: result.recordId,
-              metadata: { pendingActionId: result.actionId, errorCode },
-            },
-          }).catch(() => undefined);
-          await sendTelegramMessage({
-            chatId,
-            text: locale === 'ar'
-              ? 'تم حفظ الطلب، لكن تعذر إرسال ملف الفاتورة الآن. اضغط تأكيد مرة أخرى لإعادة المحاولة.'
-              : 'The order was saved, but the invoice PDF could not be sent. Press Confirm again to retry.',
-          }).catch(() => undefined);
-        });
-      }
       await markComplete(receipt.id, 'SUCCEEDED');
       return;
     }
 
     let message = telegram.text?.trim() ?? '';
+    const attachmentIds: string[] = [];
+    if (telegram.media) {
+      await assertAiCapabilityEnabled('MEDIA_REPORTS');
+      if (telegram.media.fileSize && telegram.media.fileSize > aiConfig.mediaMaxBytes) {
+        throw new Error('attachment_too_large');
+      }
+      const downloaded = await downloadTelegramFile(telegram.media.fileId, aiConfig.mediaMaxBytes);
+      const attachment = await storeAiAttachment({
+        userId: user.id,
+        channel: 'TELEGRAM',
+        bytes: downloaded.bytes,
+        declaredMimeType: telegram.media.mimeType,
+        fileName: telegram.media.fileName,
+        telegramFileId: telegram.media.fileId,
+      });
+      attachmentIds.push(attachment.id);
+    }
     let conversationId: string | undefined;
     if (callback?.type === 'quick') message = TELEGRAM_QUICK_PROMPTS[callback.key]?.[locale] ?? '';
     if (callback?.type === 'choice') {
@@ -387,10 +378,12 @@ export async function processTelegramUpdate(telegramUpdateId: string): Promise<v
         conversationId = selected.conversationId;
       }
     }
-    if (!message) {
+    if (!message && !attachmentIds.length) {
       await sendTelegramMessage({
         chatId: telegram.chatId,
-        text: locale === 'ar' ? 'أرسل رسالة نصية أو اختر أحد الأزرار.' : 'Send a text message or choose one of the buttons.',
+        text: locale === 'ar'
+          ? 'أرسل رسالة نصية أو صورة وصل أو ملف PDF أو رسالة صوتية، أو اختر أحد الأزرار.'
+          : 'Send text, a receipt image, a PDF, or a voice message, or choose one of the buttons.',
         keyboard: quickActionKeyboard(locale),
       });
       await markComplete(receipt.id, 'IGNORED', { errorCode: 'unsupported_message' });
@@ -426,6 +419,7 @@ export async function processTelegramUpdate(telegramUpdateId: string): Promise<v
       user,
       locale,
       message,
+      attachmentIds,
       conversationId,
       channel: 'TELEGRAM',
       externalThreadId: telegram.chatId,
@@ -447,11 +441,18 @@ export async function processTelegramUpdate(telegramUpdateId: string): Promise<v
         messageId: result.messageId,
       }),
     });
+    await deliverAiReportsToTelegram({
+      events: result.events,
+      userId: user.id,
+      chatId: telegram.chatId,
+      locale,
+      origin: receipt.origin,
+    });
     await markComplete(receipt.id, 'SUCCEEDED');
   } catch (error) {
     const errorCode = error instanceof Error ? error.message.split(':')[0].slice(0, 120) : 'telegram_processing_failed';
     const retryable = shouldRetryTelegramProcessing(error);
-    console.error('Telegram AI update failed', { telegramUpdateId, debugId, errorCode, error });
+    console.error('Telegram AI update failed', { telegramUpdateId, debugId, errorCode, retryable });
     await prisma.telegramUpdate.update({
       where: { id: telegramUpdateId },
       data: {

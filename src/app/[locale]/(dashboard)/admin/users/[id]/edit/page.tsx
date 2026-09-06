@@ -19,9 +19,14 @@ export default async function EditUserPage({
   const { id } = await params;
   const t = await getTranslations('admin');
 
-  const [u, branches] = await Promise.all([
+  const [u, branches, financeAccounts] = await Promise.all([
     prisma.user.findUnique({ where: { id } }),
     prisma.branch.findMany({ select: { id: true, nameEn: true, nameAr: true } }),
+    prisma.financeAccount.findMany({
+      where: { isActive: true, currency: 'IQD', type: { not: 'PAYMENT_GATEWAY' } },
+      select: { id: true, name: true },
+      orderBy: { name: 'asc' },
+    }),
   ]);
   if (!u) notFound();
 
@@ -40,8 +45,19 @@ export default async function EditUserPage({
       type: 'select',
       options: branches.map((b) => ({ id: b.id, name: locale === 'ar' ? b.nameAr : b.nameEn })).map((b) => ({ value: b.id, label: b.name })),
     },
+    {
+      name: 'defaultFinanceAccountId',
+      label: t('defaultFinanceAccount'),
+      type: 'select',
+      options: financeAccounts.map((account) => ({ value: account.id, label: account.name })),
+    },
   ];
-  const initial = { name: u.name, role: u.role, branchId: u.branchId ?? '' };
+  const initial = {
+    name: u.name,
+    role: u.role,
+    branchId: u.branchId ?? '',
+    defaultFinanceAccountId: u.defaultFinanceAccountId ?? '',
+  };
   const errors = {
     invalid: t('invalid'),
     forbidden: t('forbidden'),
