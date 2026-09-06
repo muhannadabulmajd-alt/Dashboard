@@ -14,6 +14,7 @@ vi.mock('@/server/telegram/api', () => ({
 }));
 
 import { createDashboardConfig } from '@/lib/dashboard-builder';
+import { formatProductBarcode, formatRetailBarcode } from '@/lib/barcode';
 import type { CurrentUser } from '@/server/auth/session';
 import { confirmPendingAction } from '@/server/ai/actions';
 import {
@@ -294,11 +295,12 @@ describeIntegration('AI Assistant Phase 2 governed operations', { timeout: remot
     secondAccountId = secondAccount.id;
     owner = await createFixtureUser(branchId, accountId);
 
+    const barcodeSequence = randomInt(100_000_000, 999_999_999);
     const productRow = await prisma.product.create({
       data: {
         sku: `${runMarker}-SKU`,
-        barcodeValue: `${runMarker}-BARCODE`,
-        retailBarcode: `${runMarker}-RETAIL`,
+        barcodeValue: formatProductBarcode(barcodeSequence),
+        retailBarcode: formatRetailBarcode(barcodeSequence),
         nameEn: `${runMarker} product`,
         nameAr: `منتج ${runMarker}`,
         productLine: 'ACCESSORIES',
