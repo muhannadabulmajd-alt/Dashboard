@@ -1,25 +1,27 @@
+import 'server-only';
 import { randomInt } from 'node:crypto';
-import { PrismaClient } from '@prisma/client';
+import type { TelegramIdentityStatus } from '@prisma/client';
+import { prisma } from '@/server/db/client';
+import {
+  deleteTelegramWebhook,
+  getTelegramBot,
+  getTelegramWebhookInfo,
+  setTelegramWebhook,
+  type TelegramWebhookInfo,
+} from './api';
+import { requireTelegramConfig } from './config';
 
-const prisma = new PrismaClient();
-
-type TelegramWebhookInfo = {
-  url: string;
-  has_custom_certificate: boolean;
-  pending_update_count: number;
-  max_connections?: number;
-  allowed_updates?: string[];
-};
-
-type TelegramBot = {
-  id: number;
-  is_bot: boolean;
-};
-
-type TelegramResponse<T> = {
-  ok: boolean;
-  result?: T;
-  error_code?: number;
+export type TelegramPreviewVerificationResult = {
+  botAuthentication: 'passed';
+  webhookAuth: 'passed';
+  privateChatOnly: 'passed';
+  statusDelivery: 'passed';
+  updateIdempotency: 'passed';
+  orderCustomerAtomicity: 'passed';
+  callbackIdempotency: 'passed';
+  pdfPersistence: 'passed';
+  telegramDocumentDelivery: 'passed';
+  webhookRestoration: 'passed';
 };
 
 function requiredEnv(name: string): string {
@@ -28,12 +30,14 @@ function requiredEnv(name: string): string {
   return value;
 }
 
-function requireSafeTarget(): {
+function requireSafeTarget(input: { previewOrigin: string; bypassSecret: string }): {
   previewUrl: URL;
-  bypassSecret: string;
-  telegramToken: string;
   telegramSecret: string;
 } {
+  if (process.env.VERCEL_ENV !== 'preview') throw new Error('telegram_verification_preview_only');
+  if (process.env.AI_PHASE2_VERIFICATION_ENABLED !== 'true') {
+    throw new Error('telegram_verification_disabled');
+  }
   if (process.env.AI_PHASE2_DATABASE_ISOLATED !== 'true') {
     throw new Error('telegram_preview_requires_isolated_database');
   }
@@ -42,39 +46,19 @@ function requireSafeTarget(): {
   if (databaseUrl.hostname !== expectedHost || !databaseUrl.hostname.endsWith('.neon.tech')) {
     throw new Error('telegram_preview_database_identity_mismatch');
   }
-  const previewUrl = new URL(requiredEnv('AI_PHASE2_PREVIEW_URL'));
+  const previewUrl = new URL(input.previewOrigin);
+  const deploymentHost = process.env.VERCEL_URL?.trim();
   if (
     previewUrl.protocol !== 'https:'
     || !previewUrl.hostname.endsWith('.vercel.app')
     || previewUrl.hostname === 'dashboard.laheeb.coffee'
+    || (deploymentHost && previewUrl.hostname !== deploymentHost)
   ) {
     throw new Error('telegram_preview_target_invalid');
   }
-  if (process.env.TELEGRAM_BOT_ENABLED !== 'true') throw new Error('telegram_preview_bot_disabled');
-  return {
-    previewUrl,
-    bypassSecret: requiredEnv('AI_PHASE2_VERCEL_BYPASS_SECRET'),
-    telegramToken: requiredEnv('TELEGRAM_BOT_TOKEN'),
-    telegramSecret: requiredEnv('TELEGRAM_WEBHOOK_SECRET'),
-  };
-}
-
-async function telegramRequest<T>(
-  token: string,
-  method: string,
-  payload: Record<string, unknown> = {},
-): Promise<T> {
-  const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(20_000),
-  });
-  const body = await response.json().catch(() => null) as TelegramResponse<T> | null;
-  if (!response.ok || !body?.ok || body.result === undefined) {
-    throw new Error(`telegram_preview_${method.toLowerCase()}_${body?.error_code ?? response.status}`);
-  }
-  return body.result;
+  if (!input.bypassSecret.trim()) throw new Error('telegram_preview_bypass_missing');
+  const config = requireTelegramConfig();
+  return { previewUrl, telegramSecret: config.webhookSecret };
 }
 
 async function nextUpdateId(): Promise<number> {
@@ -127,66 +111,73 @@ async function waitForUpdate(updateId: number, timeoutMs = 180_000) {
       },
     });
     if (update?.status === 'SUCCEEDED') return update;
-    if (update?.status === 'IGNORED') throw new Error(`telegram_preview_update_ignored_${update.errorCode ?? 'unknown'}`);
+    if (update?.status === 'IGNORED') {
+      throw new Error(`telegram_preview_update_ignored_${update.errorCode ?? 'unknown'}`);
+    }
     await new Promise((resolve) => setTimeout(resolve, 1_000));
   }
   throw new Error('telegram_preview_update_timeout');
 }
 
-async function restoreWebhook(
-  token: string,
-  secret: string,
-  original: TelegramWebhookInfo,
-): Promise<void> {
+async function restoreWebhook(secret: string, original: TelegramWebhookInfo): Promise<void> {
   if (!original.url) {
-    await telegramRequest<boolean>(token, 'deleteWebhook', { drop_pending_updates: false });
+    await deleteTelegramWebhook();
     return;
   }
-  const payload: Record<string, unknown> = {
+  await setTelegramWebhook({
     url: original.url,
-    secret_token: secret,
-    drop_pending_updates: false,
-  };
-  if (original.max_connections) payload.max_connections = original.max_connections;
-  if (original.allowed_updates?.length) payload.allowed_updates = original.allowed_updates;
-  await telegramRequest<boolean>(token, 'setWebhook', payload);
+    secretToken: secret,
+    maxConnections: original.max_connections,
+    allowedUpdates: original.allowed_updates,
+  });
 }
 
-async function main(): Promise<void> {
-  const { previewUrl, bypassSecret, telegramToken, telegramSecret } = requireSafeTarget();
-  const e2eEmail = requiredEnv('AI_PHASE2_E2E_EMAIL');
-  const productSku = requiredEnv('AI_PHASE2_E2E_PRODUCT_SKU');
-  const runId = requiredEnv('AI_PHASE2_E2E_RUN_ID').replace(/\D/g, '').slice(-7).padStart(7, '3');
-  const originalWebhook = await telegramRequest<TelegramWebhookInfo>(telegramToken, 'getWebhookInfo');
-  const bot = await telegramRequest<TelegramBot>(telegramToken, 'getMe');
-  if (!bot.is_bot || !Number.isSafeInteger(bot.id)) throw new Error('telegram_preview_bot_verification_failed');
-  if (originalWebhook.has_custom_certificate) throw new Error('telegram_preview_custom_certificate_unsupported');
+export async function verifyTelegramPreview(input: {
+  previewOrigin: string;
+  bypassSecret: string;
+  e2eUserId: string;
+  productSku: string;
+  runId: string;
+}): Promise<TelegramPreviewVerificationResult> {
+  const { previewUrl, telegramSecret } = requireSafeTarget(input);
+  const runId = input.runId.replace(/\D/g, '').slice(-7).padStart(7, '3');
+  if (!input.productSku.trim()) throw new Error('telegram_preview_product_missing');
+
+  const originalWebhook = await getTelegramWebhookInfo();
+  const bot = await getTelegramBot();
+  if (!bot.is_bot || !Number.isSafeInteger(bot.id)) {
+    throw new Error('telegram_preview_bot_verification_failed');
+  }
+  if (originalWebhook.has_custom_certificate) {
+    throw new Error('telegram_preview_custom_certificate_unsupported');
+  }
   if (originalWebhook.url && new URL(originalWebhook.url).hostname === 'dashboard.laheeb.coffee') {
     throw new Error('telegram_preview_bot_points_to_production');
   }
 
   const featureWebhook = new URL('/api/telegram/webhook', previewUrl);
-  featureWebhook.searchParams.set('x-vercel-protection-bypass', bypassSecret);
+  featureWebhook.searchParams.set('x-vercel-protection-bypass', input.bypassSecret);
   let webhookChanged = false;
+  let identityRestore: { id: string; userId: string; status: TelegramIdentityStatus; revokedAt: Date | null } | null = null;
   let verificationComplete = false;
 
   try {
-    // The request can succeed remotely even if the response is lost, so restore on every outcome.
     webhookChanged = true;
-    await telegramRequest<boolean>(telegramToken, 'setWebhook', {
+    await setTelegramWebhook({
       url: featureWebhook.toString(),
-      secret_token: telegramSecret,
-      allowed_updates: ['message', 'callback_query'],
-      drop_pending_updates: false,
+      secretToken: telegramSecret,
+      allowedUpdates: ['message', 'callback_query'],
     });
-    const registered = await telegramRequest<TelegramWebhookInfo>(telegramToken, 'getWebhookInfo');
-    if (registered.url !== featureWebhook.toString()) throw new Error('telegram_preview_webhook_not_registered');
+    const registered = await getTelegramWebhookInfo();
+    if (registered.url !== featureWebhook.toString()) {
+      throw new Error('telegram_preview_webhook_not_registered');
+    }
 
     const webhookEndpoint = new URL('/api/telegram/webhook', previewUrl);
     const rejectedId = await nextUpdateId();
     await postUpdate({
       url: webhookEndpoint,
-      bypassSecret,
+      bypassSecret: input.bypassSecret,
       telegramSecret: `${telegramSecret}-invalid`,
       expectedStatus: 401,
       update: { update_id: rejectedId },
@@ -195,7 +186,7 @@ async function main(): Promise<void> {
     const groupId = await nextUpdateId();
     const groupResult = await postUpdate({
       url: webhookEndpoint,
-      bypassSecret,
+      bypassSecret: input.bypassSecret,
       telegramSecret,
       update: {
         update_id: groupId,
@@ -218,12 +209,14 @@ async function main(): Promise<void> {
       orderBy: { linkedAt: 'asc' },
       select: {
         id: true,
+        userId: true,
+        status: true,
+        revokedAt: true,
         telegramUserId: true,
         privateChatId: true,
         firstName: true,
         lastName: true,
         username: true,
-        languageCode: true,
       },
     });
     if (!identity?.privateChatId) throw new Error('telegram_preview_linked_identity_missing');
@@ -232,10 +225,16 @@ async function main(): Promise<void> {
     if (!Number.isSafeInteger(telegramUserId) || !Number.isSafeInteger(privateChatId)) {
       throw new Error('telegram_preview_identity_invalid');
     }
-    const e2eUser = await prisma.user.findUniqueOrThrow({
-      where: { email: e2eEmail },
+    const e2eUser = await prisma.user.findFirstOrThrow({
+      where: { id: input.e2eUserId, email: 'ai-phase2-preview@laheeb.test', role: 'OWNER', isActive: true },
       select: { id: true },
     });
+    identityRestore = {
+      id: identity.id,
+      userId: identity.userId,
+      status: identity.status,
+      revokedAt: identity.revokedAt,
+    };
     await prisma.telegramIdentity.update({
       where: { id: identity.id },
       data: { userId: e2eUser.id, status: 'ACTIVE', revokedAt: null },
@@ -249,41 +248,36 @@ async function main(): Promise<void> {
       language_code: 'en',
     };
     const statusUpdateId = await nextUpdateId();
+    const statusPayload = {
+      update_id: statusUpdateId,
+      message: {
+        message_id: statusUpdateId,
+        from: telegramUser,
+        chat: { id: privateChatId, type: 'private' },
+        text: '/status',
+      },
+    };
     await postUpdate({
       url: webhookEndpoint,
-      bypassSecret,
+      bypassSecret: input.bypassSecret,
       telegramSecret,
-      update: {
-        update_id: statusUpdateId,
-        message: {
-          message_id: statusUpdateId,
-          from: telegramUser,
-          chat: { id: privateChatId, type: 'private' },
-          text: '/status',
-        },
-      },
+      update: statusPayload,
     });
     const statusReceipt = await waitForUpdate(statusUpdateId);
     const duplicateStatus = await postUpdate({
       url: webhookEndpoint,
-      bypassSecret,
+      bypassSecret: input.bypassSecret,
       telegramSecret,
-      update: {
-        update_id: statusUpdateId,
-        message: {
-          message_id: statusUpdateId,
-          from: telegramUser,
-          chat: { id: privateChatId, type: 'private' },
-          text: '/status',
-        },
-      },
+      update: statusPayload,
     });
     if (duplicateStatus.duplicate !== true) throw new Error('telegram_preview_duplicate_not_detected');
     const duplicateReceipt = await prisma.telegramUpdate.findUniqueOrThrow({
       where: { updateId: String(statusUpdateId) },
       select: { attempts: true },
     });
-    if (duplicateReceipt.attempts !== statusReceipt.attempts) throw new Error('telegram_preview_duplicate_reprocessed');
+    if (duplicateReceipt.attempts !== statusReceipt.attempts) {
+      throw new Error('telegram_preview_duplicate_reprocessed');
+    }
 
     const customerName = `Phase Two Telegram Customer ${runId}`;
     const phone = `+964770${runId}`;
@@ -293,7 +287,7 @@ async function main(): Promise<void> {
     const orderUpdateId = await nextUpdateId();
     await postUpdate({
       url: webhookEndpoint,
-      bypassSecret,
+      bypassSecret: input.bypassSecret,
       telegramSecret,
       update: {
         update_id: orderUpdateId,
@@ -309,7 +303,7 @@ async function main(): Promise<void> {
             'Governorate: BAGHDAD',
             `Street: ${street}`,
             'Customer notes: Phase 2 Telegram isolated verification',
-            `Product: 1 x ${productSku}`,
+            `Product: 1 x ${input.productSku}`,
             'Channel: POS',
             'Fulfillment: PICKUP',
             'Status: PENDING',
@@ -337,7 +331,7 @@ async function main(): Promise<void> {
       select: { id: true, validatedData: true },
     });
     const validated = JSON.stringify(pendingAction.validatedData);
-    for (const expected of [customerName, runId, address, street, productSku, orderMarker]) {
+    for (const expected of [customerName, runId, address, street, input.productSku, orderMarker]) {
       if (!validated.includes(expected)) throw new Error('telegram_preview_order_field_missing');
     }
 
@@ -356,7 +350,7 @@ async function main(): Promise<void> {
     };
     await postUpdate({
       url: webhookEndpoint,
-      bypassSecret,
+      bypassSecret: input.bypassSecret,
       telegramSecret,
       update: callbackPayload,
     });
@@ -365,7 +359,9 @@ async function main(): Promise<void> {
       where: { id: pendingAction.id },
       select: { status: true, recordId: true },
     });
-    if (executed.status !== 'EXECUTED' || !executed.recordId) throw new Error('telegram_preview_order_not_executed');
+    if (executed.status !== 'EXECUTED' || !executed.recordId) {
+      throw new Error('telegram_preview_order_not_executed');
+    }
 
     const [order, receipt, orderCount] = await Promise.all([
       prisma.order.findUniqueOrThrow({
@@ -378,7 +374,7 @@ async function main(): Promise<void> {
       }),
       prisma.order.count({ where: { notes: orderMarker } }),
     ]);
-    if (orderCount !== 1 || order.lines.length !== 1 || order.lines[0].sku !== productSku) {
+    if (orderCount !== 1 || order.lines.length !== 1 || order.lines[0].sku !== input.productSku) {
       throw new Error('telegram_preview_order_persistence_mismatch');
     }
     const customer = order.customer;
@@ -411,11 +407,13 @@ async function main(): Promise<void> {
 
     const duplicateCallback = await postUpdate({
       url: webhookEndpoint,
-      bypassSecret,
+      bypassSecret: input.bypassSecret,
       telegramSecret,
       update: callbackPayload,
     });
-    if (duplicateCallback.duplicate !== true) throw new Error('telegram_preview_callback_duplicate_not_detected');
+    if (duplicateCallback.duplicate !== true) {
+      throw new Error('telegram_preview_callback_duplicate_not_detected');
+    }
     const [finalOrderCount, finalReceiptCount] = await Promise.all([
       prisma.order.count({ where: { notes: orderMarker } }),
       prisma.aiExecutionReceipt.count({ where: { pendingActionId: pendingAction.id } }),
@@ -423,17 +421,31 @@ async function main(): Promise<void> {
     if (finalOrderCount !== 1 || finalReceiptCount !== 1) {
       throw new Error('telegram_preview_duplicate_write_detected');
     }
-
     verificationComplete = true;
   } finally {
-    if (webhookChanged) {
-      await restoreWebhook(telegramToken, telegramSecret, originalWebhook);
-      const restored = await telegramRequest<TelegramWebhookInfo>(telegramToken, 'getWebhookInfo');
-      if (restored.url !== originalWebhook.url) throw new Error('telegram_preview_webhook_restore_failed');
+    try {
+      if (identityRestore) {
+        await prisma.telegramIdentity.update({
+          where: { id: identityRestore.id },
+          data: {
+            userId: identityRestore.userId,
+            status: identityRestore.status,
+            revokedAt: identityRestore.revokedAt,
+          },
+        });
+      }
+    } finally {
+      if (webhookChanged) {
+        await restoreWebhook(telegramSecret, originalWebhook);
+        const restored = await getTelegramWebhookInfo();
+        if (restored.url !== originalWebhook.url) {
+          throw new Error('telegram_preview_webhook_restore_failed');
+        }
+      }
     }
   }
   if (!verificationComplete) throw new Error('telegram_preview_verification_incomplete');
-  process.stdout.write(JSON.stringify({
+  return {
     botAuthentication: 'passed',
     webhookAuth: 'passed',
     privateChatOnly: 'passed',
@@ -444,14 +456,5 @@ async function main(): Promise<void> {
     pdfPersistence: 'passed',
     telegramDocumentDelivery: 'passed',
     webhookRestoration: 'passed',
-  }));
+  };
 }
-
-main()
-  .catch((error) => {
-    console.error(error instanceof Error ? error.message : 'telegram_preview_verification_failed');
-    process.exitCode = 1;
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });

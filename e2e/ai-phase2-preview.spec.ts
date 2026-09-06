@@ -9,6 +9,7 @@ function requiredEnv(name: string): string {
 const email = requiredEnv('AI_PHASE2_E2E_EMAIL');
 const password = requiredEnv('AI_PHASE2_E2E_PASSWORD');
 const productSku = requiredEnv('AI_PHASE2_E2E_PRODUCT_SKU');
+const protectionBypass = requiredEnv('AI_PHASE2_VERCEL_BYPASS_SECRET');
 const runId = process.env.AI_PHASE2_E2E_RUN_ID ?? 'manual';
 
 function fixturePhone(prefix: '780' | '781'): string {
@@ -161,5 +162,35 @@ test.describe.serial('Atlas AI Phase 2 isolated preview', () => {
       expect(response.ok()).toBe(true);
       expect(await response.text()).not.toMatch(forbidden);
     }
+  });
+
+  test('verifies Telegram authentication, idempotency, order execution, PDF delivery, and webhook restoration', async ({ page }) => {
+    test.setTimeout(300_000);
+    await login(page);
+    const response = await page.context().request.post('/api/ai-assistant/verification/telegram', {
+      headers: {
+        'x-vercel-protection-bypass': protectionBypass,
+        'x-ai-phase2-verification-bypass': protectionBypass,
+      },
+      data: { productSku, runId },
+      timeout: 280_000,
+    });
+    const body = await response.json();
+    expect(response.status(), JSON.stringify(body)).toBe(200);
+    expect(body).toEqual({
+      ok: true,
+      result: {
+        botAuthentication: 'passed',
+        webhookAuth: 'passed',
+        privateChatOnly: 'passed',
+        statusDelivery: 'passed',
+        updateIdempotency: 'passed',
+        orderCustomerAtomicity: 'passed',
+        callbackIdempotency: 'passed',
+        pdfPersistence: 'passed',
+        telegramDocumentDelivery: 'passed',
+        webhookRestoration: 'passed',
+      },
+    });
   });
 });

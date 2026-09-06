@@ -16,6 +16,11 @@ This matrix is a permanent release gate for web AI and Telegram mutations. Datab
 | Multi-line spending lost classifications or decimals | Canonical finance fixtures assert line totals, three-decimal quantities, OPEX treatment, ledger rows, party, and account. |
 | Supplier phone, email, or address disappeared from a spending preview | Expense and purchase previews must show every supplied new-party field before confirmation; the persisted party and finance voucher must retain the same details. |
 | Spending partially committed | Every party, entry, line, payment, audit, cost-sync, and final-hook checkpoint is failed independently and rolls back the party, finance entry, ledger lines, stock layers, movements, and assets. |
+| Purchase, partial payment, or payable drifted apart | A governed partial inventory purchase must atomically preserve the supplier, payable, settlement, ledger classification, stock movement, FIFO layer, receipt, audit, and PDF. |
+| Transfer, refund, reversal, or reclassification executed twice | Replays must return the original receipt and PDF; high-risk corrections require the exact affected record number before one mutation is committed. |
+| Order completion missed payment, COGS, or stock | A pending order completed through AI must reconcile its status, customer payment, sales income, COGS, and one stock deduction. |
+| Inventory or roasting operation was only partially synchronized | Adjustment and roast fixtures assert final quantities, production movements, FIFO output layer, operator, branch, audit, receipt, and PDF. |
+| Customer, supplier, or dashboard update lacked a document | Every governed record update and dashboard draft must persist one attributed receipt and one downloadable persisted-data PDF. |
 | Raw structured tool data appeared in chat | Narrative and tool-contract tests prohibit untrusted structured payloads from being rendered as assistant prose. |
 | False success or false “no data changed” after commit | Once the receipt exists, confirmation recovery returns the persisted success result even if a later delivery attempt fails. |
 | Missing order/invoice link | Successful order results assert direct record, invoice, and document links. |

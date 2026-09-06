@@ -77,6 +77,25 @@ export function getTelegramWebhookInfo(): Promise<TelegramWebhookInfo> {
   return telegramRequest<TelegramWebhookInfo>('getWebhookInfo');
 }
 
+export function setTelegramWebhook(input: {
+  url: string;
+  secretToken: string;
+  maxConnections?: number;
+  allowedUpdates?: string[];
+}): Promise<boolean> {
+  return telegramRequest<boolean>('setWebhook', {
+    url: input.url,
+    secret_token: input.secretToken,
+    drop_pending_updates: false,
+    ...(input.maxConnections !== undefined ? { max_connections: input.maxConnections } : {}),
+    ...(input.allowedUpdates !== undefined ? { allowed_updates: input.allowedUpdates } : {}),
+  });
+}
+
+export function deleteTelegramWebhook(): Promise<boolean> {
+  return telegramRequest<boolean>('deleteWebhook', { drop_pending_updates: false });
+}
+
 export function getTelegramFile(fileId: string): Promise<TelegramFile> {
   return telegramRequest<TelegramFile>('getFile', { file_id: fileId });
 }
@@ -133,11 +152,10 @@ export async function downloadTelegramFile(fileId: string, maxBytes: number): Pr
 
 export async function registerTelegramWebhook(url: string): Promise<void> {
   const { webhookSecret } = requireTelegramConfig();
-  await telegramRequest<boolean>('setWebhook', {
+  await setTelegramWebhook({
     url,
-    secret_token: webhookSecret,
-    allowed_updates: ['message', 'callback_query'],
-    drop_pending_updates: false,
+    secretToken: webhookSecret,
+    allowedUpdates: ['message', 'callback_query'],
   });
   await telegramRequest<boolean>('setMyCommands', {
     commands: [

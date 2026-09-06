@@ -9,7 +9,7 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:ai-phase2:integration": "vitest run tests/ai-phase2-integration.test.ts",
+    "test:ai-phase2:integration": "vitest run tests/ai-phase2-integration.test.ts tests/ai-phase2-operations-integration.test.ts",
     "test:watch": "vitest",
     "check:reconciliation": "tsx scripts/check-reconciliation.ts",
     "check:translations": "tsx scripts/check-translations.ts",

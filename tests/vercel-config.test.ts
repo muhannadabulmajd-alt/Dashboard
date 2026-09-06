@@ -14,7 +14,11 @@ const phase2Workflow = readFileSync(
   'utf8',
 );
 const telegramPreviewVerification = readFileSync(
-  new URL('../scripts/verify-ai-phase2-telegram-preview.ts', import.meta.url),
+  new URL('../src/server/telegram/preview-verification.ts', import.meta.url),
+  'utf8',
+);
+const telegramPreviewRoute = readFileSync(
+  new URL('../src/app/api/ai-assistant/verification/telegram/route.ts', import.meta.url),
   'utf8',
 );
 
@@ -39,12 +43,16 @@ describe('Vercel deployment configuration', () => {
   });
 
   it('restores the Preview Telegram webhook after isolated verification', () => {
-    expect(phase2Workflow).toContain('Verify the Preview Telegram bot and restore its webhook');
+    expect(phase2Workflow).toContain('Verify the deployed AI and Telegram journeys');
+    expect(phase2Workflow).toContain('AI_PHASE2_VERIFICATION_ENABLED preview');
+    expect(phase2Workflow).not.toContain('vercel env pull "$env_file"');
     expect(telegramPreviewVerification).toContain("hostname === 'dashboard.laheeb.coffee'");
     expect(telegramPreviewVerification).toContain('finally {');
     expect(telegramPreviewVerification).toContain(
-      'await restoreWebhook(telegramToken, telegramSecret, originalWebhook)',
+      'await restoreWebhook(telegramSecret, originalWebhook)',
     );
     expect(telegramPreviewVerification).toContain("delivery.status !== 'DELIVERED'");
+    expect(telegramPreviewVerification).toContain('AI_PHASE2_DATABASE_ISOLATED');
+    expect(telegramPreviewRoute).toContain("userOrResponse.email !== 'ai-phase2-preview@laheeb.test'");
   });
 });

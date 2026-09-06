@@ -145,9 +145,13 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           DATABASE_URL: ${{ steps.neon.outputs.db_url_pooled }}
           DIRECT_URL: ${{ steps.neon.outputs.db_url }}
+          EXPECTED_DB_HOST: ${{ steps.neon.outputs.db_host_pooled }}
         run: |
           printf '%s' "$DATABASE_URL" | vercel env add DATABASE_URL preview --git-branch "$FEATURE_BRANCH" --sensitive --force --yes --token="$VERCEL_TOKEN"
           printf '%s' "$DIRECT_URL" | vercel env add DIRECT_URL preview --git-branch "$FEATURE_BRANCH" --sensitive --force --yes --token="$VERCEL_TOKEN"
+          printf '%s' 'true' | vercel env add AI_PHASE2_DATABASE_ISOLATED preview --git-branch "$FEATURE_BRANCH" --force --yes --token="$VERCEL_TOKEN"
+          printf '%s' 'true' | vercel env add AI_PHASE2_VERIFICATION_ENABLED preview --git-branch "$FEATURE_BRANCH" --force --yes --token="$VERCEL_TOKEN"
+          printf '%s' "$EXPECTED_DB_HOST" | vercel env add AI_PHASE2_EXPECTED_DB_HOST preview --git-branch "$FEATURE_BRANCH" --force --yes --token="$VERCEL_TOKEN"
           vercel pull --yes --environment=preview --git-branch="$FEATURE_BRANCH" --token="$VERCEL_TOKEN"
 
       - name: Force a fresh remote Preview build
@@ -167,7 +171,7 @@ jobs:
       - name: Install Chromium for remote-only browser verification
         run: pnpm exec playwright install --with-deps chromium
 
-      - name: Verify the deployed AI journey
+      - name: Verify the deployed AI and Telegram journeys
         env:
           AI_PHASE2_PREVIEW_URL: ${{ steps.preview.outputs.url }}
           AI_PHASE2_VERCEL_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
@@ -179,40 +183,6 @@ jobs:
           test -n "$AI_PHASE2_VERCEL_BYPASS_SECRET"
           echo "::add-mask::$AI_PHASE2_VERCEL_BYPASS_SECRET"
           pnpm exec playwright test e2e/ai-phase2-preview.spec.ts
-
-      - name: Verify the Preview Telegram bot and restore its webhook
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          DATABASE_URL: ${{ steps.neon.outputs.db_url_pooled }}
-          DIRECT_URL: ${{ steps.neon.outputs.db_url }}
-          AI_PHASE2_DATABASE_ISOLATED: 'true'
-          AI_PHASE2_EXPECTED_DB_HOST: ${{ steps.neon.outputs.db_host_pooled }}
-          AI_PHASE2_PREVIEW_URL: ${{ steps.preview.outputs.url }}
-          AI_PHASE2_VERCEL_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
-          AI_PHASE2_E2E_EMAIL: ${{ steps.fixture.outputs.email }}
-          AI_PHASE2_E2E_PRODUCT_SKU: ${{ steps.fixture.outputs.product_sku }}
-          AI_PHASE2_E2E_RUN_ID: ${{ github.run_id }}
-        run: |
-          env_file="$(mktemp)"
-          trap 'rm -f "$env_file"' EXIT
-          vercel env pull "$env_file" --yes --environment=preview --git-branch="$FEATURE_BRANCH" --token="$VERCEL_TOKEN" >/dev/null
-          set -a
-          source "$env_file"
-          set +a
-          rm -f "$env_file"
-          export DATABASE_URL='${{ steps.neon.outputs.db_url_pooled }}'
-          export DIRECT_URL='${{ steps.neon.outputs.db_url }}'
-          export AI_PHASE2_DATABASE_ISOLATED='true'
-          export AI_PHASE2_EXPECTED_DB_HOST='${{ steps.neon.outputs.db_host_pooled }}'
-          export AI_PHASE2_PREVIEW_URL='${{ steps.preview.outputs.url }}'
-          export AI_PHASE2_VERCEL_BYPASS_SECRET='${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}'
-          export AI_PHASE2_E2E_EMAIL='${{ steps.fixture.outputs.email }}'
-          export AI_PHASE2_E2E_PRODUCT_SKU='${{ steps.fixture.outputs.product_sku }}'
-          export AI_PHASE2_E2E_RUN_ID='${{ github.run_id }}'
-          echo "::add-mask::$TELEGRAM_BOT_TOKEN"
-          echo "::add-mask::$TELEGRAM_WEBHOOK_SECRET"
-          echo "::add-mask::$AI_PHASE2_VERCEL_BYPASS_SECRET"
-          pnpm exec tsx scripts/verify-ai-phase2-telegram-preview.ts
 
       - name: Publish safe preview details
         if: always() && steps.preview.outputs.url != ''
@@ -249,6 +219,9 @@ jobs:
         run: |
           vercel env rm DATABASE_URL preview "$FEATURE_BRANCH" --yes --project "$VERCEL_PROJECT_ID" --token="$VERCEL_TOKEN" || true
           vercel env rm DIRECT_URL preview "$FEATURE_BRANCH" --yes --project "$VERCEL_PROJECT_ID" --token="$VERCEL_TOKEN" || true
+          vercel env rm AI_PHASE2_DATABASE_ISOLATED preview "$FEATURE_BRANCH" --yes --project "$VERCEL_PROJECT_ID" --token="$VERCEL_TOKEN" || true
+          vercel env rm AI_PHASE2_VERIFICATION_ENABLED preview "$FEATURE_BRANCH" --yes --project "$VERCEL_PROJECT_ID" --token="$VERCEL_TOKEN" || true
+          vercel env rm AI_PHASE2_EXPECTED_DB_HOST preview "$FEATURE_BRANCH" --yes --project "$VERCEL_PROJECT_ID" --token="$VERCEL_TOKEN" || true
 
       - name: Delete only the named Phase 2 Neon clone
         env:
