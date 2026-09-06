@@ -358,7 +358,7 @@ describeIntegration('AI Assistant Phase 2 database regressions', { timeout: remo
         },
       ],
     });
-  });
+  }, remoteIntegrationTimeout);
 
   it('keeps form, web AI, and Telegram order results equivalent and idempotent', async () => {
     const formInput = orderFixture({ product, name: 'Phase Form Customer', phone: nextPhone() });

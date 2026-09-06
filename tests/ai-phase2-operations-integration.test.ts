@@ -385,7 +385,7 @@ describeIntegration('AI Assistant Phase 2 governed operations', { timeout: remot
         ],
       }),
     ]);
-  });
+  }, remoteIntegrationTimeout);
 
   it('creates and updates a complete customer with one receipt and PDF per action', async () => {
     const phone = nextPhone();
