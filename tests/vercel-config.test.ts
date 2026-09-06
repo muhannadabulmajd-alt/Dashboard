@@ -13,6 +13,10 @@ const phase2Workflow = readFileSync(
   new URL('../.github/workflows/ai-phase2-preview.yml', import.meta.url),
   'utf8',
 );
+const telegramPreviewVerification = readFileSync(
+  new URL('../scripts/verify-ai-phase2-telegram-preview.ts', import.meta.url),
+  'utf8',
+);
 
 describe('Vercel deployment configuration', () => {
   it('keeps every cron at a Hobby-compatible daily-or-less frequency', () => {
@@ -32,5 +36,15 @@ describe('Vercel deployment configuration', () => {
     expect(phase2Workflow).toContain(
       'AI_PHASE2_VERCEL_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}',
     );
+  });
+
+  it('restores the Preview Telegram webhook after isolated verification', () => {
+    expect(phase2Workflow).toContain('Verify the Preview Telegram bot and restore its webhook');
+    expect(telegramPreviewVerification).toContain("hostname === 'dashboard.laheeb.coffee'");
+    expect(telegramPreviewVerification).toContain('finally {');
+    expect(telegramPreviewVerification).toContain(
+      'await restoreWebhook(telegramToken, telegramSecret, originalWebhook)',
+    );
+    expect(telegramPreviewVerification).toContain("delivery.status !== 'DELIVERED'");
   });
 });
