@@ -60,8 +60,9 @@ const STALE_EXECUTION_CODES = new Set([
   'stock_configuration_ambiguous',
   'stock_insufficient',
 ]);
-const DUPLICATE_CONFIRM_WAIT_MS = 5_000;
-const DUPLICATE_CONFIRM_POLL_MS = 100;
+const DUPLICATE_CONFIRM_WAIT_MS = 45_000;
+const DUPLICATE_CONFIRM_INITIAL_POLL_MS = 250;
+const DUPLICATE_CONFIRM_MAX_POLL_MS = 1_000;
 
 export type ActionExecutionResult = {
   actionId: string;
@@ -180,6 +181,7 @@ async function waitForStoredExecution(input: {
   locale: AppLocale;
 }): Promise<ActionExecutionResult | null> {
   const deadline = Date.now() + DUPLICATE_CONFIRM_WAIT_MS;
+  let pollMs = DUPLICATE_CONFIRM_INITIAL_POLL_MS;
   while (Date.now() < deadline) {
     const latest = await prisma.aiPendingAction.findFirst({
       where: { id: input.actionId, userId: input.userId },
@@ -192,7 +194,10 @@ async function waitForStoredExecution(input: {
     if (!latest) throw new Error('notfound');
     if (latest.status === 'EXECUTED') return storedExecutionResult(latest, input.locale);
     if (latest.status !== 'EXECUTING') return null;
-    await new Promise((resolve) => setTimeout(resolve, DUPLICATE_CONFIRM_POLL_MS));
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) break;
+    await new Promise((resolve) => setTimeout(resolve, Math.min(pollMs, remainingMs)));
+    pollMs = Math.min(Math.ceil(pollMs * 1.5), DUPLICATE_CONFIRM_MAX_POLL_MS);
   }
   return null;
 }

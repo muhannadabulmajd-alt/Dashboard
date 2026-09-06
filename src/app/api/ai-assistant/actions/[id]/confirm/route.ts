@@ -4,6 +4,9 @@ import { confirmPendingAction } from '@/server/ai/actions';
 import { actionErrorResponse } from '@/server/ai/action-http';
 import { isHttpResponse, requireAiApiUser } from '@/server/ai/http';
 
+export const runtime = 'nodejs';
+export const maxDuration = 60;
+
 const BodySchema = z.object({
   locale: z.enum(['ar', 'en']).default('en'),
   confirmationText: z.string().trim().max(200).optional(),
