@@ -14,12 +14,33 @@ const TelegramChatSchema = z.object({
   type: z.string(),
 }).passthrough();
 
+const TelegramPhotoSchema = z.object({
+  file_id: z.string().min(1),
+  file_unique_id: z.string().optional(),
+  width: z.number().int().nonnegative(),
+  height: z.number().int().nonnegative(),
+  file_size: z.number().int().nonnegative().optional(),
+}).passthrough();
+
+const TelegramFileSchema = z.object({
+  file_id: z.string().min(1),
+  file_unique_id: z.string().optional(),
+  file_name: z.string().optional(),
+  mime_type: z.string().optional(),
+  file_size: z.number().int().nonnegative().optional(),
+}).passthrough();
+
 const TelegramMessageSchema = z.object({
   message_id: z.number().int(),
   from: TelegramUserSchema.optional(),
   chat: TelegramChatSchema,
   date: z.number().int().optional(),
   text: z.string().optional(),
+  caption: z.string().optional(),
+  photo: z.array(TelegramPhotoSchema).optional(),
+  document: TelegramFileSchema.optional(),
+  voice: TelegramFileSchema.extend({ duration: z.number().int().nonnegative().optional() }).optional(),
+  audio: TelegramFileSchema.extend({ duration: z.number().int().nonnegative().optional() }).optional(),
 }).passthrough();
 
 const TelegramCallbackSchema = z.object({
@@ -38,6 +59,14 @@ export const TelegramUpdateSchema = z.object({
 export type TelegramUpdate = z.infer<typeof TelegramUpdateSchema>;
 export type TelegramUser = z.infer<typeof TelegramUserSchema>;
 
+export type TelegramMedia = {
+  type: 'photo' | 'document' | 'voice' | 'audio';
+  fileId: string;
+  fileName: string;
+  mimeType: string | null;
+  fileSize: number | null;
+};
+
 export type SupportedTelegramUpdate = {
   updateId: string;
   type: 'message' | 'callback_query';
@@ -48,7 +77,49 @@ export type SupportedTelegramUpdate = {
   callbackId?: string;
   callbackData?: string;
   messageId?: number;
+  media?: TelegramMedia;
 };
+
+function messageMedia(message: z.infer<typeof TelegramMessageSchema>): TelegramMedia | undefined {
+  if (message.voice) {
+    return {
+      type: 'voice',
+      fileId: message.voice.file_id,
+      fileName: message.voice.file_name ?? `telegram-voice-${message.message_id}.ogg`,
+      mimeType: message.voice.mime_type ?? 'audio/ogg',
+      fileSize: message.voice.file_size ?? null,
+    };
+  }
+  if (message.audio) {
+    return {
+      type: 'audio',
+      fileId: message.audio.file_id,
+      fileName: message.audio.file_name ?? `telegram-audio-${message.message_id}`,
+      mimeType: message.audio.mime_type ?? null,
+      fileSize: message.audio.file_size ?? null,
+    };
+  }
+  if (message.document) {
+    return {
+      type: 'document',
+      fileId: message.document.file_id,
+      fileName: message.document.file_name ?? `telegram-document-${message.message_id}`,
+      mimeType: message.document.mime_type ?? null,
+      fileSize: message.document.file_size ?? null,
+    };
+  }
+  const photo = message.photo?.at(-1);
+  if (photo) {
+    return {
+      type: 'photo',
+      fileId: photo.file_id,
+      fileName: `telegram-photo-${message.message_id}.jpg`,
+      mimeType: 'image/jpeg',
+      fileSize: photo.file_size ?? null,
+    };
+  }
+  return undefined;
+}
 
 export function supportedTelegramUpdate(update: TelegramUpdate): SupportedTelegramUpdate | null {
   if (update.message?.from) {
@@ -58,8 +129,9 @@ export function supportedTelegramUpdate(update: TelegramUpdate): SupportedTelegr
       user: update.message.from,
       chatId: String(update.message.chat.id),
       privateChat: update.message.chat.type === 'private',
-      text: update.message.text,
+      text: update.message.text ?? update.message.caption,
       messageId: update.message.message_id,
+      media: messageMedia(update.message),
     };
   }
   const callback = update.callback_query;

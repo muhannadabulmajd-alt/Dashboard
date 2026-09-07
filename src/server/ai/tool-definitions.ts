@@ -6,6 +6,8 @@ import {
   EXPENSE_CATEGORY_TYPES,
   FULFILLMENT_METHODS,
   INVENTORY_CATEGORIES,
+  PARTY_TYPES,
+  PAYMENT_METHODS,
 } from '@/lib/enums';
 import { MEASUREMENT_UNITS } from '@/lib/units';
 
@@ -15,6 +17,7 @@ type Schema = Record<string, unknown>;
 const string: Schema = { type: 'string' };
 const nullableString: Schema = { type: ['string', 'null'] };
 const nullableNumber: Schema = { type: ['number', 'null'] };
+const nullableBoolean: Schema = { type: ['boolean', 'null'] };
 const nonnegativeInteger: Schema = { type: 'integer', minimum: 0 };
 
 function object(properties: Record<string, Schema>): Schema {
@@ -51,6 +54,41 @@ const customer = object({
   segment: enumSchema(CUSTOMER_SEGMENTS, true),
 });
 
+const partyDetails = object({
+  name: nullableString,
+  type: enumSchema(PARTY_TYPES, true),
+  phone: nullableString,
+  email: nullableString,
+  address: nullableString,
+  notes: nullableString,
+});
+
+const ledgerLine = object({
+  itemType: enumSchema(['INVENTORY', 'ASSET', 'EXPENSE', 'SERVICE', 'OTHER'], true),
+  itemName: nullableString,
+  categoryType: enumSchema(EXPENSE_CATEGORY_TYPES, true),
+  assetKey: nullableString,
+  assetCategory: nullableString,
+  inventoryItemQuery: nullableString,
+  newItemNameEn: nullableString,
+  newItemNameAr: nullableString,
+  newItemCategory: enumSchema(INVENTORY_CATEGORIES, true),
+  unit: enumSchema(MEASUREMENT_UNITS, true),
+  quantity: nullableNumber,
+  unitCost: nullableNumber,
+  discount: nullableNumber,
+  extra: nullableNumber,
+  branchQuery: nullableString,
+  notes: nullableString,
+});
+
+const nullableLedgerLines: Schema = {
+  anyOf: [
+    { type: 'array', minItems: 1, maxItems: 50, items: ledgerLine },
+    { type: 'null' },
+  ],
+};
+
 function tool(name: string, description: string, parameters: Schema): FunctionTool {
   return { type: 'function', name, description, parameters, strict: true };
 }
@@ -65,8 +103,17 @@ export const AI_ASSISTANT_TOOLS: FunctionTool[] = [
     }),
   ),
   tool(
+    'product_buyers',
+    'Find customers who bought a product in completed Atlas sale orders. Match by SKU, EAN/internal barcode, Arabic or English product name, alias, or product specifications. Return unique customer names, phones, order counts, units, and product sales for a Baghdad-time period.',
+    object({
+      productQuery: string,
+      range,
+      limit: { type: 'integer', minimum: 1, maximum: 50 },
+    }),
+  ),
+  tool(
     'search_orders',
-    'Find Atlas orders by order number, customer ID, customer name, or customer phone.',
+    'Find Atlas orders by order number, customer ID/name/phone, SKU, barcode, product name, or product group.',
     object({ query: string, limit: { type: 'integer', minimum: 1, maximum: 25 } }),
   ),
   tool(
@@ -90,6 +137,69 @@ export const AI_ASSISTANT_TOOLS: FunctionTool[] = [
       range,
       bucket: enumSchema(['all', 'capex', 'inventory', 'opex', 'review', 'direct', 'cogs']),
       category: nullableString,
+    }),
+  ),
+  tool(
+    'finance_overview',
+    'Read canonical Atlas finance data for a period: profit and loss, cash flow, balance sheet, account balances, supplier payables, or customer receivables.',
+    object({
+      range,
+      view: enumSchema(['OVERVIEW', 'CASH_FLOW', 'BALANCE_SHEET', 'ACCOUNTS', 'PAYABLES', 'RECEIVABLES']),
+      limit: { type: 'integer', minimum: 1, maximum: 50 },
+    }),
+  ),
+  tool(
+    'customer_insights',
+    'Read governed customer behavior for a Baghdad-time period, including new versus returning customers, repeat rate, geography, segments, and top customers.',
+    object({
+      range,
+      dimension: enumSchema(['SUMMARY', 'CITY', 'SEGMENT', 'TOP_CUSTOMERS']),
+      limit: { type: 'integer', minimum: 1, maximum: 50 },
+    }),
+  ),
+  tool(
+    'delivery_summary',
+    'Read fulfillment performance for a Baghdad-time period by courier or city, including delivery speed, SLA, failures, returns, and cost.',
+    object({
+      range,
+      dimension: enumSchema(['COURIER', 'CITY']),
+      slaDays: { type: 'integer', minimum: 1, maximum: 30 },
+      limit: { type: 'integer', minimum: 1, maximum: 50 },
+    }),
+  ),
+  tool(
+    'roastery_summary',
+    'Read roasting production for a Baghdad-time period by batch, roast level, or operator, including input, output, shrinkage, and quality score.',
+    object({
+      range,
+      dimension: enumSchema(['BATCH', 'ROAST_LEVEL', 'OPERATOR']),
+      limit: { type: 'integer', minimum: 1, maximum: 50 },
+    }),
+  ),
+  tool(
+    'inventory_recommendations',
+    'Calculate read-only replenishment recommendations from current stock, configured reorder points, and configured average daily usage. Never creates a purchase.',
+    object({
+      query: nullableString,
+      horizonDays: { type: 'integer', minimum: 1, maximum: 90 },
+      limit: { type: 'integer', minimum: 1, maximum: 50 },
+    }),
+  ),
+  tool(
+    'demand_forecast',
+    'Forecast product-unit demand from completed Atlas sales using a transparent recent-versus-prior weighted run rate. This is advisory and never writes.',
+    object({
+      lookbackDays: { type: 'integer', minimum: 14, maximum: 180 },
+      horizonDays: { type: 'integer', minimum: 1, maximum: 90 },
+      limit: { type: 'integer', minimum: 1, maximum: 50 },
+    }),
+  ),
+  tool(
+    'operational_alerts',
+    'Read current role-authorized Atlas alerts for stockouts, reorder levels, expiring inventory, unsafe product margins, and failed deliveries. This is advisory and never writes.',
+    object({
+      expiryDays: { type: 'integer', minimum: 1, maximum: 180 },
+      limit: { type: 'integer', minimum: 1, maximum: 50 },
     }),
   ),
   tool(
@@ -140,7 +250,7 @@ export const AI_ASSISTANT_TOOLS: FunctionTool[] = [
   ),
   tool(
     'prepare_create_expense',
-    'Prepare an operating expense for explicit confirmation. Account, category, amount, currency, date, and description are required.',
+    'Prepare one or more operating-expense, service, asset, inventory, or review lines for explicit confirmation. Dates default to Baghdad today, currency defaults to IQD, and the configured user default account may be used. Never silently classify OTHER lines.',
     object({
       date: nullableString,
       amount: nullableNumber,
@@ -149,16 +259,18 @@ export const AI_ASSISTANT_TOOLS: FunctionTool[] = [
       accountQuery: nullableString,
       categoryType: enumSchema(EXPENSE_CATEGORY_TYPES, true),
       partyQuery: nullableString,
+      newParty: { anyOf: [partyDetails, { type: 'null' }] },
       description: nullableString,
       reference: nullableString,
       branchQuery: nullableString,
+      lines: nullableLedgerLines,
     }),
   ),
   tool(
     'prepare_create_purchase',
-    'Prepare an inventory or fixed-asset purchase for explicit confirmation. Never guess supplier, payment, item, or asset details.',
+    'Prepare a single or multi-line inventory, fixed-asset, service, or mixed supplier purchase for explicit confirmation. Preserve full supplier details and never guess low-confidence classification or payment routing.',
     object({
-      purchaseType: enumSchema(['INVENTORY', 'ASSET'], true),
+      purchaseType: enumSchema(['INVENTORY', 'ASSET', 'MIXED'], true),
       date: nullableString,
       totalAmount: nullableNumber,
       currency: enumSchema(CURRENCIES, true),
@@ -172,6 +284,7 @@ export const AI_ASSISTANT_TOOLS: FunctionTool[] = [
       assetName: nullableString,
       assetCategory: nullableString,
       supplierQuery: nullableString,
+      newSupplier: { anyOf: [partyDetails, { type: 'null' }] },
       paidMode: enumSchema(['PAID', 'CREDIT', 'PARTIAL'], true),
       paidAmount: nullableNumber,
       accountQuery: nullableString,
@@ -181,6 +294,21 @@ export const AI_ASSISTANT_TOOLS: FunctionTool[] = [
       branchQuery: nullableString,
       reference: nullableString,
       notes: nullableString,
+      lines: nullableLedgerLines,
+    }),
+  ),
+  tool(
+    'prepare_create_transfer',
+    'Prepare an internal transfer between two active Atlas finance accounts for explicit confirmation. The source and destination must be different and use the selected currency.',
+    object({
+      date: nullableString,
+      amount: nullableNumber,
+      currency: enumSchema(CURRENCIES, true),
+      rate: nullableNumber,
+      fromAccountQuery: nullableString,
+      toAccountQuery: nullableString,
+      description: nullableString,
+      reference: nullableString,
     }),
   ),
   tool(
@@ -194,6 +322,124 @@ export const AI_ASSISTANT_TOOLS: FunctionTool[] = [
       providerKey: nullableString,
       paymentMethod: nullableString,
       date: nullableString,
+    }),
+  ),
+  tool(
+    'prepare_update_customer',
+    'Prepare a governed customer update. Preserve every supplied field and never merge differently named customers just because they share a phone number.',
+    object({
+      customerQuery: nullableString,
+      nameEn: nullableString,
+      nameAr: nullableString,
+      phone: nullableString,
+      email: nullableString,
+      governorate: nullableString,
+      address1: nullableString,
+      street: nullableString,
+      notes: nullableString,
+      campaignSource: nullableString,
+      segment: enumSchema(CUSTOMER_SEGMENTS, true),
+      reason: nullableString,
+    }),
+  ),
+  tool(
+    'prepare_update_party',
+    'Prepare a governed supplier, customer-party, shareholder, service provider, employee, or other party update.',
+    object({
+      partyQuery: nullableString,
+      name: nullableString,
+      type: enumSchema(PARTY_TYPES, true),
+      phone: nullableString,
+      email: nullableString,
+      address: nullableString,
+      notes: nullableString,
+      netFeesFromRemittance: nullableBoolean,
+      collectsOrderPayments: nullableBoolean,
+      reason: nullableString,
+    }),
+  ),
+  tool(
+    'prepare_adjust_inventory',
+    'Prepare a physical inventory adjustment to an exact target quantity with up to three decimal places. The preview must show current quantity, target quantity, and difference.',
+    object({
+      inventoryItemQuery: nullableString,
+      targetQuantity: nullableNumber,
+      occurredAt: nullableString,
+      reason: nullableString,
+    }),
+  ),
+  tool(
+    'prepare_create_roast_batch',
+    'Prepare a roasting batch with optional green-input and roasted-output inventory movements.',
+    object({
+      batchNumber: nullableString,
+      origin: nullableString,
+      roastDate: nullableString,
+      roastLevel: nullableString,
+      greenInputGrams: nullableNumber,
+      roastedOutputGrams: nullableNumber,
+      qcScore: nullableNumber,
+      qcNotes: nullableString,
+      greenInventoryItemQuery: nullableString,
+      roastedInventoryItemQuery: nullableString,
+      branchQuery: nullableString,
+    }),
+  ),
+  tool(
+    'prepare_record_payment',
+    'Prepare a payment against an Atlas order or an outstanding payable/receivable. A real active finance account is always required; use the user default only when configured.',
+    object({
+      targetType: enumSchema(['ORDER', 'FINANCE_ENTRY'], true),
+      targetQuery: nullableString,
+      amount: nullableNumber,
+      accountQuery: nullableString,
+      paymentMethod: enumSchema(PAYMENT_METHODS, true),
+      date: nullableString,
+    }),
+  ),
+  tool(
+    'prepare_record_refund',
+    'Prepare a refund for an order. This is a high-risk reversible financial correction and requires a second confirmation with the order number.',
+    object({
+      orderQuery: nullableString,
+      amount: nullableNumber,
+      accountQuery: nullableString,
+      paymentMethod: enumSchema(PAYMENT_METHODS, true),
+      date: nullableString,
+      reason: nullableString,
+    }),
+  ),
+  tool(
+    'prepare_reverse_finance_record',
+    'Prepare reversal of one eligible Atlas finance record. This is high risk and requires a second confirmation with its record number.',
+    object({ recordQuery: nullableString, reason: nullableString }),
+  ),
+  tool(
+    'prepare_reclassify_spend',
+    'Prepare reclassification of one spending line as CAPEX, INVENTORY, OPEX, or REVIEW. This is high risk and requires a second confirmation with its finance record number.',
+    object({
+      recordQuery: nullableString,
+      lineQuery: nullableString,
+      spendTreatment: enumSchema(['CAPEX', 'INVENTORY', 'OPEX', 'REVIEW'], true),
+      classificationNote: nullableString,
+      fixedAssetQuery: nullableString,
+      inventoryItemQuery: nullableString,
+    }),
+  ),
+  tool(
+    'prepare_dashboard_draft',
+    'Prepare a private dashboard draft from a trusted Atlas metric template. Never invent metric IDs.',
+    object({
+      name: nullableString,
+      description: nullableString,
+      template: enumSchema([
+        'owner-overview',
+        'sales-dashboard',
+        'inventory-dashboard',
+        'delivery-dashboard',
+        'financial-dashboard',
+        'customer-dashboard',
+      ], true),
     }),
   ),
 ];

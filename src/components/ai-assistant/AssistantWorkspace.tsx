@@ -8,11 +8,13 @@ import {
   Check,
   ChevronRight,
   Clock3,
+  Download,
   FileSearch,
   History,
   LoaderCircle,
   MessageSquarePlus,
   PackagePlus,
+  Paperclip,
   ReceiptText,
   RotateCcw,
   ShoppingBag,
@@ -21,6 +23,7 @@ import {
 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import type { AiActionPreview, AiClarification, AiResultCard, AiStreamEvent } from '@/lib/ai-assistant';
+import type { AiPageContext } from '@/lib/ai-page-context';
 import { Link } from '@/i18n/navigation';
 import { cn } from '@/lib/utils';
 import { GuidedOrderComposer, type QuickOrderPrepared } from './GuidedOrderComposer';
@@ -58,12 +61,26 @@ type StoredMessage = {
   createdAt: string;
 };
 
+type UploadedAttachment = {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  byteSize: number;
+  kind: 'RECEIPT_IMAGE' | 'DOCUMENT' | 'AUDIO';
+  href: string;
+};
+
 type ActionResult = {
   actionId: string;
   status: string;
   message: string;
   href?: string;
   invoiceHref?: string;
+  documentHref?: string;
+  documentStatus?: 'READY' | 'PENDING';
+  committed?: boolean;
+  requiresSecondConfirmation?: boolean;
+  confirmationChallenge?: string;
 };
 
 const QUICK_ACTIONS = [
@@ -100,6 +117,21 @@ const PROMPTS = {
   },
 } as const;
 
+function pageContextPrompts(locale: 'ar' | 'en', pageLabel: string) {
+  if (locale === 'ar') {
+    return {
+      summary: `لخص بيانات أطلس المباشرة المتعلقة بصفحة ${pageLabel} حسب الفلاتر الحالية.`,
+      risks: `اكتشف المخاطر أو الحالات غير الاعتيادية المتعلقة بصفحة ${pageLabel} حسب الفلاتر الحالية.`,
+      nextSteps: `اقترح الخطوات التشغيلية التالية بناءً على بيانات صفحة ${pageLabel} الحالية دون تنفيذ أي تغيير.`,
+    };
+  }
+  return {
+    summary: `Summarize the live Atlas data relevant to the ${pageLabel} page using its current filters.`,
+    risks: `Find risks or unusual conditions relevant to the ${pageLabel} page using its current filters.`,
+    nextSteps: `Recommend the next operational steps from the current ${pageLabel} data without changing anything.`,
+  };
+}
+
 function payloadEvents(payload: unknown): AiStreamEvent[] {
   if (!payload || typeof payload !== 'object') return [];
   const value = payload as { events?: unknown; actionResult?: ActionResult };
@@ -112,6 +144,9 @@ function payloadEvents(payload: unknown): AiStreamEvent[] {
       message: value.actionResult.message,
       href: value.actionResult.href,
       invoiceHref: value.actionResult.invoiceHref,
+      documentHref: value.actionResult.documentHref,
+      documentStatus: value.actionResult.documentStatus,
+      committed: value.actionResult.committed,
     }];
   }
   return [];
@@ -184,6 +219,24 @@ function ResultCard({ card, locale }: { card: AiResultCard; locale: 'ar' | 'en' 
           })}
         </div>
       ) : null}
+      {card.downloads?.length ? (
+        <div className="flex flex-wrap gap-2 border-t border-border/70 px-4 py-2.5">
+          {card.downloads.map((download) => (
+            <a
+              key={download.format}
+              href={download.href}
+              className="inline-flex min-h-9 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-sm font-semibold text-roast hover:bg-linen/35"
+            >
+              <Download className="size-3.5" />
+              {download.format === 'PDF'
+                ? t('downloadPdf')
+                : download.format === 'XLSX'
+                  ? t('downloadExcel')
+                  : t('downloadCsv')}
+            </a>
+          ))}
+        </div>
+      ) : null}
       {card.href ? (
         <div className="border-t border-border/70 px-4 py-2.5">
           <Link href={card.href} className="text-sm font-semibold text-primary hover:text-amber">{t('viewInAtlas')}</Link>
@@ -237,9 +290,10 @@ function ActionPreviewCard({
   action: AiActionPreview;
   locale: 'ar' | 'en';
   busy: boolean;
-  onAction: (action: AiActionPreview, operation: 'confirm' | 'cancel') => void;
+  onAction: (action: AiActionPreview, operation: 'confirm' | 'cancel', confirmationText?: string) => void;
 }) {
   const t = useTranslations('aiAssistant');
+  const [confirmationText, setConfirmationText] = useState('');
   const terminal = ['EXECUTING', 'EXECUTED', 'CANCELLED', 'FAILED', 'EXPIRED', 'STALE'].includes(action.status);
   const terminalLabels: Record<string, string> = {
     EXECUTING: t('processing'),
@@ -281,15 +335,29 @@ function ActionPreviewCard({
               <Clock3 className="size-3.5" />
               {t('expiresAt', { date: dateLabel(action.expiresAt, locale) })}
             </p>
+            {action.confirmationChallenge ? (
+              <label className="mb-3 block text-sm font-semibold text-roast">
+                <span className="mb-1.5 block">{t('highRiskPrompt', { record: action.confirmationChallenge })}</span>
+                <input
+                  type="text"
+                  value={confirmationText}
+                  onChange={(event) => setConfirmationText(event.target.value)}
+                  placeholder={action.confirmationChallenge}
+                  autoComplete="off"
+                  dir="ltr"
+                  className="min-h-11 w-full rounded-lg border border-border bg-background px-3 font-mono text-sm outline-none focus:border-amber/60 focus:ring-2 focus:ring-amber/10"
+                />
+              </label>
+            ) : null}
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <button
                 type="button"
-                disabled={busy}
-                onClick={() => onAction(action, 'confirm')}
+                disabled={busy || Boolean(action.confirmationChallenge && !confirmationText.trim())}
+                onClick={() => onAction(action, 'confirm', action.confirmationChallenge ? confirmationText : undefined)}
                 className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-bold text-primary-foreground hover:bg-amber/90 disabled:opacity-50"
               >
                 {busy ? <LoaderCircle className="size-4 animate-spin" /> : <Check className="size-4" />}
-                {t('confirm')}
+                {action.risk === 'HIGH' && !action.confirmationChallenge ? t('reviewHighRisk') : t('confirm')}
               </button>
               <button
                 type="button"
@@ -374,11 +442,13 @@ function ConversationHistory({
 
 export function AssistantWorkspace({
   locale,
+  pageContext,
   initialConversations,
   retentionDays,
   quickOrder,
 }: {
   locale: 'ar' | 'en';
+  pageContext?: AiPageContext;
   initialConversations: ConversationSummary[];
   retentionDays: number;
   quickOrder: {
@@ -393,15 +463,20 @@ export function AssistantWorkspace({
 }) {
   const t = useTranslations('aiAssistant');
   const [conversations, setConversations] = useState(initialConversations);
+  const [activePageContext, setActivePageContext] = useState(pageContext);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
+  const [attachments, setAttachments] = useState<UploadedAttachment[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [actionBusy, setActionBusy] = useState<string | null>(null);
   const [quickOrderOpen, setQuickOrderOpen] = useState(false);
   const viewportRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const attachmentInputRef = useRef<HTMLInputElement>(null);
   const historyTriggerRef = useRef<HTMLButtonElement>(null);
   const historyDialogRef = useRef<HTMLDivElement>(null);
   const historyCloseRef = useRef<HTMLButtonElement>(null);
@@ -410,6 +485,13 @@ export function AssistantWorkspace({
   const chatAbortRef = useRef<AbortController | null>(null);
   const shouldFollowRef = useRef(true);
   const privacyText = t('privacy', { days: retentionDays });
+  const pageContextLabel = activePageContext
+    ? t(`pageContext.sections.${activePageContext.section}`)
+    : '';
+  const contextualPrompts = useMemo(
+    () => pageContextPrompts(locale, pageContextLabel),
+    [locale, pageContextLabel],
+  );
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -479,6 +561,9 @@ export function AssistantWorkspace({
     setConversationId(null);
     setMessages([]);
     setInput('');
+    setActivePageContext(pageContext);
+    setAttachments([]);
+    setAttachmentError(null);
     setHistoryOpen(false);
     requestAnimationFrame(() => composerRef.current?.focus());
   };
@@ -497,19 +582,38 @@ export function AssistantWorkspace({
         conversation: {
           id: string;
           messages: StoredMessage[];
-          pendingActions: Array<{ id: string; status: string }>;
+          pendingActions: Array<{
+            id: string;
+            status: string;
+            risk: 'MEDIUM' | 'HIGH';
+            confirmationChallenge: string | null;
+            confirmationRequestedAt: string | null;
+          }>;
         };
       };
       if (loadId !== conversationLoadRef.current) return;
-      const actionStatuses = new Map(data.conversation.pendingActions.map((action) => [action.id, action.status]));
+      const actionStates = new Map(data.conversation.pendingActions.map((action) => [action.id, action]));
       setConversationId(data.conversation.id);
+      setActivePageContext(undefined);
       setMessages(data.conversation.messages.slice().reverse().flatMap((message) => message.role === 'SYSTEM' ? [] : [{
         id: message.id,
         role: message.role,
         content: message.content ?? '',
-        events: payloadEvents(message.payload).map((event) => event.type === 'action_preview'
-          ? { ...event, action: { ...event.action, status: actionStatuses.get(event.action.id) ?? event.action.status } }
-          : event),
+        events: payloadEvents(message.payload).map((event) => {
+          if (event.type !== 'action_preview') return event;
+          const state = actionStates.get(event.action.id);
+          return {
+            ...event,
+            action: {
+              ...event.action,
+              risk: state?.risk ?? event.action.risk ?? 'MEDIUM',
+              status: state?.status ?? event.action.status,
+              confirmationChallenge: state?.confirmationRequestedAt
+                ? state.confirmationChallenge ?? undefined
+                : undefined,
+            },
+          };
+        }),
         createdAt: message.createdAt,
       }]));
       shouldFollowRef.current = true;
@@ -529,17 +633,62 @@ export function AssistantWorkspace({
     }));
   };
 
+  const uploadAttachments = async (files: FileList | null) => {
+    const selected = Array.from(files ?? []);
+    if (!selected.length || uploading || sending) return;
+    setUploading(true);
+    setAttachmentError(null);
+    try {
+      const remaining = Math.max(0, 4 - attachments.length);
+      if (selected.length > remaining) throw new Error(t('attachmentCountError'));
+      const totalBytes = attachments.reduce((sum, item) => sum + item.byteSize, 0)
+        + selected.reduce((sum, file) => sum + file.size, 0);
+      if (totalBytes > 10 * 1024 * 1024) throw new Error(t('attachmentSizeError'));
+      const uploaded: UploadedAttachment[] = [];
+      for (const file of selected) {
+        const form = new FormData();
+        form.set('file', file);
+        if (conversationId) form.set('conversationId', conversationId);
+        const response = await fetch('/api/ai-assistant/attachments', { method: 'POST', body: form });
+        const body = await response.json().catch(() => ({})) as UploadedAttachment & { error?: string };
+        if (!response.ok) {
+          throw new Error(body.error === 'attachment_too_large'
+            ? t('attachmentSizeError')
+            : body.error === 'attachment_mime_mismatch' || body.error === 'attachment_type_unsupported'
+              ? t('attachmentTypeError')
+              : t('attachmentUploadError'));
+        }
+        uploaded.push(body);
+      }
+      setAttachments((current) => [...current, ...uploaded]);
+    } catch (error) {
+      setAttachmentError(error instanceof Error ? error.message : t('attachmentUploadError'));
+    } finally {
+      setUploading(false);
+      if (attachmentInputRef.current) attachmentInputRef.current.value = '';
+    }
+  };
+
   const sendMessage = async (raw?: string) => {
     const messageText = (raw ?? input).trim();
-    if (!messageText || sending) return;
+    const selectedAttachments = raw === undefined ? attachments : [];
+    if ((!messageText && !selectedAttachments.length) || sending || uploading) return;
     const userId = `local-user-${Date.now()}`;
     const assistantId = `local-assistant-${Date.now()}`;
     setInput('');
+    setAttachments([]);
+    setAttachmentError(null);
     setSending(true);
     shouldFollowRef.current = true;
     setMessages((current) => [
       ...current,
-      { id: userId, role: 'USER', content: messageText, events: [], createdAt: new Date().toISOString() },
+      {
+        id: userId,
+        role: 'USER',
+        content: messageText || `${t('attachedFiles')}: ${selectedAttachments.map((item) => item.fileName).join(', ')}`,
+        events: [],
+        createdAt: new Date().toISOString(),
+      },
       { id: assistantId, role: 'ASSISTANT', content: '', events: [], createdAt: new Date().toISOString(), streaming: true },
     ]);
 
@@ -549,7 +698,13 @@ export function AssistantWorkspace({
       const response = await fetch('/api/ai-assistant/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ conversationId: conversationId ?? undefined, message: messageText, locale }),
+        body: JSON.stringify({
+          conversationId: conversationId ?? undefined,
+          message: messageText || undefined,
+          attachmentIds: selectedAttachments.map((attachment) => attachment.id),
+          pageContextPath: activePageContext?.path,
+          locale,
+        }),
         signal: controller.signal,
       });
       if (!response.ok || !response.body) {
@@ -579,6 +734,7 @@ export function AssistantWorkspace({
       if (!completed) throw new Error(locale === 'ar' ? 'انقطع الرد قبل اكتماله. لم يتم تغيير أي بيانات.' : 'The response ended before completion. No data was changed.');
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return;
+      if (selectedAttachments.length) setAttachments(selectedAttachments);
       addEvent(assistantId, {
         type: 'error',
         message: error instanceof Error && error.message !== 'request_failed'
@@ -596,14 +752,14 @@ export function AssistantWorkspace({
     }
   };
 
-  const runAction = async (action: AiActionPreview, operation: 'confirm' | 'cancel') => {
+  const runAction = async (action: AiActionPreview, operation: 'confirm' | 'cancel', confirmationText?: string) => {
     if (actionBusy) return;
     setActionBusy(action.id);
     try {
       const response = await fetch(`/api/ai-assistant/actions/${action.id}/${operation}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ locale }),
+        body: JSON.stringify({ locale, ...(confirmationText ? { confirmationText } : {}) }),
       });
       const body = await response.json() as ActionResult & { message?: string; error?: string };
       if (!response.ok) {
@@ -617,6 +773,22 @@ export function AssistantWorkspace({
           })));
         }
         throw new Error(body.message || 'action_failed');
+      }
+      if (body.requiresSecondConfirmation && body.confirmationChallenge) {
+        setMessages((current) => current.map((message) => ({
+          ...message,
+          events: message.events.map((event) => event.type === 'action_preview' && event.action.id === action.id
+            ? {
+                ...event,
+                action: {
+                  ...event.action,
+                  status: 'PENDING',
+                  confirmationChallenge: body.confirmationChallenge,
+                },
+              }
+            : event),
+        })));
+        return;
       }
       setMessages((current) => current.map((message) => ({
         ...message,
@@ -635,6 +807,9 @@ export function AssistantWorkspace({
           message: body.message,
           href: body.href,
           invoiceHref: body.invoiceHref,
+          documentHref: body.documentHref,
+          documentStatus: body.documentStatus,
+          committed: body.committed,
         }],
         createdAt: new Date().toISOString(),
       }]);
@@ -682,6 +857,51 @@ export function AssistantWorkspace({
             <button type="button" onClick={newConversation} aria-label={t('newChat')} className="inline-flex size-10 items-center justify-center rounded-lg bg-grove text-primary-foreground"><MessageSquarePlus className="size-4" /></button>
           </div>
         </div>
+
+        {activePageContext ? (
+          <section className="border-b border-amber/20 bg-linen/25 px-3 py-3 sm:px-5" aria-label={t('pageContext.title')}>
+            <div className="mx-auto max-w-3xl">
+              <div className="flex items-start gap-3">
+                <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-grove text-primary-foreground">
+                  <Sparkles className="size-4" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-bold text-roast">{t('pageContext.active', { page: pageContextLabel })}</p>
+                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                    <Link href={activePageContext.path} className="font-semibold text-primary underline underline-offset-4">
+                      {t('pageContext.return')}
+                    </Link>
+                    <span className="text-muted-foreground">{t('pageContext.safeHint')}</span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActivePageContext(undefined)}
+                  className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-card hover:text-roast"
+                  aria-label={t('pageContext.clear')}
+                  title={t('pageContext.clear')}
+                >
+                  <X className="size-4" />
+                </button>
+              </div>
+              {!messages.length ? (
+                <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                  {(['summary', 'risks', 'nextSteps'] as const).map((key) => (
+                    <button
+                      key={key}
+                      type="button"
+                      disabled={sending}
+                      onClick={() => void sendMessage(contextualPrompts[key])}
+                      className="min-h-10 rounded-lg border border-border bg-card px-3 py-2 text-start text-xs font-semibold leading-5 text-roast hover:border-amber/45 hover:bg-linen/35 disabled:opacity-50"
+                    >
+                      {t(`pageContext.suggestions.${key}`)}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          </section>
+        ) : null}
 
         <div
           ref={viewportRef}
@@ -759,6 +979,12 @@ export function AssistantWorkspace({
                               {t('openInvoice')}
                             </Link>
                           ) : null}
+                          {event.documentHref ? (
+                            <a href={event.documentHref} className="inline-flex items-center gap-1 text-roast underline underline-offset-4">
+                              <Download className="size-3.5" />
+                              {event.documentStatus === 'PENDING' ? t('documentPending') : t('downloadPdf')}
+                            </a>
+                          ) : null}
                         </div>
                       );
                       if (event.type === 'error') return (
@@ -787,7 +1013,44 @@ export function AssistantWorkspace({
           <div className="mx-auto mb-2 flex max-w-3xl justify-start">
             <button type="button" onClick={() => setQuickOrderOpen(true)} disabled={sending} className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-border bg-card px-3 text-sm font-bold text-roast hover:border-amber/45 hover:bg-linen/35 disabled:opacity-50"><ShoppingBag className="size-4" />{t('quickActions.createOrder')}</button>
           </div>
+          {attachments.length ? (
+            <div className="mx-auto mb-2 flex max-w-3xl flex-wrap gap-2">
+              {attachments.map((attachment) => (
+                <span key={attachment.id} className="inline-flex max-w-full items-center gap-2 rounded-lg border border-border bg-linen/30 px-2.5 py-1.5 text-xs text-roast">
+                  <Paperclip className="size-3.5 shrink-0" />
+                  <span className="max-w-56 truncate">{attachment.fileName}</span>
+                  <button
+                    type="button"
+                    onClick={() => setAttachments((current) => current.filter((item) => item.id !== attachment.id))}
+                    aria-label={t('removeAttachment', { name: attachment.fileName })}
+                    className="inline-flex size-6 items-center justify-center rounded-md hover:bg-card"
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          ) : null}
+          {attachmentError ? <p className="mx-auto mb-2 max-w-3xl text-xs font-medium text-destructive">{attachmentError}</p> : null}
           <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-2xl border border-border bg-background p-2 shadow-[0_8px_24px_rgba(83,45,31,0.06)] focus-within:border-amber/50 focus-within:ring-2 focus-within:ring-amber/10">
+            <input
+              ref={attachmentInputRef}
+              type="file"
+              multiple
+              accept="image/jpeg,image/png,image/webp,application/pdf,audio/*"
+              className="sr-only"
+              onChange={(event) => void uploadAttachments(event.currentTarget.files)}
+            />
+            <button
+              type="button"
+              disabled={sending || uploading || attachments.length >= 4}
+              onClick={() => attachmentInputRef.current?.click()}
+              aria-label={t('attach')}
+              title={t('attach')}
+              className="inline-flex size-11 shrink-0 items-center justify-center rounded-xl text-muted-foreground hover:bg-linen/50 hover:text-roast disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {uploading ? <LoaderCircle className="size-5 animate-spin" /> : <Paperclip className="size-5" />}
+            </button>
             <textarea
               ref={composerRef}
               value={input}
@@ -808,7 +1071,7 @@ export function AssistantWorkspace({
             />
             <button
               type="submit"
-              disabled={sending || !input.trim()}
+              disabled={sending || uploading || (!input.trim() && !attachments.length)}
               aria-label={t('send')}
               className="inline-flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground hover:bg-amber/90 disabled:cursor-not-allowed disabled:opacity-40"
             >

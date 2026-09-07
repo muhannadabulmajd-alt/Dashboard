@@ -2,10 +2,15 @@
 
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
+import { z } from 'zod';
 import { prisma } from '@/server/db/client';
 import { getCurrentUser } from '@/server/auth/session';
 import { getUsdToIqd } from '@/server/settings';
 import type { TrustedCommandContext } from '@/server/commands/actor-context';
+import {
+  COMMAND_TRANSACTION_OPTIONS,
+  type CentralRecordTransactionCheckpoint,
+} from '@/server/commands/transaction-checkpoints';
 import {
   audit,
   optField,
@@ -13,6 +18,7 @@ import {
   type ActionState,
   type CommandCommitHook,
   type CommandPreconditionHook,
+  type CommandStageHook,
   resolveCommandActor,
 } from '@/server/records/shared';
 import { can } from '@/lib/rbac';
@@ -25,9 +31,14 @@ import {
   classificationStatusForTreatment,
   spendTreatmentForItemType,
 } from '@/lib/spend-treatment';
-import { isMeasurementUnit } from '@/lib/units';
+import { isMeasurementUnit, MEASUREMENT_UNITS } from '@/lib/units';
 import { syncActiveCost } from '@/server/inventory/fifo';
 import { normalizeIraqiPhone } from '@/lib/phone';
+import {
+  PartyCommandSchema,
+  resolveOrCreatePartyInTransaction,
+  type PartyCommandInput,
+} from '@/server/commands/parties';
 import { syncAllocatedAssetTotals } from '@/server/finance/asset-allocations';
 import {
   captureLayerBaseCosts,
@@ -62,6 +73,68 @@ type LedgerLineType = (typeof LINE_TYPES)[number];
 
 const PURCHASE_PAYMENT_MODES = ['PAID', 'CREDIT', 'PARTIAL'] as const;
 type PurchasePaymentMode = (typeof PURCHASE_PAYMENT_MODES)[number];
+
+const CentralRecordLineSchema = z.object({
+  token: z.string().trim().min(1).optional(),
+  itemType: z.enum(LINE_TYPES),
+  itemName: z.string().trim().min(1),
+  categoryType: z.enum(EXPENSE_CATEGORY_TYPES).nullish(),
+  assetKey: z.string().trim().nullish(),
+  assetCategory: z.string().trim().nullish(),
+  inventoryItemId: z.string().trim().nullish(),
+  inventoryItemMode: z.enum(['existing', 'new']).default('existing'),
+  newItemNameEn: z.string().trim().default(''),
+  newItemNameAr: z.string().trim().default(''),
+  newItemCategory: z.enum(INVENTORY_CATEGORIES).nullish(),
+  unit: z.enum(MEASUREMENT_UNITS),
+  quantity: z.coerce.number().positive(),
+  unitCost: z.coerce.number().positive(),
+  discount: z.coerce.number().nonnegative().default(0),
+  extra: z.coerce.number().nonnegative().default(0),
+  branchId: z.string().trim().nullish(),
+  notes: z.string().trim().nullish(),
+}).strict();
+
+const CentralRecordCommandInputSchema = z.object({
+  locale: z.enum(['en', 'ar']).default('ar'),
+  recordKind: z.enum(RECORD_KINDS),
+  date: z.coerce.date(),
+  amount: z.coerce.number().positive().optional(),
+  currency: z.enum(CURRENCIES).default('IQD'),
+  rate: z.coerce.number().positive().nullish(),
+  accountId: z.string().trim().nullish(),
+  toAccountId: z.string().trim().nullish(),
+  partyId: z.string().trim().nullish(),
+  newParty: PartyCommandSchema.optional(),
+  categoryType: z.enum(EXPENSE_CATEGORY_TYPES).nullish(),
+  branchId: z.string().trim().nullish(),
+  description: z.string().trim().nullish(),
+  reference: z.string().trim().nullish(),
+  attachmentUrl: z.string().trim().nullish(),
+  dueDate: z.coerce.date().nullish(),
+  quantity: z.coerce.number().positive().nullish(),
+  unit: z.enum(MEASUREMENT_UNITS).nullish(),
+  inventoryItemMode: z.enum(['existing', 'new']).optional(),
+  inventoryItemId: z.string().trim().nullish(),
+  newItemNameEn: z.string().trim().nullish(),
+  newItemNameAr: z.string().trim().nullish(),
+  newItemCategory: z.enum(INVENTORY_CATEGORIES).nullish(),
+  expiryDate: z.coerce.date().nullish(),
+  assetName: z.string().trim().nullish(),
+  assetCategory: z.string().trim().nullish(),
+  assetKey: z.string().trim().nullish(),
+  paymentMode: z.enum(PURCHASE_PAYMENT_MODES).optional(),
+  paidAmount: z.coerce.number().nonnegative().nullish(),
+  paymentMethod: z.enum(PAYMENT_METHODS).nullish(),
+  paymentDate: z.coerce.date().nullish(),
+  lines: z.array(CentralRecordLineSchema).max(50).optional(),
+}).strict().superRefine((value, ctx) => {
+  if (!value.lines?.length && !value.amount) {
+    ctx.addIssue({ code: 'custom', path: ['amount'], message: 'Amount is required.' });
+  }
+});
+
+export type CentralRecordCommandInput = z.input<typeof CentralRecordCommandInputSchema>;
 
 type MoneyShape = {
   amount: number;
@@ -529,12 +602,114 @@ export async function quickCreateCustomer(fd: FormData): Promise<QuickCreateResu
   return { ok: true, id: result.id, label: result.name };
 }
 
+function setCentralCommandField(fd: FormData, key: string, value: unknown): void {
+  if (value === null || value === undefined || value === '') return;
+  fd.set(key, value instanceof Date ? value.toISOString() : String(value));
+}
+
+/**
+ * Typed adapter shared by trusted server callers such as web AI and Telegram.
+ * The existing FormData action remains the browser boundary so current forms
+ * retain their behavior while every channel enters the same transaction code.
+ */
+export async function createCentralRecordFromInput(
+  rawInput: CentralRecordCommandInput,
+  options: {
+    actorContext?: TrustedCommandContext;
+    beforeExecute?: CommandPreconditionHook;
+    onCommitted?: CommandCommitHook<{ recordId: string }>;
+    afterStage?: CommandStageHook<CentralRecordTransactionCheckpoint>;
+  } = {},
+): Promise<ActionState> {
+  const parsed = CentralRecordCommandInputSchema.safeParse(rawInput);
+  if (!parsed.success) {
+    return {
+      error: 'invalid',
+      formError: 'invalid',
+      fieldErrors: Object.fromEntries(
+        parsed.error.issues.map((issue) => [issue.path.join('.') || 'form', 'invalid']),
+      ),
+      stage: 'validation',
+    };
+  }
+
+  const input = parsed.data;
+  const fd = new FormData();
+  const fields: Array<[string, unknown]> = [
+    ['locale', input.locale],
+    ['recordKind', input.recordKind],
+    ['date', input.date],
+    ['amount', input.amount],
+    ['currency', input.currency],
+    ['rate', input.rate],
+    ['accountId', input.accountId],
+    ['toAccountId', input.toAccountId],
+    ['partyId', input.partyId],
+    ['categoryType', input.categoryType],
+    ['branchId', input.branchId],
+    ['description', input.description],
+    ['reference', input.reference],
+    ['attachmentUrl', input.attachmentUrl],
+    ['dueDate', input.dueDate],
+    ['quantity', input.quantity],
+    ['unit', input.unit],
+    ['inventoryItemMode', input.inventoryItemMode],
+    ['inventoryItemId', input.inventoryItemId],
+    ['newItemNameEn', input.newItemNameEn],
+    ['newItemNameAr', input.newItemNameAr],
+    ['newItemCategory', input.newItemCategory],
+    ['expiryDate', input.expiryDate],
+    ['assetName', input.assetName],
+    ['assetCategory', input.assetCategory],
+    ['assetKey', input.assetKey],
+    ['paymentMode', input.paymentMode],
+    ['paidAmount', input.paidAmount],
+    ['paymentMethod', input.paymentMethod],
+    ['paymentDate', input.paymentDate],
+  ];
+  for (const [key, value] of fields) setCentralCommandField(fd, key, value);
+
+  if (input.lines?.length) {
+    const tokens = input.lines.map((line, index) => line.token || `ai-${index + 1}`);
+    setCentralCommandField(fd, 'lineIds', tokens.join(','));
+    input.lines.forEach((line, index) => {
+      const prefix = `line_${tokens[index]}_`;
+      const lineFields: Array<[string, unknown]> = [
+        ['type', line.itemType],
+        ['itemName', line.itemName],
+        ['categoryType', line.categoryType],
+        ['assetKey', line.assetKey],
+        ['assetCategory', line.assetCategory],
+        ['inventoryItemId', line.inventoryItemId],
+        ['inventoryItemMode', line.inventoryItemMode],
+        ['newItemNameEn', line.newItemNameEn],
+        ['newItemNameAr', line.newItemNameAr],
+        ['newItemCategory', line.newItemCategory],
+        ['unit', line.unit],
+        ['quantity', line.quantity],
+        ['unitCost', line.unitCost],
+        ['discount', line.discount],
+        ['extra', line.extra],
+        ['branchId', line.branchId],
+        ['notes', line.notes],
+      ];
+      for (const [key, value] of lineFields) {
+        setCentralCommandField(fd, `${prefix}${key}`, value);
+      }
+    });
+  }
+
+  return createCentralRecordCommand(fd, { ...options, newParty: input.newParty });
+}
+
 export async function createCentralRecordCommand(
   fd: FormData,
   options: {
     actorContext?: TrustedCommandContext;
     beforeExecute?: CommandPreconditionHook;
     onCommitted?: CommandCommitHook<{ recordId: string }>;
+    afterStage?: CommandStageHook<CentralRecordTransactionCheckpoint>;
+    newParty?: PartyCommandInput;
   } = {},
 ): Promise<ActionState> {
   const user = await resolveCommandActor('manage:finance', options.actorContext);
@@ -544,17 +719,18 @@ export async function createCentralRecordCommand(
   if (!kind || !date) return { error: 'invalid' };
 
   const lineTokens = parseLedgerLineTokens(fd);
-  const isMultiLinePurchase = kind === 'STOCK_PURCHASE' && lineTokens.length > 0;
-  const linePayload = isMultiLinePurchase ? await parseLedgerLines(fd) : null;
-  const money = isMultiLinePurchase ? linePayload?.money ?? null : await parseMoney(fd);
+  const isMultiLineRecord = (kind === 'STOCK_PURCHASE' || kind === 'MONEY_OUT') && lineTokens.length > 0;
+  const linePayload = isMultiLineRecord ? await parseLedgerLines(fd) : null;
+  const money = isMultiLineRecord ? linePayload?.money ?? null : await parseMoney(fd);
   if (!money || money.amount <= 0) return { error: 'invalid' };
 
   const quantity = kind === 'STOCK_PURCHASE' || kind === 'ASSET_PURCHASE' ? parseQuantity(fd) : null;
-  if (!isMultiLinePurchase && (kind === 'STOCK_PURCHASE' || kind === 'ASSET_PURCHASE') && !quantity) return { error: 'invalid' };
+  if (!isMultiLineRecord && (kind === 'STOCK_PURCHASE' || kind === 'ASSET_PURCHASE') && !quantity) return { error: 'invalid' };
 
   const paidMode = parsePurchasePaymentMode(fd);
-  const payable = paidMode !== 'PAID';
-  const needsPaymentAccount = (kind === 'STOCK_PURCHASE' || kind === 'ASSET_PURCHASE') && (paidMode === 'PAID' || paidMode === 'PARTIAL');
+  const payable = kind !== 'MONEY_OUT' && paidMode !== 'PAID';
+  const needsPaymentAccount = kind === 'MONEY_OUT'
+    || ((kind === 'STOCK_PURCHASE' || kind === 'ASSET_PURCHASE') && (paidMode === 'PAID' || paidMode === 'PARTIAL'));
   if (needsPaymentAccount && !optField(fd, 'accountId')) {
     return { error: 'invalid' };
   }
@@ -569,24 +745,40 @@ export async function createCentralRecordCommand(
 
   let newId = '';
   const touchedItems: string[] = [];
+  let stage: CentralRecordTransactionCheckpoint = 'precondition';
   try {
     await prisma.$transaction(async (tx) => {
       await options.beforeExecute?.(tx);
-      if (isMultiLinePurchase && linePayload) {
+      await options.afterStage?.(tx, 'precondition');
+      stage = 'party';
+      if (!optField(fd, 'partyId') && options.newParty) {
+        const party = await resolveOrCreatePartyInTransaction(
+          tx,
+          options.newParty,
+          { actorId: user.id, source: options.actorContext ? 'ai-assistant-finance' : 'central-record-panel' },
+        );
+        fd.set('partyId', party.id);
+      }
+      await options.afterStage?.(tx, 'party');
+      if (isMultiLineRecord && linePayload) {
       const paymentMethod = parsePaymentMethod(fd);
+      const entryType: FinanceType = kind === 'MONEY_OUT' ? 'EXPENSE' : 'PURCHASE';
+      stage = 'finance_entry';
       const entry = await tx.financeEntry.create({
         data: {
-          ...baseEntryData(fd, date, money, 'PURCHASE', payable, payable ? 'PAYABLE' : null),
+          ...baseEntryData(fd, date, money, entryType, payable, payable ? 'PAYABLE' : null),
           recordClass: ledgerRecordClassForLines(linePayload.lines),
-          accountId: paidMode === 'PAID' ? optField(fd, 'accountId') ?? null : null,
+          accountId: kind === 'MONEY_OUT' || paidMode === 'PAID' ? optField(fd, 'accountId') ?? null : null,
           categoryType: overallCategory(linePayload.lines),
-          paymentMethod: paidMode === 'CREDIT' ? 'CREDIT' : paymentMethod,
+          paymentMethod: payable && paidMode === 'CREDIT' ? 'CREDIT' : paymentMethod,
           createdById: user.id,
-          description: optField(fd, 'description') ?? 'Vendor invoice / purchase',
+          description: optField(fd, 'description') ?? (kind === 'MONEY_OUT' ? 'Multi-line business spending' : 'Vendor invoice / purchase'),
         },
         select: { id: true },
       });
+      await options.afterStage?.(tx, 'finance_entry');
 
+      stage = 'line_effects';
       for (const line of linePayload.lines) {
         let inventoryItemId = line.inventoryItemId;
         let categoryType = line.categoryType;
@@ -683,8 +875,10 @@ export async function createCentralRecordCommand(
           });
         }
       }
+      await options.afterStage?.(tx, 'line_effects');
 
-      if (paidMode === 'PARTIAL') {
+      stage = 'payment';
+      if (kind !== 'MONEY_OUT' && paidMode === 'PARTIAL') {
         await tx.financeEntry.create({
           data: {
             date: parseOptionalDate(optField(fd, 'paymentDate')) ?? date,
@@ -704,7 +898,9 @@ export async function createCentralRecordCommand(
           },
         });
       }
+      await options.afterStage?.(tx, 'payment');
 
+      stage = 'audit';
       await tx.auditLog.create({
         data: {
           userId: user.id,
@@ -712,7 +908,7 @@ export async function createCentralRecordCommand(
           entity: 'FinanceEntry',
           entityId: entry.id,
           metadata: {
-            source: 'multi-item-ledger-panel',
+            source: options.actorContext ? 'ai-assistant-finance' : 'multi-item-ledger-panel',
             kind,
             lines: linePayload.lines.map((line) => ({
               lineNo: line.lineNo,
@@ -728,11 +924,16 @@ export async function createCentralRecordCommand(
           },
         },
       });
+      await options.afterStage?.(tx, 'audit');
+      stage = 'cost_sync';
       for (const itemId of [...new Set(touchedItems)]) {
         await syncActiveCost(itemId, tx);
       }
+      await options.afterStage?.(tx, 'cost_sync');
       newId = entry.id;
+      stage = 'commit_hook';
       await options.onCommitted?.(tx, { recordId: newId });
+      await options.afterStage?.(tx, 'commit_hook');
         return;
       }
 
@@ -744,6 +945,7 @@ export async function createCentralRecordCommand(
       const item = await resolveInventoryItem(tx, fd, user.id, unitCost);
       if (!item) throw new Error('invalid-item');
       const paymentMethod = parsePaymentMethod(fd);
+      stage = 'finance_entry';
       const entry = await tx.financeEntry.create({
         data: {
           ...baseEntryData(fd, date, money, 'PURCHASE', payable, payable ? 'PAYABLE' : null),
@@ -757,6 +959,8 @@ export async function createCentralRecordCommand(
         },
         select: { id: true },
       });
+      await options.afterStage?.(tx, 'finance_entry');
+      stage = 'line_effects';
       await tx.ledgerEntryLine.create({
         data: {
           financeEntryId: entry.id,
@@ -798,6 +1002,8 @@ export async function createCentralRecordCommand(
           branchId: optField(fd, 'branchId') ?? item.branchId,
         },
       });
+      await options.afterStage?.(tx, 'line_effects');
+      stage = 'payment';
       if (paidMode === 'PARTIAL') {
         await tx.financeEntry.create({
           data: {
@@ -818,6 +1024,8 @@ export async function createCentralRecordCommand(
           },
         });
       }
+      await options.afterStage?.(tx, 'payment');
+      stage = 'audit';
       await tx.auditLog.create({
         data: {
           userId: user.id,
@@ -835,10 +1043,15 @@ export async function createCentralRecordCommand(
           },
         },
       });
+      await options.afterStage?.(tx, 'audit');
       newId = entry.id;
       touchedItems.push(item.id);
+      stage = 'cost_sync';
       await syncActiveCost(item.id, tx);
+      await options.afterStage?.(tx, 'cost_sync');
+      stage = 'commit_hook';
       await options.onCommitted?.(tx, { recordId: newId });
+      await options.afterStage?.(tx, 'commit_hook');
       return;
     }
 
@@ -850,6 +1063,7 @@ export async function createCentralRecordCommand(
       if (!name || !isMeasurementUnit(unit)) throw new Error('invalid-asset');
       const unitCost = unitCostData(money.amount, qty);
       const paymentMethod = parsePaymentMethod(fd);
+      stage = 'finance_entry';
       const entry = await tx.financeEntry.create({
         data: {
           ...baseEntryData(fd, date, money, 'PURCHASE', payable, payable ? 'PAYABLE' : null),
@@ -862,6 +1076,8 @@ export async function createCentralRecordCommand(
         },
         select: { id: true },
       });
+      await options.afterStage?.(tx, 'finance_entry');
+      stage = 'line_effects';
       const ledgerLine = await tx.ledgerEntryLine.create({
         data: {
           financeEntryId: entry.id,
@@ -910,6 +1126,8 @@ export async function createCentralRecordCommand(
           notes: 'Created from central record panel',
         },
       });
+      await options.afterStage?.(tx, 'line_effects');
+      stage = 'audit';
       await tx.auditLog.create({
         data: {
           userId: user.id,
@@ -919,6 +1137,8 @@ export async function createCentralRecordCommand(
           metadata: { source: 'central-ledger-panel', financeEntryId: entry.id, name, quantity: decimalData(qty), unit, totalCost: money.amount, unitCost },
         },
       });
+      await options.afterStage?.(tx, 'audit');
+      stage = 'payment';
       if (paidMode === 'PARTIAL') {
         await tx.financeEntry.create({
           data: {
@@ -939,8 +1159,13 @@ export async function createCentralRecordCommand(
           },
         });
       }
+      await options.afterStage?.(tx, 'payment');
+      stage = 'cost_sync';
+      await options.afterStage?.(tx, 'cost_sync');
       newId = entry.id;
+      stage = 'commit_hook';
       await options.onCommitted?.(tx, { recordId: newId });
+      await options.afterStage?.(tx, 'commit_hook');
       return;
     }
 
@@ -966,6 +1191,7 @@ export async function createCentralRecordCommand(
     if (mapped.type === 'CAPITAL_IN' || mapped.type === 'DRAWING') {
       await requireActiveShareholder(tx, optField(fd, 'partyId') ?? null);
     }
+    stage = 'finance_entry';
     const entry = await tx.financeEntry.create({
       data: {
         ...baseEntryData(fd, date, money, mapped.type, mapped.obligation, mapped.kind),
@@ -974,6 +1200,8 @@ export async function createCentralRecordCommand(
       },
       select: { id: true },
     });
+    await options.afterStage?.(tx, 'finance_entry');
+    stage = 'line_effects';
     if (mapped.type === 'EXPENSE' || mapped.type === 'PURCHASE') {
       const isOperating = mapped.type === 'EXPENSE';
       await tx.ledgerEntryLine.create({
@@ -1000,6 +1228,10 @@ export async function createCentralRecordCommand(
         },
       });
     }
+    await options.afterStage?.(tx, 'line_effects');
+    stage = 'payment';
+    await options.afterStage?.(tx, 'payment');
+    stage = 'audit';
     await tx.auditLog.create({
       data: {
         userId: user.id,
@@ -1009,11 +1241,19 @@ export async function createCentralRecordCommand(
         metadata: { source: 'central-ledger-panel', kind, amount: money.amount },
       },
     });
+    await options.afterStage?.(tx, 'audit');
+    stage = 'cost_sync';
+    await options.afterStage?.(tx, 'cost_sync');
     newId = entry.id;
+    stage = 'commit_hook';
     await options.onCommitted?.(tx, { recordId: newId });
-    });
+    await options.afterStage?.(tx, 'commit_hook');
+    }, COMMAND_TRANSACTION_OPTIONS);
   } catch (error) {
-    return { error: error instanceof Error && error.message === 'action_stale' ? 'action_stale' : 'invalid' };
+    return {
+      error: error instanceof Error && error.message === 'action_stale' ? 'action_stale' : 'invalid',
+      stage,
+    };
   }
 
   revalidateFinancePaths();

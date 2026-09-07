@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { inferCustomerCandidate, recoverCustomerCandidate } from '@/lib/customer-candidate';
+import { AI_EXTRACTION_EVALUATION_CASES } from '@/lib/ai-evaluations';
 
 describe('AI order customer inference', () => {
   it('prepares an unmatched Arabic name as a new customer', () => {
@@ -58,10 +59,46 @@ describe('AI order customer inference', () => {
     });
   });
 
+  it('recovers every supplied customer contact and address field after clarification', () => {
+    expect(recoverCustomerCandidate(
+      { phone: '+9647707130864' },
+      [
+        'Customer: Noor Abdul Latif\nPhone: 0770 713 0864\nEmail: noor@example.com\nAddress: Iraq Gate Complex\nGovernorate: Baghdad\nStreet: Building 12\nNotes: Call before pickup',
+        'lines.0.productQuery: LHB-TRK-CRD-225-TG-MD',
+      ],
+    )).toEqual({
+      nameEn: 'Noor Abdul Latif',
+      phone: '+9647707130864',
+      email: 'noor@example.com',
+      governorate: 'Baghdad',
+      address1: 'Iraq Gate Complex',
+      street: 'Building 12',
+      notes: 'Call before pickup',
+      segment: 'NEW',
+    });
+  });
+
   it('does not merge an unrelated customer from an older message', () => {
     expect(recoverCustomerCandidate(
       { phone: '0770 713 0864' },
       ['العميل: سلوى دحام\n0781 110 0140'],
     )).toEqual({ phone: '+9647707130864', segment: 'NEW' });
+  });
+
+  it('recovers at least 98 percent of 150-plus bilingual customer fixtures exactly', () => {
+    const exact = AI_EXTRACTION_EVALUATION_CASES.filter((testCase) => {
+      const actual = recoverCustomerCandidate(
+        { phone: testCase.expectedCustomer.phone },
+        [testCase.prompt],
+      );
+      try {
+        expect(actual).toEqual(testCase.expectedCustomer);
+        return true;
+      } catch {
+        return false;
+      }
+    }).length;
+    expect(AI_EXTRACTION_EVALUATION_CASES.length).toBeGreaterThanOrEqual(150);
+    expect(exact / AI_EXTRACTION_EVALUATION_CASES.length).toBeGreaterThanOrEqual(0.98);
   });
 });

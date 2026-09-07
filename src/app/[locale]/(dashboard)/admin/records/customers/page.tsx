@@ -8,7 +8,7 @@ import { PageHeader } from '@/components/ui/primitives';
 import { DataTable, type Column } from '@/components/data-table/DataTable';
 import { RecordsSummary, type SummaryStat } from '@/components/records/Summary';
 import { TableToolbar } from '@/components/records/TableToolbar';
-import { Plus } from 'lucide-react';
+import { Plus, ShoppingBag } from 'lucide-react';
 import { BackLink } from '@/components/records/parts';
 import { SectionGuide } from '@/components/records/SectionGuide';
 import { Link } from '@/i18n/navigation';
@@ -92,15 +92,24 @@ export default async function CustomersRecordsPage({
   return (
     <>
       <BackLink href="/admin/records" label={t('back')} />
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <PageHeader title={t('entities.customers')} subtitle={t('total', { n: customers.length })} />
-        <Link
-          href="/admin/records/customers/new"
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:opacity-95"
-        >
-          <Plus className="size-4" />
-          {t('add')}
-        </Link>
+        <div className="flex w-full flex-wrap gap-2 sm:w-auto">
+          <Link
+            href="/customers/product-buyers"
+            className="inline-flex min-h-10 flex-1 items-center justify-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-sm font-semibold text-roast hover:bg-linen/40 sm:flex-none"
+          >
+            <ShoppingBag className="size-4" />
+            {t('productBuyers')}
+          </Link>
+          <Link
+            href="/admin/records/customers/new"
+            className="inline-flex min-h-10 flex-1 items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:opacity-95 sm:flex-none"
+          >
+            <Plus className="size-4" />
+            {t('add')}
+          </Link>
+        </div>
       </div>
       <SectionGuide title={t('guide.customers.title')} intro={t('guide.customers.intro')} points={t.raw('guide.customers.points') as string[]} />
       <RecordsSummary stats={stats} />

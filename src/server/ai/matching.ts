@@ -1,9 +1,8 @@
 import 'server-only';
 import { normalizeAssistantText } from '@/lib/ai-assistant';
 import { normalizeIraqiPhone } from '@/lib/phone';
-import { effectivePrice } from '@/lib/metrics/pricing';
-import { rankProductCandidates } from '@/lib/product-matching';
 import { prisma } from '@/server/db/client';
+import { matchActiveProduct } from '@/server/products/matching';
 
 export type MatchResult<T> =
   | { kind: 'exact'; value: T }
@@ -15,7 +14,21 @@ export async function matchCustomer(query: string) {
   const normalizedQuery = normalizeAssistantText(query);
   const rows = await prisma.customer.findMany({
     where: { isActive: true },
-    select: { id: true, externalId: true, nameEn: true, nameAr: true, phone: true, normalizedPhone: true },
+    select: {
+      id: true,
+      externalId: true,
+      nameEn: true,
+      nameAr: true,
+      phone: true,
+      normalizedPhone: true,
+      email: true,
+      governorate: true,
+      address1: true,
+      street: true,
+      notes: true,
+      campaignSource: true,
+      segment: true,
+    },
     orderBy: { createdAt: 'desc' },
   });
   const exact = rows.filter((row) =>
@@ -37,37 +50,7 @@ export async function matchCustomer(query: string) {
 }
 
 export async function matchProduct(query: string) {
-  const now = new Date();
-  const productRows = await prisma.product.findMany({
-    where: { isActive: true },
-    select: {
-      id: true,
-      sku: true,
-      barcodeValue: true,
-      retailBarcode: true,
-      nameEn: true,
-      nameAr: true,
-      aliases: true,
-      sizeGrams: true,
-      sizeLabel: true,
-      grind: true,
-      roastLevel: true,
-      origin: true,
-      productLine: true,
-      variationType: true,
-      sellUnit: true,
-      sellingPrice: true,
-      cogsPerUnit: true,
-      prices: { where: { kind: 'BASE' }, select: { kind: true, price: true, effectiveFrom: true } },
-      group: { select: { code: true, nameEn: true, nameAr: true } },
-    },
-    orderBy: { sku: 'asc' },
-  });
-  const rows = productRows.map(({ prices, ...row }) => ({
-    ...row,
-    sellingPrice: effectivePrice(prices, row.sellingPrice, now),
-  }));
-  return rankProductCandidates(rows, query);
+  return matchActiveProduct(query);
 }
 
 export async function matchOrder(query: string, scope: { branchId?: string } = {}) {
@@ -130,6 +113,7 @@ export async function matchFinanceAccount(query: string) {
 
 export async function matchParty(query: string, type?: 'SUPPLIER' | 'CUSTOMER') {
   const normalized = normalizeAssistantText(query);
+  const normalizedPhone = normalizeIraqiPhone(query);
   const rows = await prisma.party.findMany({
     where: { isActive: true, ...(type ? { type } : {}) },
     select: {
@@ -145,6 +129,7 @@ export async function matchParty(query: string, type?: 'SUPPLIER' | 'CUSTOMER') 
   });
   const exact = rows.filter((row) =>
     row.id === query ||
+    (normalizedPhone && normalizeIraqiPhone(row.phone) === normalizedPhone) ||
     normalizeAssistantText(row.name) === normalized ||
     normalizeAssistantText(row.externalKey ?? '') === normalized,
   );
@@ -157,10 +142,10 @@ export async function matchParty(query: string, type?: 'SUPPLIER' | 'CUSTOMER') 
     : { kind: 'none', candidates: [] } as const;
 }
 
-export async function matchInventoryItem(query: string) {
+export async function matchInventoryItem(query: string, scope: { branchId?: string } = {}) {
   const normalized = normalizeAssistantText(query);
   const rows = await prisma.inventoryItem.findMany({
-    where: { isActive: true },
+    where: { isActive: true, ...(scope.branchId ? { branchId: scope.branchId } : {}) },
     select: { id: true, nameEn: true, nameAr: true, category: true, unit: true, branchId: true },
     orderBy: { nameEn: 'asc' },
   });

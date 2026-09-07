@@ -36,11 +36,11 @@ export async function getOrCreateConversation(input: {
       },
     });
   }
-  if (input.channel === 'TELEGRAM' && input.externalThreadId) {
+  if (input.channel && input.externalThreadId) {
     const existing = await prisma.aiConversation.findFirst({
       where: {
         userId: input.userId,
-        channel: 'TELEGRAM',
+        channel: input.channel,
         externalThreadId: input.externalThreadId,
         status: 'ACTIVE',
         expiresAt: { gt: new Date() },

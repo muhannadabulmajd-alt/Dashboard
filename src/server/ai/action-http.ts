@@ -30,6 +30,20 @@ export function pendingActionError(error: unknown, locale: 'ar' | 'en'): ActionE
   if (code === 'action_in_progress') {
     return { status: 409, body: { error: code, message: localized(locale, 'This action is already being processed.', 'هذا الإجراء قيد التنفيذ حالياً.'), retryable: true } };
   }
+  if (code.startsWith('ai_capability_unavailable:')) {
+    return {
+      status: 503,
+      body: {
+        error: 'ai_capability_unavailable',
+        message: localized(
+          locale,
+          'This assistant capability is paused. No data was changed. An Owner can review and re-enable it.',
+          'قدرة المساعد هذه متوقفة. لم تتغير أي بيانات. يمكن للمالك مراجعتها وإعادة تفعيلها.',
+        ),
+        retryable: true,
+      },
+    };
+  }
   if (code.startsWith('action_') && !code.startsWith('action_failed:')) {
     return { status: 409, body: { error: code, message: localized(locale, 'This action is no longer available.', 'لم يعد هذا الإجراء متاحاً.'), retryable: false } };
   }

@@ -40,6 +40,12 @@ Target stack: **Vercel** (Next.js host) + **Neon** (free serverless PostgreSQL).
 | `AI_ASSISTANT_MODEL` | `gpt-5.4-mini-2026-03-17` |
 | `AI_ASSISTANT_MAX_REQUESTS_PER_MINUTE` | `10` |
 | `AI_ASSISTANT_HISTORY_RETENTION_DAYS` | `90` |
+| `AI_ASSISTANT_TRANSCRIPTION_MODEL` | `gpt-transcribe` |
+| `AI_ASSISTANT_MEDIA_MAX_MB` | `10` (the server also enforces this upper bound) |
+| `TELEGRAM_BOT_ENABLED` | `true` only after the bot identity and webhook are verified |
+| `TELEGRAM_BOT_TOKEN` | BotFather token; use different bots for Preview and Production |
+| `TELEGRAM_WEBHOOK_SECRET` | a different long random secret in each environment |
+| `TELEGRAM_ALLOWED_USER_IDS` | comma-separated numeric Telegram IDs allowed to request account linking |
 
 ## 4. That's it — no terminal
 
@@ -66,10 +72,12 @@ Once you're in, you can **delete `ADMIN_PASSWORD`** from Vercel to turn the env-
 
 ## 6. Optional extras
 
-- **Scheduled report/connector crons** are declared in `vercel.json` (all run at most once/day, so they work on Vercel's free Hobby plan). They authenticate with `CRON_SECRET`.
+- **Scheduled report, connector, cleanup, and AI automation crons** are declared in `vercel.json` (all run at most once/day, so they work on Vercel's free Hobby plan). The AI automation runner checks due work daily at 03:07 UTC (06:07 Baghdad). They authenticate with `CRON_SECRET`.
 - **Emailed reports:** set `RESEND_API_KEY` + a verified `REPORT_FROM` domain; otherwise reports generate but only log.
 - **Connectors:** configure the credentialed HTTP-CSV connector at **/admin/connectors**; tokens are encrypted with `ENCRYPTION_KEY`.
-- **Atlas AI Assistant:** add the five AI variables above separately to Vercel Preview and Production. Chats remain private in Atlas, expire after the configured retention period, and OpenAI requests use `store: false`.
+- **Atlas AI Assistant:** configure the AI variables above separately in Preview and Production. Chats remain private in Atlas, expire after the configured retention period, and OpenAI requests use `store: false`.
+- **Phase 2 rollout:** a newly migrated database starts with governed reads enabled and every mutation, media/report, and automation capability disabled. An Owner enables the phases from the AI Assistant capability controls in this order: orders/customers, spending/purchases, operations/payments, media/reports, then automations.
+- **Telegram:** each environment needs its own bot. Link every numeric Telegram ID to an active Atlas user under **Administration → Connectors**, then verify the bot and register its webhook once. Register again only when the bot token, webhook secret, or public deployment URL changes.
 
 ## Manual alternative (if you prefer the CLI)
 
@@ -95,4 +103,6 @@ ADMIN_EMAIL="you@laheeb.coffee" ADMIN_PASSWORD="a-strong-password" pnpm create-a
 - [ ] `ADMIN_EMAIL` / `ADMIN_PASSWORD` set; first sign-in creates the Owner.
 - [ ] Demo seed **not** run on the live DB.
 - [ ] Separate Preview and Production `OPENAI_API_KEY` values configured; `AI_ASSISTANT_ENABLED=true` only where launch is intended.
+- [ ] AI transcription/media settings are configured and Phase 2 capabilities are enabled one stage at a time after smoke checks.
+- [ ] Separate Preview and Production Telegram bots are linked, verified, and registered; numeric user mappings have been reviewed.
 - [ ] *(optional)* `RESEND_API_KEY` for emailed reports.

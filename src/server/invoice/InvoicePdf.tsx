@@ -99,6 +99,9 @@ export function InvoicePdf({ data, labels, locale }: { data: InvoiceData; labels
             <DetailRow label={labels.governorate} value={deliveryGovernorate} rtl={isRtl} />
             <DetailRow label={labels.address} value={order.customer?.address1} rtl={isRtl} />
             <DetailRow label={labels.street} value={order.customer?.street} rtl={isRtl} />
+            <DetailRow label={labels.source} value={order.customer?.campaignSource} rtl={isRtl} />
+            <DetailRow label={labels.segment} value={order.customer?.segment} rtl={isRtl} />
+            <DetailRow label={labels.customerNotes} value={order.customer?.notes} rtl={isRtl} />
           </View>
           <View style={styles.detailCard}>
             <Text style={styles.sectionTitle}>{labels.deliveryDetails}</Text>

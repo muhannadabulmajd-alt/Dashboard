@@ -1,6 +1,11 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "prisma migrate deploy && pnpm check:reconciliation && next build",
+  "git": {
+    "deploymentEnabled": {
+      "feat/ai-assistant-phase-2": false
+    }
+  },
   "functions": {
     "src/app/api/queues/telegram-updates/route.ts": {
       "experimentalTriggers": [
@@ -11,12 +16,33 @@
           "initialDelaySeconds": 0
         }
       ]
+    },
+    "src/app/api/queues/ai-documents/route.ts": {
+      "experimentalTriggers": [
+        {
+          "type": "queue/v2beta",
+          "topic": "ai-document-delivery",
+          "retryAfterSeconds": 60,
+          "initialDelaySeconds": 0
+        }
+      ]
+    },
+    "src/app/api/queues/ai-reports/route.ts": {
+      "experimentalTriggers": [
+        {
+          "type": "queue/v2beta",
+          "topic": "ai-report-delivery",
+          "retryAfterSeconds": 60,
+          "initialDelaySeconds": 0
+        }
+      ]
     }
   },
   "crons": [
     { "path": "/api/reports/scheduled?kind=weekly", "schedule": "0 6 * * 1" },
     { "path": "/api/reports/scheduled?kind=monthly", "schedule": "0 6 1 * *" },
     { "path": "/api/connectors/sync", "schedule": "0 3 * * *" },
-    { "path": "/api/ai-assistant/cleanup", "schedule": "30 2 * * *" }
+    { "path": "/api/ai-assistant/cleanup", "schedule": "30 2 * * *" },
+    { "path": "/api/ai-assistant/automations", "schedule": "7 3 * * *" }
   ]
 }

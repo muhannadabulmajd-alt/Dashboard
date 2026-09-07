@@ -10,6 +10,7 @@ export interface CurrentUser {
   name: string;
   role: Role;
   branchId: string | null;
+  defaultFinanceAccountId?: string | null;
 }
 
 /** Resolve the authenticated user and refresh mutable authorization state. */
@@ -24,6 +25,7 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
       name: true,
       role: true,
       branchId: true,
+      defaultFinanceAccountId: true,
       isActive: true,
     },
   });
@@ -34,5 +36,6 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
     name: user.name,
     role: user.role,
     branchId: user.branchId,
+    defaultFinanceAccountId: user.defaultFinanceAccountId,
   };
 });

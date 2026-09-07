@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { AiChatRequestSchema, type AiStreamEvent } from '@/lib/ai-assistant';
+import { resolveAiPageContext } from '@/lib/ai-page-context';
 import { isHttpResponse, requireAiApiUser } from '@/server/ai/http';
 import { AiRateLimitError } from '@/server/ai/rate-limit';
 import { processAssistantMessage } from '@/server/ai/service';
@@ -29,8 +30,10 @@ export async function POST(request: NextRequest) {
           await processAssistantMessage({
             user: userOrResponse,
             locale: parsed.data.locale,
-            message: parsed.data.message,
+            message: parsed.data.message ?? '',
+            attachmentIds: parsed.data.attachmentIds,
             conversationId: parsed.data.conversationId,
+            pageContext: resolveAiPageContext(parsed.data.pageContextPath) ?? undefined,
             channel: 'WEB',
             signal: request.signal,
             onEvent: send,

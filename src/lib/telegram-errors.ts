@@ -4,6 +4,8 @@ const TERMINAL_TELEGRAM_PROCESSING_ERRORS = new Set([
   'action_failed',
   'action_not_pending',
   'action_stale',
+  'ai_capability_unavailable',
+  'ai_tool_forbidden',
   'notfound',
 ]);
 

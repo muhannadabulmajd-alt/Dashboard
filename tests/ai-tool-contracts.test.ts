@@ -1,9 +1,30 @@
 import { describe, expect, it } from 'vitest';
-import { PrepareOrderSchema, PreparePurchaseSchema } from '@/server/ai/schemas';
-import { ResolvedOrderActionSchema } from '@/server/ai/action-data';
+import {
+  PrepareInventoryAdjustmentSchema,
+  PrepareOrderSchema,
+  PreparePurchaseSchema,
+  PrepareRefundSchema,
+  PrepareTransferSchema,
+  ProductBuyersSchema,
+  FinanceOverviewSchema,
+  CustomerInsightsSchema,
+  DemandForecastSchema,
+  DeliverySummarySchema,
+  RoasterySummarySchema,
+  InventoryRecommendationsSchema,
+  OperationalAlertsSchema,
+} from '@/server/ai/schemas';
+import {
+  ResolvedInventoryAdjustmentActionSchema,
+  ResolvedOrderActionSchema,
+  ResolvedRefundActionSchema,
+  ResolvedTransferActionSchema,
+} from '@/server/ai/action-data';
 import { AI_ASSISTANT_TOOLS } from '@/server/ai/tool-definitions';
 import { actionPreconditionIssues } from '@/server/ai/preconditions';
 import { QuickOrderDraftSchema } from '@/lib/ai-quick-order';
+import { compatibleCustomerMatches } from '@/server/commands/customers';
+import { buildDemandForecast } from '@/lib/ai-demand-forecast';
 
 describe('AI write tool validation', () => {
   it('accepts a bounded guided order draft and rejects unsafe extras', () => {
@@ -66,6 +87,7 @@ describe('AI write tool validation', () => {
       assetName: null,
       assetCategory: null,
       supplierQuery: null,
+      newSupplier: null,
       paidMode: null,
       paidAmount: null,
       accountQuery: null,
@@ -75,13 +97,69 @@ describe('AI write tool validation', () => {
       branchQuery: null,
       reference: null,
       notes: null,
+      lines: null,
     };
     expect(PreparePurchaseSchema.parse(base)).toEqual(base);
     expect(() => PreparePurchaseSchema.parse({ ...base, sql: 'DROP TABLE' })).toThrow();
   });
 
+  it('accepts three-decimal multi-line purchases with explicit treatment data', () => {
+    const input = {
+      purchaseType: 'MIXED' as const,
+      date: null,
+      totalAmount: null,
+      currency: null,
+      rate: null,
+      quantity: null,
+      unit: null,
+      inventoryItemQuery: null,
+      newItemNameEn: null,
+      newItemNameAr: null,
+      newItemCategory: null,
+      assetName: null,
+      assetCategory: null,
+      supplierQuery: 'Coffee equipment supplier',
+      newSupplier: {
+        name: 'Coffee equipment supplier',
+        type: 'SUPPLIER' as const,
+        phone: '+9647700000000',
+        email: null,
+        address: 'Baghdad',
+        notes: null,
+      },
+      paidMode: 'PARTIAL' as const,
+      paidAmount: 100_000,
+      accountQuery: 'Cash',
+      paymentMethod: 'CASH',
+      paymentDate: null,
+      dueDate: null,
+      branchQuery: null,
+      reference: 'SUP-TEST-1',
+      notes: null,
+      lines: [{
+        itemType: 'INVENTORY' as const,
+        itemName: 'Packaging bags',
+        categoryType: 'PACKAGING' as const,
+        assetKey: null,
+        assetCategory: null,
+        inventoryItemQuery: null,
+        newItemNameEn: 'Packaging bags',
+        newItemNameAr: 'أكياس تغليف',
+        newItemCategory: 'PACKAGING' as const,
+        unit: 'unit' as const,
+        quantity: 125.375,
+        unitCost: 1_000,
+        discount: 0,
+        extra: 5_000,
+        branchQuery: null,
+        notes: null,
+      }],
+    };
+    expect(PreparePurchaseSchema.parse(input).lines?.[0].quantity).toBe(125.375);
+  });
+
   it('publishes only strict allowlisted function schemas', () => {
-    expect(AI_ASSISTANT_TOOLS).toHaveLength(11);
+    expect(AI_ASSISTANT_TOOLS).toHaveLength(29);
     expect(new Set(AI_ASSISTANT_TOOLS.map((tool) => tool.name)).size).toBe(AI_ASSISTANT_TOOLS.length);
     for (const tool of AI_ASSISTANT_TOOLS) {
       expect(tool.strict).toBe(true);
@@ -89,6 +167,148 @@ describe('AI write tool validation', () => {
     }
     expect(AI_ASSISTANT_TOOLS.some((tool) => tool.name.includes('delete'))).toBe(false);
     expect(AI_ASSISTANT_TOOLS.some((tool) => tool.name.includes('sql'))).toBe(false);
+    expect(AI_ASSISTANT_TOOLS.some((tool) => tool.name === 'product_buyers')).toBe(true);
+    expect(AI_ASSISTANT_TOOLS.some((tool) => tool.name === 'finance_overview')).toBe(true);
+    expect(AI_ASSISTANT_TOOLS.some((tool) => tool.name === 'inventory_recommendations')).toBe(true);
+    expect(AI_ASSISTANT_TOOLS.some((tool) => tool.name === 'demand_forecast')).toBe(true);
+  });
+
+  it('bounds governed cross-module analytics without accepting arbitrary query fields', () => {
+    const range = { preset: 'this_month' as const, from: null, to: null };
+    expect(FinanceOverviewSchema.parse({ range, view: 'ACCOUNTS', limit: 25 }).view).toBe('ACCOUNTS');
+    expect(CustomerInsightsSchema.parse({ range, dimension: 'TOP_CUSTOMERS', limit: 25 }).dimension).toBe('TOP_CUSTOMERS');
+    expect(DeliverySummarySchema.parse({ range, dimension: 'COURIER', slaDays: 3, limit: 25 }).slaDays).toBe(3);
+    expect(RoasterySummarySchema.parse({ range, dimension: 'BATCH', limit: 25 }).dimension).toBe('BATCH');
+    expect(InventoryRecommendationsSchema.parse({ query: null, horizonDays: 30, limit: 25 }).horizonDays).toBe(30);
+    expect(DemandForecastSchema.parse({ lookbackDays: 60, horizonDays: 30, limit: 25 }).lookbackDays).toBe(60);
+    expect(OperationalAlertsSchema.parse({ expiryDays: 21, limit: 25 }).expiryDays).toBe(21);
+    expect(() => FinanceOverviewSchema.parse({ range, view: 'ACCOUNTS', limit: 25, sql: 'select *' })).toThrow();
+    expect(() => InventoryRecommendationsSchema.parse({ query: null, horizonDays: 365, limit: 25 })).toThrow();
+    expect(() => DemandForecastSchema.parse({ lookbackDays: 7, horizonDays: 30, limit: 25 })).toThrow();
+  });
+
+  it('builds a transparent recent-versus-prior demand forecast', () => {
+    const line = (productId: string, sku: string, quantity: number) => ({
+      productId,
+      sku,
+      quantity,
+      product: { nameEn: productId, nameAr: productId },
+    });
+    const forecast = buildDemandForecast({
+      previous: [line('coffee', 'COFFEE-1', 14)],
+      recent: [line('coffee', 'COFFEE-1', 28), line('new', 'NEW-1', 7)],
+      previousDays: 14,
+      recentDays: 14,
+      horizonDays: 7,
+    });
+
+    expect(forecast[0]).toMatchObject({
+      productId: 'coffee',
+      previousUnits: 14,
+      recentUnits: 28,
+      trendPct: 1,
+      forecastUnits: 15,
+      confidence: 'HIGH',
+    });
+    expect(forecast[1]).toMatchObject({ productId: 'new', trendPct: null, forecastUnits: 4, confidence: 'MEDIUM' });
+  });
+
+  it('requires distinct accounts for a governed transfer', () => {
+    const extracted = PrepareTransferSchema.parse({
+      date: null,
+      amount: 125_000,
+      currency: null,
+      rate: null,
+      fromAccountQuery: 'Cash',
+      toAccountQuery: 'Bank',
+      description: null,
+      reference: null,
+    });
+    expect(extracted.amount).toBe(125_000);
+    const resolved = {
+      date: '2026-09-05T09:00:00.000Z',
+      amount: 125_000,
+      currency: 'IQD' as const,
+      rate: null,
+      fromAccountId: 'cash',
+      fromAccountName: 'Cash',
+      toAccountId: 'bank',
+      toAccountName: 'Bank',
+      description: 'Cash deposit',
+      reference: null,
+    };
+    expect(ResolvedTransferActionSchema.parse(resolved)).toEqual(resolved);
+    expect(() => ResolvedTransferActionSchema.parse({ ...resolved, toAccountId: 'cash' })).toThrow();
+    expect(actionPreconditionIssues('CREATE_TRANSFER', resolved, {
+      fromAccount: { id: 'cash', isActive: true, currency: 'IQD', type: 'CASH' },
+      toAccount: { id: 'bank', isActive: false, currency: 'IQD', type: 'BANK' },
+    } as never)).toContainEqual({ field: 'toAccountQuery', code: 'account_inactive' });
+  });
+
+  it('keeps differently named customers separate even when they share a phone', () => {
+    const existing = [{ id: 'customer-1', nameEn: null, nameAr: 'نور عبداللطيف' }];
+    expect(compatibleCustomerMatches({ nameAr: 'نور عبداللطيف' }, existing)).toHaveLength(1);
+    expect(compatibleCustomerMatches({ nameAr: 'سارة أحمد' }, existing)).toHaveLength(0);
+  });
+
+  it('validates governed operations without accepting raw query fields', () => {
+    const adjustment = {
+      inventoryItemQuery: 'Green coffee Brazil',
+      targetQuantity: 12.375,
+      occurredAt: null,
+      reason: 'Verified physical count',
+    };
+    expect(PrepareInventoryAdjustmentSchema.parse(adjustment)).toEqual(adjustment);
+    expect(ResolvedInventoryAdjustmentActionSchema.parse({
+      inventoryItemId: 'item-1',
+      inventoryItemName: 'Green coffee Brazil',
+      targetQuantity: 12.375,
+      occurredAt: '2026-09-05T09:00:00.000Z',
+      reason: adjustment.reason,
+    }).targetQuantity).toBe(12.375);
+    expect(() => ResolvedInventoryAdjustmentActionSchema.parse({
+      inventoryItemId: 'item-1',
+      inventoryItemName: 'Green coffee Brazil',
+      targetQuantity: 12.3755,
+      occurredAt: '2026-09-05T09:00:00.000Z',
+      reason: adjustment.reason,
+    })).toThrow();
+    expect(() => PrepareInventoryAdjustmentSchema.parse({ ...adjustment, sql: 'update inventory' })).toThrow();
+  });
+
+  it('requires complete high-risk refund data at execution time', () => {
+    const extracted = {
+      orderQuery: 'LHB-ORD-260905-WEB-0001',
+      amount: 10_000,
+      accountQuery: 'Cash',
+      paymentMethod: 'CASH' as const,
+      date: null,
+      reason: 'Customer returned the order',
+    };
+    expect(PrepareRefundSchema.parse(extracted)).toEqual(extracted);
+    const resolved = ResolvedRefundActionSchema.parse({
+      orderId: 'order-1',
+      orderNumber: extracted.orderQuery,
+      amount: extracted.amount,
+      accountId: 'account-1',
+      accountName: 'Cash',
+      paymentMethod: extracted.paymentMethod,
+      date: '2026-09-05T09:00:00.000Z',
+      reason: extracted.reason,
+    });
+    expect(resolved.orderNumber).toBe(extracted.orderQuery);
+    expect(() => ResolvedRefundActionSchema.parse({ ...resolved, reason: '' })).toThrow();
+  });
+
+  it('requires a bounded product-buyer query and rejects raw query fields', () => {
+    const input = {
+      productQuery: 'LHB-DRP-BOX10-15G-DB-M',
+      range: { preset: 'all' as const, from: null, to: null },
+      limit: 25,
+    };
+    expect(ProductBuyersSchema.parse(input)).toEqual(input);
+    expect(() => ProductBuyersSchema.parse({ ...input, sql: 'select * from orders' })).toThrow();
+    expect(() => ProductBuyersSchema.parse({ ...input, limit: 100 })).toThrow();
   });
 
   it('blocks inactive records and insufficient stock before order confirmation', () => {

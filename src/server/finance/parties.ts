@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { prisma } from '@/server/db/client';
 import { PARTY_TYPES } from '@/lib/enums';
+import { createPartyCommand, updatePartyCommand } from '@/server/commands/parties';
 import { requireCap, audit, reqField, optField, type ActionState } from '../records/shared';
 
 const LIST = '/[locale]/(dashboard)/finance/parties';
@@ -50,8 +51,7 @@ export async function createParty(_prev: ActionState, fd: FormData): Promise<Act
   const r = parse(fd);
   if (!r.success) return { error: 'invalid' };
   const locale = reqField(fd, 'locale') || 'ar';
-  const row = await prisma.party.create({ data: { ...r.data, branchId: r.data.branchId ?? null, defaultSettlementAccountId: r.data.defaultSettlementAccountId ?? null } });
-  await audit(user.id, 'CREATE', 'Party', { id: row.id, name: row.name });
+  const row = await createPartyCommand(r.data, { actorId: user.id, source: 'party-form' });
   revalidatePath(LIST, 'page');
   redirect(`/${locale}/finance/parties/${row.id}`);
 }
@@ -66,8 +66,10 @@ export async function updateParty(
   const r = parse(fd);
   if (!r.success) return { error: 'invalid' };
   const locale = reqField(fd, 'locale') || 'ar';
-  await prisma.party.update({ where: { id }, data: { ...r.data, branchId: r.data.branchId ?? null, defaultSettlementAccountId: r.data.defaultSettlementAccountId ?? null } });
-  await audit(user.id, 'UPDATE', 'Party', { id, name: r.data.name });
+  await updatePartyCommand(
+    { partyId: id, ...r.data, reason: 'Party form update' },
+    { actorId: user.id, source: 'party-form' },
+  );
   revalidatePath(LIST, 'page');
   redirect(`/${locale}/finance/parties/${id}`);
 }

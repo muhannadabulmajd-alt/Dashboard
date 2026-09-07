@@ -32,6 +32,12 @@ export type CommandPreconditionHook = (
   tx: Prisma.TransactionClient,
 ) => Promise<void>;
 
+/** Optional transaction checkpoint used by isolated integration tests to prove rollback boundaries. */
+export type CommandStageHook<TStage extends string> = (
+  tx: Prisma.TransactionClient,
+  stage: TStage,
+) => Promise<void>;
+
 /** Return the current user iff they hold the capability, else null. */
 export async function requireCap(capability: Capability) {
   const user = await getCurrentUser();

@@ -23,11 +23,18 @@ import {
 } from '@/server/orders/sync';
 import { generateOrderNumber } from '@/server/records/numbering';
 import {
-  createCustomerInTransaction,
+  enrichCustomerForOrderInTransaction,
+  resolveOrCreateCustomerInTransaction,
   CustomerCommandSchema,
+  CustomerOrderEnrichmentSchema,
   type CustomerCommandInput,
+  type CustomerOrderEnrichmentInput,
 } from '@/server/commands/customers';
 import type { TrustedCommandContext } from '@/server/commands/actor-context';
+import {
+  COMMAND_TRANSACTION_OPTIONS,
+  type OrderCreateTransactionCheckpoint,
+} from '@/server/commands/transaction-checkpoints';
 import {
   requireCap,
   resolveCommandActor,
@@ -37,6 +44,7 @@ import {
   type ActionState,
   type CommandCommitHook,
   type CommandPreconditionHook,
+  type CommandStageHook,
 } from './shared';
 
 const LIST = '/[locale]/(dashboard)/admin/records/orders';
@@ -111,6 +119,109 @@ const lineSchema = z.array(
     lineDiscount: z.coerce.number().int().nonnegative().default(0),
   }),
 );
+
+const OrderCreateCommandInputSchema = headerSchema.omit({ orderNumber: true }).extend({
+  locale: z.enum(['en', 'ar']).default('ar'),
+  customerExternalId: z.string().nullish(),
+  newCustomer: CustomerCommandSchema.nullish(),
+  customerEnrichment: CustomerOrderEnrichmentSchema.nullish(),
+  financeAccountId: z.string().nullish(),
+  financeProviderId: z.string().nullish(),
+  financePaidAmount: z.coerce.number().int().nonnegative().nullish(),
+  financePaymentMethod: z.string().nullish(),
+  financePaymentDate: z.coerce.date().nullish(),
+  financeDueDate: z.coerce.date().nullish(),
+  notes: z.string().nullish(),
+  lines: lineSchema,
+}).strict();
+
+export type OrderCreateCommandInput = z.input<typeof OrderCreateCommandInputSchema>;
+
+const BulkOrderCommandInputSchema = bulkOrderSchema.strict();
+export type BulkOrderCommandInput = z.input<typeof BulkOrderCommandInputSchema>;
+
+function setCommandField(fd: FormData, key: string, value: unknown): void {
+  if (value === null || value === undefined || value === '') return;
+  fd.set(key, value instanceof Date ? value.toISOString() : String(value));
+}
+
+/**
+ * Typed adapter shared by web AI and Telegram. The existing FormData action
+ * remains a thin UI boundary while all trusted callers validate the same
+ * command contract before entering the order transaction.
+ */
+export async function createOrderFromInput(
+  rawInput: OrderCreateCommandInput,
+  options: {
+    actorContext?: TrustedCommandContext;
+    beforeExecute?: CommandPreconditionHook;
+    onCommitted?: CommandCommitHook<{ recordId: string; recordNumber: string }>;
+    afterStage?: CommandStageHook<OrderCreateTransactionCheckpoint>;
+  } = {},
+): Promise<ActionState> {
+  const parsed = OrderCreateCommandInputSchema.safeParse(rawInput);
+  if (!parsed.success) {
+    const fieldErrors = Object.fromEntries(
+      parsed.error.issues.map((issue) => [issue.path.join('.') || 'form', 'invalid']),
+    );
+    return { error: 'invalid', formError: 'invalid', fieldErrors, stage: 'validation' };
+  }
+  const input = parsed.data;
+  const fd = new FormData();
+  setCommandField(fd, 'locale', input.locale);
+  setCommandField(fd, 'placedAt', input.placedAt);
+  setCommandField(fd, 'customerExternalId', input.customerExternalId);
+  if (input.newCustomer) setCommandField(fd, 'newCustomer', JSON.stringify(input.newCustomer));
+  if (input.customerEnrichment) setCommandField(fd, 'customerEnrichment', JSON.stringify(input.customerEnrichment));
+  setCommandField(fd, 'channel', input.channel);
+  setCommandField(fd, 'governorate', input.governorate);
+  setCommandField(fd, 'fulfillmentMethod', input.fulfillmentMethod);
+  setCommandField(fd, 'status', input.status);
+  setCommandField(fd, 'deliveryFee', input.deliveryFee);
+  setCommandField(fd, 'deliveryCost', input.deliveryCost);
+  setCommandField(fd, 'orderDiscount', input.orderDiscount);
+  setCommandField(fd, 'extraCharges', input.extraCharges);
+  setCommandField(fd, 'notes', input.notes);
+  setCommandField(fd, 'financeMode', input.financeMode);
+  setCommandField(fd, 'financeAccountId', input.financeAccountId);
+  setCommandField(fd, 'financeProviderId', input.financeProviderId);
+  setCommandField(fd, 'financePaidAmount', input.financePaidAmount);
+  setCommandField(fd, 'financePaymentMethod', input.financePaymentMethod);
+  setCommandField(fd, 'financePaymentDate', input.financePaymentDate);
+  setCommandField(fd, 'financeDueDate', input.financeDueDate);
+  setCommandField(fd, 'lines', JSON.stringify(input.lines));
+  return createOrderCommand(fd, options);
+}
+
+export async function bulkUpdateOrdersFromInput(
+  rawInput: BulkOrderCommandInput,
+  options: {
+    actorContext?: TrustedCommandContext;
+    beforeExecute?: CommandPreconditionHook;
+    onCommitted?: CommandCommitHook<{ count: number; amountApplied: number }>;
+  } = {},
+): Promise<ActionState> {
+  const parsed = BulkOrderCommandInputSchema.safeParse(rawInput);
+  if (!parsed.success) {
+    return {
+      error: 'invalid',
+      formError: 'invalid',
+      fieldErrors: Object.fromEntries(parsed.error.issues.map((issue) => [issue.path.join('.') || 'form', 'invalid'])),
+      stage: 'validation',
+    };
+  }
+  const input = parsed.data;
+  const fd = new FormData();
+  setCommandField(fd, 'orderIds', JSON.stringify(input.orderIds));
+  setCommandField(fd, 'operation', input.operation);
+  setCommandField(fd, 'status', input.status);
+  setCommandField(fd, 'completionMode', input.completionMode);
+  setCommandField(fd, 'accountId', input.accountId);
+  setCommandField(fd, 'providerKey', input.providerKey);
+  setCommandField(fd, 'paymentMethod', input.paymentMethod);
+  setCommandField(fd, 'date', input.date);
+  return bulkUpdateOrders(undefined, fd, options);
+}
 
 function parseHeader(fd: FormData) {
   return headerSchema.safeParse({
@@ -300,6 +411,7 @@ export async function createOrderCommand(
     actorContext?: TrustedCommandContext;
     beforeExecute?: CommandPreconditionHook;
     onCommitted?: CommandCommitHook<{ recordId: string; recordNumber: string }>;
+    afterStage?: CommandStageHook<OrderCreateTransactionCheckpoint>;
   } = {},
 ): Promise<ActionState> {
   const user = await resolveCommandActor(CAP, options.actorContext);
@@ -336,6 +448,22 @@ export async function createOrderCommand(
     }
   }
   if (h.data.customerExternalId && newCustomer) {
+    return { error: 'customer', fieldErrors: { customerExternalId: 'customer' } };
+  }
+  let customerEnrichment: CustomerOrderEnrichmentInput | null = null;
+  const customerEnrichmentRaw = optField(fd, 'customerEnrichment');
+  if (customerEnrichmentRaw) {
+    try {
+      const parsedEnrichment = CustomerOrderEnrichmentSchema.safeParse(JSON.parse(customerEnrichmentRaw));
+      if (!parsedEnrichment.success || !Object.keys(parsedEnrichment.data).length) {
+        return { error: 'customer', fieldErrors: { customerExternalId: 'customer' } };
+      }
+      customerEnrichment = parsedEnrichment.data;
+    } catch {
+      return { error: 'customer', fieldErrors: { customerExternalId: 'customer' } };
+    }
+  }
+  if ((!h.data.customerExternalId && customerEnrichment) || (newCustomer && customerEnrichment)) {
     return { error: 'customer', fieldErrors: { customerExternalId: 'customer' } };
   }
   const statusRoles = await getOrderStatusRoleMap();
@@ -413,7 +541,10 @@ export async function createOrderCommand(
     })
     : null;
   if (h.data.customerExternalId && !existingCustomer) return { error: 'customer', fieldErrors: { customerExternalId: 'customer' } };
-  const branch = await prisma.branch.findFirst({ orderBy: { createdAt: 'asc' }, select: { id: true } });
+  const branch = user.branchId
+    ? await prisma.branch.findFirst({ where: { id: user.branchId, isActive: true }, select: { id: true } })
+    : await prisma.branch.findFirst({ where: { isActive: true }, orderBy: { createdAt: 'asc' }, select: { id: true } });
+  if (user.branchId && !branch) return { error: 'branch', fieldErrors: { branchId: 'branch' } };
   const gross = lineData.reduce((s, l) => s + l.unitGrossPrice * l.quantity, 0);
   const discount = lineData.reduce((s, l) => s + l.lineDiscount, 0) + h.data.orderDiscount;
   const total = Math.max(0, gross - discount + h.data.deliveryFee + h.data.extraCharges);
@@ -438,19 +569,32 @@ export async function createOrderCommand(
   try {
     order = await prisma.$transaction(async (tx) => {
       await options.beforeExecute?.(tx);
+      stage = 'validation';
+      await options.afterStage?.(tx, 'precondition');
       stage = 'order_number';
       const orderNumber = await generateOrderNumber(tx, h.data.placedAt, h.data.channel);
+      await options.afterStage?.(tx, 'order_number');
+      stage = 'customer_lookup';
       const customer = newCustomer
-        ? await createCustomerInTransaction(tx, newCustomer, {
+        ? await resolveOrCreateCustomerInTransaction(tx, newCustomer, {
             actorId: user.id,
             source: 'ai-assistant-order',
           })
         : existingCustomer;
+      if (!newCustomer && customerEnrichment && customer) {
+        stage = 'customer_lookup';
+        await enrichCustomerForOrderInTransaction(tx, customer.id, customerEnrichment, {
+          actorId: user.id,
+          source: 'ai-assistant-order',
+        });
+      }
+      await options.afterStage?.(tx, 'customer');
       stage = 'stock_sync';
       const stockReadiness = await resolveOrderInventoryReadiness(
         tx,
         lineData.map((line) => line.productId),
       );
+      await options.afterStage?.(tx, 'inventory_readiness');
       stage = 'order_insert';
       const o = await tx.order.create({
         data: {
@@ -475,6 +619,7 @@ export async function createOrderCommand(
           lines: { create: lineData },
         },
       });
+      await options.afterStage?.(tx, 'order_insert');
       // Only statuses mapped as completed sales consume stock. Changing the role
       // on a later edit reverses or reapplies the linked movements atomically.
       stage = 'stock_sync';
@@ -497,6 +642,7 @@ export async function createOrderCommand(
           },
         });
       }
+      await options.afterStage?.(tx, 'stock_sync');
       stage = 'finance_sync';
       await syncOrderFinance(tx, o.id, {
         mode: financeMode as FinanceSyncMode,
@@ -509,16 +655,16 @@ export async function createOrderCommand(
         partyId: provider?.id ?? null,
         statusRole,
       });
+      await options.afterStage?.(tx, 'finance_sync');
       stage = 'customer_stats';
       await syncCustomerStats(tx, customer?.id, saleStatuses);
+      await options.afterStage?.(tx, 'customer_stats');
       const commandResult = { recordId: o.id, recordNumber: o.orderNumber };
       stage = 'commit_hook';
       await options.onCommitted?.(tx, commandResult);
+      await options.afterStage?.(tx, 'commit_hook');
       return { id: o.id, orderNumber: o.orderNumber };
-    }, {
-      maxWait: 10_000,
-      timeout: 60_000,
-    });
+    }, COMMAND_TRANSACTION_OPTIONS);
   } catch (error) {
     if (error instanceof Error && error.message === 'action_stale') return { error: 'action_stale' };
     const metadata = {
@@ -1199,47 +1345,56 @@ const invoicePaymentSchema = z.object({
   date: z.coerce.date(),
 });
 
-export async function recordInvoicePayment(
-  orderId: string,
-  fd: FormData,
-): Promise<void> {
-  const user = await requireCap('manage:finance');
-  if (!user) return;
-  const locale = reqField(fd, 'locale') || 'ar';
-  const parsed = invoicePaymentSchema.safeParse({
-    amount: reqField(fd, 'amount'),
-    accountId: reqField(fd, 'accountId'),
-    paymentMethod: optField(fd, 'paymentMethod'),
-    date: reqField(fd, 'date'),
-  });
-  if (!parsed.success) return;
+const InvoicePaymentCommandSchema = invoicePaymentSchema.extend({
+  orderId: z.string().min(1),
+}).strict();
 
-  const order = await prisma.order.findUnique({
-    where: { id: orderId },
-    select: {
-      id: true,
-      status: true,
-      orderNumber: true,
-      grossAmount: true,
-      discountAmount: true,
-      refundAmount: true,
-      deliveryFee: true,
-      extraCharges: true,
-      currency: true,
-      branchId: true,
-    },
-  });
-  if (!order) return;
+export type InvoicePaymentCommandInput = z.input<typeof InvoicePaymentCommandSchema>;
 
-  const result = await prisma.$transaction(async (tx) => {
-    const account = await tx.financeAccount.findUnique({
-      where: { id: parsed.data.accountId },
+export async function recordInvoicePaymentFromInput(
+  rawInput: InvoicePaymentCommandInput,
+  options: {
+    actorContext?: TrustedCommandContext;
+    beforeExecute?: CommandPreconditionHook;
+    onCommitted?: CommandCommitHook<{
+      recordId: string;
+      orderId: string;
+      orderNumber: string;
+      amount: number;
+      remainingBefore: number;
+    }>;
+  } = {},
+) {
+  const user = await resolveCommandActor('manage:finance', options.actorContext);
+  if (!user) throw new Error('forbidden');
+  const input = InvoicePaymentCommandSchema.parse(rawInput);
+
+  return prisma.$transaction(async (tx) => {
+    await options.beforeExecute?.(tx);
+    const order = await tx.order.findUnique({
+      where: { id: input.orderId },
+      select: {
+        id: true,
+        status: true,
+        orderNumber: true,
+        grossAmount: true,
+        discountAmount: true,
+        refundAmount: true,
+        deliveryFee: true,
+        extraCharges: true,
+        currency: true,
+        branchId: true,
+      },
+    });
+    if (!order) throw new Error('order_not_found');
+    const account = await tx.financeAccount.findFirst({
+      where: { id: input.accountId, isActive: true },
       select: { id: true, currency: true },
     });
-    if (!account || account.currency !== order.currency) throw new Error('account');
+    if (!account || account.currency !== order.currency) throw new Error('account_currency');
     const readSnapshot = async () => {
       const entries = await tx.financeEntry.findMany({
-        where: { OR: [{ orderId }, { settles: { is: { orderId } } }] },
+        where: { OR: [{ orderId: order.id }, { settles: { is: { orderId: order.id } } }] },
         select: {
           id: true,
           orderId: true,
@@ -1260,31 +1415,32 @@ export async function recordInvoicePayment(
       return invoicePaymentSnapshot(order, entries);
     };
     let snapshot = await readSnapshot();
-    if (snapshot.remaining <= 0) return null;
+    if (snapshot.remaining <= 0) throw new Error('invoice_paid');
     if (!snapshot.receivableIds.length) {
-      await syncOrderCustomerBalance(tx, orderId, {
-        dueDate: parsed.data.date,
+      await syncOrderCustomerBalance(tx, order.id, {
+        dueDate: input.date,
         createdById: user.id,
       });
       snapshot = await readSnapshot();
     }
     const receivableId = snapshot.receivableIds[0];
-    if (!receivableId) throw new Error('receivable');
-    const amount = Math.min(toMinor(parsed.data.amount, order.currency), snapshot.remaining);
+    if (!receivableId) throw new Error('receivable_missing');
+    const amount = Math.min(toMinor(input.amount, order.currency), snapshot.remaining);
+    if (amount <= 0) throw new Error('amount');
     const receivable = await tx.financeEntry.findUnique({
       where: { id: receivableId },
       select: { partyId: true },
     });
     const payment = await tx.financeEntry.create({
       data: {
-        date: parsed.data.date,
+        date: input.date,
         type: 'PAYMENT_IN',
         amount,
         currency: order.currency,
         obligation: false,
         accountId: account.id,
         partyId: receivable?.partyId ?? null,
-        paymentMethod: parsed.data.paymentMethod ?? null,
+        paymentMethod: input.paymentMethod ?? null,
         settlesId: receivableId,
         branchId: order.branchId,
         orderId: order.id,
@@ -1293,20 +1449,193 @@ export async function recordInvoicePayment(
         createdById: user.id,
       },
     });
-    return { payment, amount, remainingBefore: snapshot.remaining };
+    const result = {
+      recordId: payment.id,
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      amount,
+      remainingBefore: snapshot.remaining,
+    };
+    await tx.auditLog.create({
+      data: {
+        userId: user.id,
+        action: 'INVOICE_PAYMENT',
+        entity: 'FinanceEntry',
+        entityId: payment.id,
+        metadata: {
+          orderId: order.id,
+          amount,
+          total: invoiceTotal(order),
+          remainingBefore: snapshot.remaining,
+          remainingAfter: snapshot.remaining - amount,
+          paymentMethod: input.paymentMethod ?? null,
+          accountId: account.id,
+        },
+      },
+    });
+    await options.onCommitted?.(tx, result);
+    return result;
+  }, COMMAND_TRANSACTION_OPTIONS);
+}
+
+export async function recordInvoicePayment(
+  orderId: string,
+  fd: FormData,
+): Promise<void> {
+  const locale = reqField(fd, 'locale') || 'ar';
+  const parsed = invoicePaymentSchema.safeParse({
+    amount: reqField(fd, 'amount'),
+    accountId: reqField(fd, 'accountId'),
+    paymentMethod: optField(fd, 'paymentMethod'),
+    date: reqField(fd, 'date'),
   });
-  if (!result) return;
-  await audit(user.id, 'INVOICE_PAYMENT', 'FinanceEntry', {
-    id: result.payment.id,
-    orderId,
-    amount: result.amount,
-    total: invoiceTotal(order),
-    remainingBefore: result.remainingBefore,
-    paymentMethod: parsed.data.paymentMethod ?? null,
-  });
+  if (!parsed.success) return;
+  try {
+    await recordInvoicePaymentFromInput({ orderId, ...parsed.data });
+  } catch {
+    return;
+  }
   revalidatePath(FINANCE, 'page');
   revalidatePath(LEDGER, 'page');
   revalidatePath(DUES, 'page');
   revalidatePath(`/${locale}/invoice/${orderId}`, 'page');
   redirect(`/${locale}/invoice/${orderId}`);
+}
+
+const OrderRefundCommandSchema = z.object({
+  orderId: z.string().min(1),
+  amount: z.coerce.number().positive(),
+  accountId: z.string().min(1),
+  paymentMethod: z.string().trim().optional(),
+  date: z.coerce.date(),
+  reason: z.string().trim().min(3),
+}).strict();
+
+export type OrderRefundCommandInput = z.input<typeof OrderRefundCommandSchema>;
+
+export async function recordOrderRefundFromInput(
+  rawInput: OrderRefundCommandInput,
+  options: {
+    actorContext?: TrustedCommandContext;
+    beforeExecute?: CommandPreconditionHook;
+    onCommitted?: CommandCommitHook<{
+      recordId: string;
+      orderId: string;
+      orderNumber: string;
+      amount: number;
+      refundableBefore: number;
+    }>;
+  } = {},
+) {
+  const user = await resolveCommandActor('manage:finance', options.actorContext);
+  if (!user || (user.role !== 'OWNER' && user.role !== 'ADMIN')) throw new Error('forbidden');
+  const input = OrderRefundCommandSchema.parse(rawInput);
+  const saleStatuses = [...await getOrderStatusRoleMap()]
+    .filter(([, role]) => role === 'SALE')
+    .map(([code]) => code);
+
+  return prisma.$transaction(async (tx) => {
+    await options.beforeExecute?.(tx);
+    await tx.$queryRaw`SELECT "id" FROM "Order" WHERE "id" = ${input.orderId} FOR UPDATE`;
+    const order = await tx.order.findUnique({
+      where: { id: input.orderId },
+      select: {
+        id: true,
+        orderNumber: true,
+        status: true,
+        customerId: true,
+        grossAmount: true,
+        discountAmount: true,
+        refundAmount: true,
+        deliveryFee: true,
+        extraCharges: true,
+        currency: true,
+        branchId: true,
+      },
+    });
+    if (!order) throw new Error('order_not_found');
+    await tx.$queryRaw`SELECT "id" FROM "FinanceAccount" WHERE "id" = ${input.accountId} FOR UPDATE`;
+    const account = await tx.financeAccount.findFirst({
+      where: { id: input.accountId, isActive: true, type: { not: 'PAYMENT_GATEWAY' } },
+      select: { id: true, currency: true },
+    });
+    if (!account || account.currency !== order.currency) throw new Error('account_currency');
+    const entries = await tx.financeEntry.findMany({
+      where: { OR: [{ orderId: order.id }, { settles: { is: { orderId: order.id } } }] },
+      select: {
+        id: true,
+        orderId: true,
+        type: true,
+        amount: true,
+        obligation: true,
+        obligationKind: true,
+        settlesId: true,
+        archivedAt: true,
+        reversedAt: true,
+        reversalOfId: true,
+        date: true,
+        paymentMethod: true,
+        account: { select: { name: true } },
+        party: { select: { id: true, name: true, collectsOrderPayments: true } },
+      },
+    });
+    const snapshot = invoicePaymentSnapshot(order, entries);
+    const originalTotal = Math.max(
+      0,
+      order.grossAmount - order.discountAmount + order.deliveryFee + order.extraCharges,
+    );
+    const refundableBefore = Math.min(
+      snapshot.paidRaw,
+      Math.max(0, originalTotal - order.refundAmount),
+    );
+    const amount = toMinor(input.amount, order.currency);
+    if (amount <= 0 || amount > refundableBefore) throw new Error('refund_amount_invalid');
+    const refund = await tx.financeEntry.create({
+      data: {
+        date: input.date,
+        type: 'PAYMENT_OUT',
+        amount,
+        currency: order.currency,
+        obligation: false,
+        accountId: account.id,
+        orderId: order.id,
+        branchId: order.branchId,
+        paymentMethod: input.paymentMethod ?? null,
+        reference: order.orderNumber,
+        description: `Order refund: ${order.orderNumber} - ${input.reason}`,
+        createdById: user.id,
+      },
+    });
+    await tx.order.update({
+      where: { id: order.id },
+      data: { refundAmount: { increment: amount } },
+    });
+    await syncCustomerStats(tx, order.customerId, saleStatuses);
+    const result = {
+      recordId: refund.id,
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      amount,
+      refundableBefore,
+    };
+    await tx.auditLog.create({
+      data: {
+        userId: user.id,
+        action: 'ORDER_REFUND',
+        entity: 'FinanceEntry',
+        entityId: refund.id,
+        metadata: {
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          amount,
+          accountId: account.id,
+          paymentMethod: input.paymentMethod ?? null,
+          reason: input.reason,
+          refundableBefore,
+        },
+      },
+    });
+    await options.onCommitted?.(tx, result);
+    return result;
+  }, COMMAND_TRANSACTION_OPTIONS);
 }

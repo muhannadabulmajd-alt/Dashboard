@@ -6,6 +6,8 @@ import {
   EXPENSE_CATEGORY_TYPES,
   FULFILLMENT_METHODS,
   INVENTORY_CATEGORIES,
+  PARTY_TYPES,
+  PAYMENT_METHODS,
 } from '@/lib/enums';
 import { MEASUREMENT_UNITS } from '@/lib/units';
 
@@ -25,6 +27,12 @@ export const SalesSummarySchema = z.object({
   dimension: z.enum(['NONE', 'CHANNEL', 'CITY', 'PRODUCT']).nullable(),
 }).strict();
 
+export const ProductBuyersSchema = z.object({
+  productQuery: z.string().trim().min(1),
+  range: AssistantRangeSchema,
+  limit: z.number().int().min(1).max(50),
+}).strict();
+
 export const InventorySummarySchema = z.object({
   query: z.string().trim().nullable(),
   lowStockOnly: z.boolean(),
@@ -35,6 +43,48 @@ export const ExpenseSummarySchema = z.object({
   range: AssistantRangeSchema,
   bucket: z.enum(['all', 'capex', 'inventory', 'opex', 'review', 'direct', 'cogs']),
   category: z.string().trim().nullable(),
+}).strict();
+
+export const FinanceOverviewSchema = z.object({
+  range: AssistantRangeSchema,
+  view: z.enum(['OVERVIEW', 'CASH_FLOW', 'BALANCE_SHEET', 'ACCOUNTS', 'PAYABLES', 'RECEIVABLES']),
+  limit: z.number().int().min(1).max(50),
+}).strict();
+
+export const CustomerInsightsSchema = z.object({
+  range: AssistantRangeSchema,
+  dimension: z.enum(['SUMMARY', 'CITY', 'SEGMENT', 'TOP_CUSTOMERS']),
+  limit: z.number().int().min(1).max(50),
+}).strict();
+
+export const DeliverySummarySchema = z.object({
+  range: AssistantRangeSchema,
+  dimension: z.enum(['COURIER', 'CITY']),
+  slaDays: z.number().int().min(1).max(30),
+  limit: z.number().int().min(1).max(50),
+}).strict();
+
+export const RoasterySummarySchema = z.object({
+  range: AssistantRangeSchema,
+  dimension: z.enum(['BATCH', 'ROAST_LEVEL', 'OPERATOR']),
+  limit: z.number().int().min(1).max(50),
+}).strict();
+
+export const InventoryRecommendationsSchema = z.object({
+  query: z.string().trim().nullable(),
+  horizonDays: z.number().int().min(1).max(90),
+  limit: z.number().int().min(1).max(50),
+}).strict();
+
+export const DemandForecastSchema = z.object({
+  lookbackDays: z.number().int().min(14).max(180),
+  horizonDays: z.number().int().min(1).max(90),
+  limit: z.number().int().min(1).max(50),
+}).strict();
+
+export const OperationalAlertsSchema = z.object({
+  expiryDays: z.number().int().min(1).max(180),
+  limit: z.number().int().min(1).max(50),
 }).strict();
 
 export const PrepareCustomerSchema = z.object({
@@ -48,6 +98,34 @@ export const PrepareCustomerSchema = z.object({
   notes: z.string().trim().nullable(),
   campaignSource: z.string().trim().nullable(),
   segment: z.enum(CUSTOMER_SEGMENTS).nullable(),
+}).strict();
+
+export const PreparePartyDetailsSchema = z.object({
+  name: z.string().trim().nullable(),
+  type: z.enum(PARTY_TYPES).nullable(),
+  phone: z.string().trim().nullable(),
+  email: z.string().trim().nullable(),
+  address: z.string().trim().nullable(),
+  notes: z.string().trim().nullable(),
+}).strict();
+
+export const PrepareLedgerLineSchema = z.object({
+  itemType: z.enum(['INVENTORY', 'ASSET', 'EXPENSE', 'SERVICE', 'OTHER']).nullable(),
+  itemName: z.string().trim().nullable(),
+  categoryType: z.enum(EXPENSE_CATEGORY_TYPES).nullable(),
+  assetKey: z.string().trim().nullable(),
+  assetCategory: z.string().trim().nullable(),
+  inventoryItemQuery: z.string().trim().nullable(),
+  newItemNameEn: z.string().trim().nullable(),
+  newItemNameAr: z.string().trim().nullable(),
+  newItemCategory: z.enum(INVENTORY_CATEGORIES).nullable(),
+  unit: z.enum(MEASUREMENT_UNITS).nullable(),
+  quantity: z.number().positive().nullable(),
+  unitCost: z.number().positive().nullable(),
+  discount: z.number().nonnegative().nullable(),
+  extra: z.number().nonnegative().nullable(),
+  branchQuery: z.string().trim().nullable(),
+  notes: z.string().trim().nullable(),
 }).strict();
 
 export const PrepareOrderSchema = z.object({
@@ -86,13 +164,15 @@ export const PrepareExpenseSchema = z.object({
   accountQuery: z.string().trim().nullable(),
   categoryType: z.enum(EXPENSE_CATEGORY_TYPES).nullable(),
   partyQuery: z.string().trim().nullable(),
+  newParty: PreparePartyDetailsSchema.nullable(),
   description: z.string().trim().nullable(),
   reference: z.string().trim().nullable(),
   branchQuery: z.string().trim().nullable(),
+  lines: z.array(PrepareLedgerLineSchema).min(1).max(50).nullable(),
 }).strict();
 
 export const PreparePurchaseSchema = z.object({
-  purchaseType: z.enum(['INVENTORY', 'ASSET']).nullable(),
+  purchaseType: z.enum(['INVENTORY', 'ASSET', 'MIXED']).nullable(),
   date: z.string().nullable(),
   totalAmount: z.number().positive().nullable(),
   currency: z.enum(CURRENCIES).nullable(),
@@ -106,6 +186,7 @@ export const PreparePurchaseSchema = z.object({
   assetName: z.string().trim().nullable(),
   assetCategory: z.string().trim().nullable(),
   supplierQuery: z.string().trim().nullable(),
+  newSupplier: PreparePartyDetailsSchema.nullable(),
   paidMode: z.enum(['PAID', 'CREDIT', 'PARTIAL']).nullable(),
   paidAmount: z.number().nonnegative().nullable(),
   accountQuery: z.string().trim().nullable(),
@@ -115,6 +196,18 @@ export const PreparePurchaseSchema = z.object({
   branchQuery: z.string().trim().nullable(),
   reference: z.string().trim().nullable(),
   notes: z.string().trim().nullable(),
+  lines: z.array(PrepareLedgerLineSchema).min(1).max(50).nullable(),
+}).strict();
+
+export const PrepareTransferSchema = z.object({
+  date: z.string().nullable(),
+  amount: z.number().positive().nullable(),
+  currency: z.enum(CURRENCIES).nullable(),
+  rate: z.number().positive().nullable(),
+  fromAccountQuery: z.string().trim().nullable(),
+  toAccountQuery: z.string().trim().nullable(),
+  description: z.string().trim().nullable(),
+  reference: z.string().trim().nullable(),
 }).strict();
 
 export const PrepareOrderStatusSchema = z.object({
@@ -125,4 +218,98 @@ export const PrepareOrderStatusSchema = z.object({
   providerKey: z.string().trim().nullable(),
   paymentMethod: z.string().trim().nullable(),
   date: z.string().nullable(),
+}).strict();
+
+export const PrepareCustomerUpdateSchema = z.object({
+  customerQuery: z.string().trim().nullable(),
+  nameEn: z.string().trim().nullable(),
+  nameAr: z.string().trim().nullable(),
+  phone: z.string().trim().nullable(),
+  email: z.string().trim().nullable(),
+  governorate: z.string().trim().nullable(),
+  address1: z.string().trim().nullable(),
+  street: z.string().trim().nullable(),
+  notes: z.string().trim().nullable(),
+  campaignSource: z.string().trim().nullable(),
+  segment: z.enum(CUSTOMER_SEGMENTS).nullable(),
+  reason: z.string().trim().nullable(),
+}).strict();
+
+export const PreparePartyUpdateSchema = z.object({
+  partyQuery: z.string().trim().nullable(),
+  name: z.string().trim().nullable(),
+  type: z.enum(PARTY_TYPES).nullable(),
+  phone: z.string().trim().nullable(),
+  email: z.string().trim().nullable(),
+  address: z.string().trim().nullable(),
+  notes: z.string().trim().nullable(),
+  netFeesFromRemittance: z.boolean().nullable(),
+  collectsOrderPayments: z.boolean().nullable(),
+  reason: z.string().trim().nullable(),
+}).strict();
+
+export const PrepareInventoryAdjustmentSchema = z.object({
+  inventoryItemQuery: z.string().trim().nullable(),
+  targetQuantity: z.number().nonnegative().nullable(),
+  occurredAt: z.string().nullable(),
+  reason: z.string().trim().nullable(),
+}).strict();
+
+export const PrepareRoastBatchSchema = z.object({
+  batchNumber: z.string().trim().nullable(),
+  origin: z.string().trim().nullable(),
+  roastDate: z.string().nullable(),
+  roastLevel: z.string().trim().nullable(),
+  greenInputGrams: z.number().positive().nullable(),
+  roastedOutputGrams: z.number().positive().nullable(),
+  qcScore: z.number().nullable(),
+  qcNotes: z.string().trim().nullable(),
+  greenInventoryItemQuery: z.string().trim().nullable(),
+  roastedInventoryItemQuery: z.string().trim().nullable(),
+  branchQuery: z.string().trim().nullable(),
+}).strict();
+
+export const PreparePaymentSchema = z.object({
+  targetType: z.enum(['ORDER', 'FINANCE_ENTRY']).nullable(),
+  targetQuery: z.string().trim().nullable(),
+  amount: z.number().positive().nullable(),
+  accountQuery: z.string().trim().nullable(),
+  paymentMethod: z.enum(PAYMENT_METHODS).nullable(),
+  date: z.string().nullable(),
+}).strict();
+
+export const PrepareRefundSchema = z.object({
+  orderQuery: z.string().trim().nullable(),
+  amount: z.number().positive().nullable(),
+  accountQuery: z.string().trim().nullable(),
+  paymentMethod: z.enum(PAYMENT_METHODS).nullable(),
+  date: z.string().nullable(),
+  reason: z.string().trim().nullable(),
+}).strict();
+
+export const PrepareReversalSchema = z.object({
+  recordQuery: z.string().trim().nullable(),
+  reason: z.string().trim().nullable(),
+}).strict();
+
+export const PrepareSpendReclassificationSchema = z.object({
+  recordQuery: z.string().trim().nullable(),
+  lineQuery: z.string().trim().nullable(),
+  spendTreatment: z.enum(['CAPEX', 'INVENTORY', 'OPEX', 'REVIEW']).nullable(),
+  classificationNote: z.string().trim().nullable(),
+  fixedAssetQuery: z.string().trim().nullable(),
+  inventoryItemQuery: z.string().trim().nullable(),
+}).strict();
+
+export const PrepareDashboardDraftSchema = z.object({
+  name: z.string().trim().nullable(),
+  description: z.string().trim().nullable(),
+  template: z.enum([
+    'owner-overview',
+    'sales-dashboard',
+    'inventory-dashboard',
+    'delivery-dashboard',
+    'financial-dashboard',
+    'customer-dashboard',
+  ]).nullable(),
 }).strict();

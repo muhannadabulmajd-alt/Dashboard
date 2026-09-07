@@ -14,6 +14,7 @@ import {
 import { normalizeIraqiPhone } from '@/lib/phone';
 import { can } from '@/lib/rbac';
 import { parseBaghdadDateTime } from '@/lib/dates';
+import { resolveAiPageContext } from '@/lib/ai-page-context';
 import OpenAI from 'openai';
 import { isOpenAiCreditUnavailable, safeOpenAiError } from '@/server/ai/provider-error';
 
@@ -64,8 +65,28 @@ describe('Atlas AI assistant contracts', () => {
 
   it('accepts only strict, bounded chat requests', () => {
     expect(AiChatRequestSchema.parse({ message: 'مرحبا', locale: 'ar' })).toEqual({ message: 'مرحبا', locale: 'ar' });
+    expect(AiChatRequestSchema.parse({
+      message: 'Summarize this page',
+      locale: 'en',
+      pageContextPath: '/sales?range=this_month',
+    })).toMatchObject({ pageContextPath: '/sales?range=this_month' });
     expect(() => AiChatRequestSchema.parse({ message: 'hello', locale: 'en', injected: true })).toThrow();
+    expect(() => AiChatRequestSchema.parse({
+      message: 'hello',
+      locale: 'en',
+      pageContextPath: 'https://attacker.example/orders',
+    })).toThrow();
     expect(() => AiChatRequestSchema.parse({ message: 'x'.repeat(AI_MESSAGE_MAX_LENGTH + 1), locale: 'en' })).toThrow();
+  });
+
+  it('normalizes local page context and strips unapproved query values', () => {
+    expect(resolveAiPageContext('/ar/admin/records/orders/order_1?token=secret&status=PENDING&range=7d')).toEqual({
+      path: '/admin/records/orders/order_1?range=7d&status=PENDING',
+      section: 'orders',
+    });
+    expect(resolveAiPageContext('//attacker.example/sales')).toBeNull();
+    expect(resolveAiPageContext('/login')).toBeNull();
+    expect(resolveAiPageContext('/ai-assistant')).toBeNull();
   });
 
   it('keeps launch safety limits pinned', () => {

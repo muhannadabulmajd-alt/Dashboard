@@ -37,9 +37,13 @@ export function telegramSecretMatches(received: string | null, expected: string 
   return receivedBuffer.length === expectedBuffer.length && timingSafeEqual(receivedBuffer, expectedBuffer);
 }
 
-export function requireTelegramConfig(): Required<Pick<TelegramConfig, 'token' | 'webhookSecret'>> & TelegramConfig {
+export function requireTelegramConfig(): TelegramConfig & {
+  token: string;
+  webhookSecret: string;
+  configured: true;
+} {
   const config = getTelegramConfig();
   if (!config.enabled) throw new Error('telegram_disabled');
   if (!config.token || !config.webhookSecret) throw new Error('telegram_not_configured');
-  return { ...config, token: config.token, webhookSecret: config.webhookSecret };
+  return { ...config, token: config.token, webhookSecret: config.webhookSecret, configured: true };
 }
