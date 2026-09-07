@@ -5,6 +5,7 @@ import { AlertTriangle, ChevronDown, LoaderCircle, ShieldCheck } from 'lucide-re
 import { useTranslations } from 'next-intl';
 import {
   AI_CAPABILITIES,
+  defaultAiCapabilityState,
   type AiCapability,
   type AiCapabilityState,
   type AiCapabilityStatusValue,
@@ -22,15 +23,7 @@ export function CapabilityControls({ initialCapabilities }: { initialCapabilitie
     const byCapability = new Map(initialCapabilities.map((state) => [state.capability, state]));
     return Object.fromEntries(AI_CAPABILITIES.map((capability) => [
       capability,
-      toDraft(byCapability.get(capability) ?? {
-        capability,
-        status: 'ENABLED',
-        failureCount: 0,
-        failureLimit: 1,
-        disabledReason: null,
-        lastFailureAt: null,
-        updatedAt: null,
-      }),
+      toDraft(byCapability.get(capability) ?? defaultAiCapabilityState(capability)),
     ])) as Record<AiCapability, CapabilityDraft>;
   });
   const [saving, setSaving] = useState<AiCapability | null>(null);

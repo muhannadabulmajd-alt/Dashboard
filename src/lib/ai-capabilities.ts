@@ -15,6 +15,15 @@ export const AI_CAPABILITY_STATUSES = ['ENABLED', 'DISABLED', 'PAUSED'] as const
 export type AiCapability = (typeof AI_CAPABILITIES)[number];
 export type AiCapabilityStatusValue = (typeof AI_CAPABILITY_STATUSES)[number];
 
+export const DEFAULT_AI_CAPABILITY_STATUSES: Record<AiCapability, AiCapabilityStatusValue> = {
+  READS: 'ENABLED',
+  ORDERS_CUSTOMERS: 'DISABLED',
+  SPENDING_PURCHASES: 'DISABLED',
+  OPERATIONS_PAYMENTS: 'DISABLED',
+  MEDIA_REPORTS: 'DISABLED',
+  AUTOMATIONS: 'DISABLED',
+};
+
 export type AiCapabilityState = {
   capability: AiCapability;
   status: AiCapabilityStatusValue;
@@ -101,7 +110,7 @@ export function aiCapabilitiesForAction(type: AiPendingActionType): readonly AiC
 export function defaultAiCapabilityState(capability: AiCapability): AiCapabilityState {
   return {
     capability,
-    status: 'ENABLED',
+    status: DEFAULT_AI_CAPABILITY_STATUSES[capability],
     failureCount: 0,
     failureLimit: 1,
     disabledReason: null,

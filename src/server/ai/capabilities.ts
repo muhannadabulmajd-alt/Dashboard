@@ -70,7 +70,7 @@ export async function isAiCapabilityEnabled(
     where: { capability },
     select: { status: true },
   });
-  return !row || row.status === 'ENABLED';
+  return (row?.status ?? defaultAiCapabilityState(capability).status) === 'ENABLED';
 }
 
 export async function assertAiCapabilityEnabled(
@@ -97,8 +97,8 @@ export async function assertAiActionCapabilitiesEnabled(
   const rows = await capabilityRows(capabilities, db);
   const status = new Map(rows.map((row) => [row.capability, row.status]));
   const unavailable = capabilities.find((capability) => {
-    const current = status.get(capability);
-    return current !== undefined && current !== 'ENABLED';
+    const current = status.get(capability) ?? defaultAiCapabilityState(capability).status;
+    return current !== 'ENABLED';
   });
   if (unavailable) throw new Error(`ai_capability_unavailable:${unavailable}`);
 }
@@ -110,10 +110,13 @@ export async function enabledAssistantToolsForRole(role: CurrentUser['role']) {
     return capability ? [capability] : [];
   }))];
   const rows = await capabilityRows(capabilities, prisma);
-  const unavailable = new Set(rows.filter((row) => row.status !== 'ENABLED').map((row) => row.capability));
+  const status = new Map(rows.map((row) => [row.capability, row.status]));
   return allowed.filter((tool) => {
     const capability = aiCapabilityForTool(tool.name);
-    return Boolean(capability && !unavailable.has(capability));
+    return Boolean(
+      capability
+      && (status.get(capability) ?? defaultAiCapabilityState(capability).status) === 'ENABLED',
+    );
   });
 }
 
@@ -133,6 +136,7 @@ export async function recordAiCapabilityFailure(input: {
       where: { capability: input.capability },
       create: {
         capability: input.capability,
+        status: defaultAiCapabilityState(input.capability).status,
         failureCount: 1,
         lastFailureAt: now,
       },

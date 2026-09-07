@@ -97,6 +97,7 @@ import {
   assertAiActionCapabilitiesEnabled,
   enabledAssistantToolsForRole,
   getAiCapabilityStates,
+  isAiCapabilityEnabled,
   recordAiCapabilityFailure,
   recordAiCapabilitySuccess,
   updateAiCapabilitySetting,
@@ -135,15 +136,23 @@ describe('AI capability release controls', () => {
     })).toThrow();
   });
 
-  it('treats missing database rows as enabled without writing defaults', async () => {
+  it('defaults a new release to reads-only without writing database rows', async () => {
     const states = await getAiCapabilityStates();
     expect(states).toHaveLength(AI_CAPABILITIES.length);
-    expect(states.every((state) => state.status === 'ENABLED' && state.failureCount === 0)).toBe(true);
+    expect(states.find((state) => state.capability === 'READS')?.status).toBe('ENABLED');
+    expect(states.filter((state) => state.capability !== 'READS').every(
+      (state) => state.status === 'DISABLED' && state.failureCount === 0,
+    )).toBe(true);
+    await expect(isAiCapabilityEnabled('READS')).resolves.toBe(true);
+    await expect(isAiCapabilityEnabled('ORDERS_CUSTOMERS')).resolves.toBe(false);
+    await expect(assertAiActionCapabilitiesEnabled('CREATE_ORDER'))
+      .rejects.toThrow('ai_capability_unavailable:ORDERS_CUSTOMERS');
     expect(database.rows.size).toBe(0);
   });
 
   it('removes paused tools before the model sees them while retaining unrelated role tools', async () => {
     database.rows.set('READS', freshRow('READS', { status: 'PAUSED' }));
+    database.rows.set('ORDERS_CUSTOMERS', freshRow('ORDERS_CUSTOMERS'));
     const tools = await enabledAssistantToolsForRole('OWNER');
     expect(tools.some((tool) => tool.name === 'sales_summary')).toBe(false);
     expect(tools.some((tool) => tool.name === 'prepare_create_order')).toBe(true);
@@ -151,6 +160,7 @@ describe('AI capability release controls', () => {
 
   it('rechecks the mapped capability before action execution', async () => {
     database.rows.set('ORDERS_CUSTOMERS', freshRow('ORDERS_CUSTOMERS', { status: 'DISABLED' }));
+    database.rows.set('SPENDING_PURCHASES', freshRow('SPENDING_PURCHASES'));
     await expect(assertAiActionCapabilitiesEnabled('CREATE_ORDER'))
       .rejects.toThrow('ai_capability_unavailable:ORDERS_CUSTOMERS');
     await expect(assertAiActionCapabilitiesEnabled('CREATE_EXPENSE')).resolves.toBeUndefined();
