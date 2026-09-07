@@ -37,6 +37,10 @@ describe('Vercel deployment configuration', () => {
       'NEON_BRANCH_NAME: preview-ai-phase2-pr-43-${{ github.run_id }}-${{ github.run_attempt }}',
     );
     expect(phase2Workflow).not.toContain('previous_id=');
+    const retireIndex = phase2Workflow.indexOf('- name: Retire prior Phase 2 Neon clones');
+    const cloneIndex = phase2Workflow.indexOf('- name: Clone the current Neon primary branch');
+    expect(retireIndex).toBeGreaterThan(-1);
+    expect(retireIndex).toBeLessThan(cloneIndex);
   });
 
   it('keeps every cron at a Hobby-compatible daily-or-less frequency', () => {
