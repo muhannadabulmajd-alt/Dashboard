@@ -16,7 +16,7 @@ import {
   type TrustedCommandContext,
 } from '@/server/commands/actor-context';
 import { can } from '@/lib/rbac';
-import { shouldRetryTelegramProcessing } from '@/lib/telegram-errors';
+import { shouldRetryTelegramProcessing, telegramProcessingErrorMessage } from '@/lib/telegram-errors';
 import { downloadTelegramFile, sendTelegramDocument } from '@/server/telegram/api';
 
 const adminUser: CurrentUser = {
@@ -190,9 +190,19 @@ describe('Telegram Atlas AI transport contracts', () => {
 
   it('does not retry terminal action or stale callback failures', () => {
     expect(shouldRetryTelegramProcessing(new Error('action_failed:debug-id'))).toBe(false);
+    expect(shouldRetryTelegramProcessing(new Error('ai_capability_unavailable:MEDIA_REPORTS'))).toBe(false);
+    expect(shouldRetryTelegramProcessing(new Error('attachment_too_large'))).toBe(false);
+    expect(shouldRetryTelegramProcessing(new Error('attachment_mime_mismatch'))).toBe(false);
     expect(shouldRetryTelegramProcessing(Object.assign(new Error('telegram_api_400'), { retryable: false }))).toBe(false);
     expect(shouldRetryTelegramProcessing(Object.assign(new Error('telegram_api_500'), { retryable: true }))).toBe(true);
     expect(shouldRetryTelegramProcessing(new Error('temporary_network_failure'))).toBe(true);
+  });
+
+  it('explains paused voice/media and invalid attachments without a generic failure', () => {
+    expect(telegramProcessingErrorMessage('en', 'ai_capability_unavailable', 'debug-1')).toContain('voice or attachments');
+    expect(telegramProcessingErrorMessage('ar', 'ai_capability_unavailable', 'debug-2')).toContain('الصوت أو المرفقات');
+    expect(telegramProcessingErrorMessage('en', 'attachment_too_large', 'debug-3')).toContain('smaller file');
+    expect(telegramProcessingErrorMessage('ar', 'attachment_mime_mismatch', 'debug-4')).toContain('غير مدعوم');
   });
 
   it('uploads invoice PDFs to Telegram as multipart documents', async () => {
