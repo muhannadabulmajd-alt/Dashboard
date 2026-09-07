@@ -1,7 +1,7 @@
 import 'server-only';
 import type { Prisma } from '@prisma/client';
 import type { AiStreamEvent } from '@/lib/ai-assistant';
-import { shouldRetryTelegramProcessing } from '@/lib/telegram-errors';
+import { shouldRetryTelegramProcessing, telegramProcessingErrorMessage } from '@/lib/telegram-errors';
 import type { CurrentUser } from '@/server/auth/session';
 import { prisma } from '@/server/db/client';
 import { cancelPendingAction, confirmPendingAction } from '@/server/ai/actions';
@@ -463,9 +463,7 @@ export async function processTelegramUpdate(telegramUpdateId: string): Promise<v
       },
     }).catch(() => undefined);
     if (!retryable && receipt.attempts <= 1 && telegram?.privateChat) {
-      const text = locale === 'ar'
-        ? `تعذر إكمال الطلب الآن. لم تتغير أي بيانات. رمز المتابعة: ${debugId}`
-        : `The request could not be completed. No data was changed. Debug ID: ${debugId}`;
+      const text = telegramProcessingErrorMessage(locale, errorCode, debugId);
       const messageId = Number(receipt.replyMessageId);
       if (Number.isInteger(messageId) && messageId > 0) {
         await editTelegramMessage({ chatId: telegram.chatId, messageId, text }).catch(() => undefined);
