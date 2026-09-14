@@ -20,6 +20,7 @@ import {
 } from './internal';
 import {
   buildInventoryVarianceLinePlan,
+  inventoryVarianceLedgerClassification,
   varianceAccountCode,
   type InventoryVarianceDirection,
 } from './inventory-variance';
@@ -303,7 +304,7 @@ export async function resolveStockDiscrepancy(
           ledgerLines: {
             create: {
               lineNo: 1,
-              itemType: financeType,
+              ...inventoryVarianceLedgerClassification(false),
               itemName: discrepancy.inventoryItem.nameEn || discrepancy.inventoryItem.nameAr,
               categoryType: inventoryVarianceCategory(discrepancy.inventoryItem.category),
               inventoryItemId: discrepancy.inventoryItemId,
@@ -314,7 +315,6 @@ export async function resolveStockDiscrepancy(
               lineTotal: plan.lineTotal,
               branchId: context.branchId,
               notes: command.resolution,
-              spendTreatment: 'OPEX',
               classificationStatus: 'CONFIRMED',
               classificationSource: 'stock-discrepancy',
             },

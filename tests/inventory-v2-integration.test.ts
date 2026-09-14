@@ -999,5 +999,12 @@ describeIntegration('Inventory V2 production-shaped database workflows', {
       ...discrepancyInput,
       resolution: `${discrepancyInput.resolution} changed`,
     })).rejects.toMatchObject({ failure: { code: 'idempotency_conflict' } });
+
+    expect(await prisma.ledgerEntryLine.count({
+      where: {
+        inventoryItemId: { not: null },
+        itemType: { not: 'INVENTORY' },
+      },
+    })).toBe(0);
   }, remoteIntegrationTimeout);
 });

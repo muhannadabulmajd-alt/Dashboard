@@ -30,6 +30,7 @@ import {
 } from './count-contracts';
 import {
   buildInventoryVarianceLinePlan,
+  inventoryVarianceLedgerClassification,
   varianceAccountCode,
   type InventoryVarianceDirection,
 } from './inventory-variance';
@@ -375,7 +376,7 @@ export async function approveInventoryCount(
             ledgerLines: {
               create: lines.map((line, index) => ({
                 lineNo: index + 1,
-                itemType: financeType,
+                ...inventoryVarianceLedgerClassification(count.kind === 'OPENING'),
                 itemName: line.item.nameEn || line.item.nameAr,
                 categoryType: inventoryVarianceCategory(line.item.category),
                 inventoryItemId: line.item.id,
@@ -386,7 +387,6 @@ export async function approveInventoryCount(
                 lineTotal: line.lineTotal,
                 branchId: location.branchId,
                 notes: line.line.notes,
-                spendTreatment: count.kind === 'OPENING' ? 'INVENTORY' : 'OPEX',
                 classificationStatus: 'CONFIRMED',
                 classificationSource: 'inventory-count',
               })),

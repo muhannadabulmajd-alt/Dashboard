@@ -24,7 +24,11 @@ import {
 } from './internal';
 import { selectLotAllocations, type AvailableLot } from './lot-allocation';
 import { generateStockDocumentNumber } from './numbering';
-import { buildInventoryVarianceLinePlan, varianceAccountCode } from './inventory-variance';
+import {
+  buildInventoryVarianceLinePlan,
+  inventoryVarianceLedgerClassification,
+  varianceAccountCode,
+} from './inventory-variance';
 import {
   DisposeReturnedGoodsCommandSchema,
   ReturnToQuarantineCommandSchema,
@@ -574,7 +578,7 @@ export async function disposeReturnedGoods(
               ledgerLines: {
                 create: {
                   lineNo: 1,
-                  itemType: 'INVENTORY_LOSS',
+                  ...inventoryVarianceLedgerClassification(false),
                   itemName: inventoryItem.nameEn || inventoryItem.nameAr,
                   categoryType: inventoryVarianceCategory(inventoryItem.category),
                   inventoryItemId: command.inventoryItemId,
@@ -585,7 +589,6 @@ export async function disposeReturnedGoods(
                   lineTotal: wastePlan.lineTotal,
                   branchId: quarantine.branchId,
                   notes: command.reason,
-                  spendTreatment: 'OPEX',
                   classificationStatus: 'CONFIRMED',
                   classificationSource: 'returned-goods-waste',
                 },

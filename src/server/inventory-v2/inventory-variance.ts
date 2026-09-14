@@ -24,6 +24,13 @@ export type InventoryVariancePolicyLike = {
   inventoryLossAccountCode: string | null;
 };
 
+export function inventoryVarianceLedgerClassification(isOpeningBalance: boolean) {
+  return {
+    itemType: 'INVENTORY' as const,
+    spendTreatment: isOpeningBalance ? 'INVENTORY' as const : 'OPEX' as const,
+  };
+}
+
 function validNumber(value: number): boolean {
   return Number.isFinite(value) && value >= 0;
 }

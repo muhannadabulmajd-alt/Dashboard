@@ -12,6 +12,7 @@ import {
 } from '@/server/inventory-v2/finished-goods-contracts';
 import {
   buildInventoryVarianceLinePlan,
+  inventoryVarianceLedgerClassification,
   inventoryVarianceOperatingAmount,
   varianceAccountCode,
 } from '@/server/inventory-v2/inventory-variance';
@@ -94,6 +95,17 @@ describe('Inventory V2 cutover contracts', () => {
     expect(inventoryVarianceOperatingAmount('INVENTORY_GAIN', 2_000, false)).toBe(-2_000);
     expect(inventoryVarianceOperatingAmount('INVENTORY_LOSS', 2_000, false)).toBe(2_000);
     expect(inventoryVarianceOperatingAmount('INVENTORY_LOSS', 2_000, true)).toBe(0);
+  });
+
+  it('keeps every stock-linked variance line on the canonical inventory item type', () => {
+    expect(inventoryVarianceLedgerClassification(false)).toEqual({
+      itemType: 'INVENTORY',
+      spendTreatment: 'OPEX',
+    });
+    expect(inventoryVarianceLedgerClassification(true)).toEqual({
+      itemType: 'INVENTORY',
+      spendTreatment: 'INVENTORY',
+    });
   });
 
   it('classifies exactly one company-wide sellable definition as ready', () => {
