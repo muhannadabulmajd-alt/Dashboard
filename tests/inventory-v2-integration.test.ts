@@ -1000,6 +1000,20 @@ describeIntegration('Inventory V2 production-shaped database workflows', {
       resolution: `${discrepancyInput.resolution} changed`,
     })).rejects.toMatchObject({ failure: { code: 'idempotency_conflict' } });
 
+    const varianceEntry = await prisma.financeEntry.findUniqueOrThrow({
+      where: { importKey: `INVDISC:${discrepancy.id}` },
+      include: { ledgerLines: true },
+    });
+    expect(varianceEntry.ledgerLines).toHaveLength(1);
+    expect(varianceEntry.ledgerLines[0]).toMatchObject({
+      itemType: 'INVENTORY',
+      spendTreatment: 'OPEX',
+      inventoryItemId: green.id,
+    });
+    expect(await prisma.stockMovement.count({
+      where: { financeEntryId: varianceEntry.id },
+    })).toBe(0);
+
     expect(await prisma.ledgerEntryLine.count({
       where: {
         inventoryItemId: { not: null },
