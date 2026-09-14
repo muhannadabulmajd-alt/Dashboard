@@ -16,6 +16,10 @@ const phase2Workflow = readFileSync(
   new URL('../.github/workflows/ai-phase2-preview.yml', import.meta.url),
   'utf8',
 );
+const inventoryV2Workflow = readFileSync(
+  new URL('../.github/workflows/inventory-v2-preview.yml', import.meta.url),
+  'utf8',
+);
 const telegramPreviewVerification = readFileSync(
   new URL('../src/server/telegram/preview-verification.ts', import.meta.url),
   'utf8',
@@ -26,9 +30,10 @@ const telegramPreviewRoute = readFileSync(
 );
 
 describe('Vercel deployment configuration', () => {
-  it('leaves automatic deployments enabled except for the workflow-owned Phase 2 branch', () => {
+  it('leaves automatic deployments enabled except for workflow-owned isolated branches', () => {
     expect(config.git?.deploymentEnabled).toEqual({
       'feat/ai-assistant-phase-2': false,
+      'feat/location-inventory': false,
     });
   });
 
@@ -74,5 +79,24 @@ describe('Vercel deployment configuration', () => {
     expect(telegramPreviewVerification).toContain("delivery.status !== 'DELIVERED'");
     expect(telegramPreviewVerification).toContain('AI_PHASE2_DATABASE_ISOLATED');
     expect(telegramPreviewRoute).toContain("userOrResponse.email !== 'ai-phase2-preview@laheeb.test'");
+  });
+
+  it('keeps Inventory V2 verification on an isolated branch-scoped Preview', () => {
+    expect(inventoryV2Workflow).toContain('FEATURE_BRANCH: feat/location-inventory');
+    expect(inventoryV2Workflow).toContain(
+      'NEON_BRANCH_NAME: preview-inventory-v2-pr-45-${{ github.run_id }}-${{ github.run_attempt }}',
+    );
+    expect(inventoryV2Workflow).toContain(
+      'vercel env add DATABASE_URL preview --git-branch "$FEATURE_BRANCH" --sensitive',
+    );
+    expect(inventoryV2Workflow).toContain(
+      'vercel env add INVENTORY_V2_ENABLED preview --git-branch "$FEATURE_BRANCH"',
+    );
+    expect(inventoryV2Workflow).toContain('pnpm test:inventory-v2:integration');
+    expect(inventoryV2Workflow).toContain(
+      'pnpm exec playwright test e2e/inventory-v2-preview.spec.ts',
+    );
+    expect(inventoryV2Workflow).not.toContain('vercel deploy --prod');
+    expect(inventoryV2Workflow).not.toContain('store-git-staging');
   });
 });

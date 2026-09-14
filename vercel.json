@@ -3,7 +3,8 @@
   "buildCommand": "prisma migrate deploy && pnpm check:reconciliation && next build",
   "git": {
     "deploymentEnabled": {
-      "feat/ai-assistant-phase-2": false
+      "feat/ai-assistant-phase-2": false,
+      "feat/location-inventory": false
     }
   },
   "functions": {
