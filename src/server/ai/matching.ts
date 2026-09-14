@@ -3,6 +3,12 @@ import { normalizeAssistantText } from '@/lib/ai-assistant';
 import { normalizeIraqiPhone } from '@/lib/phone';
 import { prisma } from '@/server/db/client';
 import { matchActiveProduct } from '@/server/products/matching';
+import {
+  buildFinanceAccountScopeWhere,
+  buildInventoryItemScopeWhere,
+  buildOrderScopeWhere,
+  type DataScope,
+} from '@/server/filters/where-builder';
 
 export type MatchResult<T> =
   | { kind: 'exact'; value: T }
@@ -53,11 +59,11 @@ export async function matchProduct(query: string) {
   return matchActiveProduct(query);
 }
 
-export async function matchOrder(query: string, scope: { branchId?: string } = {}) {
+export async function matchOrder(query: string, scope: DataScope = {}) {
   const normalized = normalizeAssistantText(query);
   const rows = await prisma.order.findMany({
     where: {
-      ...(scope.branchId ? { branchId: scope.branchId } : {}),
+      ...buildOrderScopeWhere(scope),
       OR: [
         { id: query },
         { orderNumber: { contains: query, mode: 'insensitive' } },
@@ -90,10 +96,15 @@ export async function matchOrder(query: string, scope: { branchId?: string } = {
     : { kind: 'none', candidates: [] } as const;
 }
 
-export async function matchFinanceAccount(query: string) {
+export async function matchFinanceAccount(query: string, scope: DataScope = {}) {
   const normalized = normalizeAssistantText(query);
   const rows = await prisma.financeAccount.findMany({
-    where: { isActive: true, currency: 'IQD', type: { not: 'PAYMENT_GATEWAY' } },
+    where: {
+      isActive: true,
+      currency: 'IQD',
+      type: { not: 'PAYMENT_GATEWAY' },
+      ...buildFinanceAccountScopeWhere(scope),
+    },
     select: { id: true, name: true, externalKey: true, currency: true, type: true },
     orderBy: { name: 'asc' },
   });
@@ -142,10 +153,10 @@ export async function matchParty(query: string, type?: 'SUPPLIER' | 'CUSTOMER') 
     : { kind: 'none', candidates: [] } as const;
 }
 
-export async function matchInventoryItem(query: string, scope: { branchId?: string } = {}) {
+export async function matchInventoryItem(query: string, scope: DataScope = {}) {
   const normalized = normalizeAssistantText(query);
   const rows = await prisma.inventoryItem.findMany({
-    where: { isActive: true, ...(scope.branchId ? { branchId: scope.branchId } : {}) },
+    where: { isActive: true, ...buildInventoryItemScopeWhere(scope) },
     select: { id: true, nameEn: true, nameAr: true, category: true, unit: true, branchId: true },
     orderBy: { nameEn: 'asc' },
   });

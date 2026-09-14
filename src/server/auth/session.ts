@@ -10,7 +10,9 @@ export interface CurrentUser {
   name: string;
   role: Role;
   branchId: string | null;
+  defaultStockLocationId?: string | null;
   defaultFinanceAccountId?: string | null;
+  locationIds?: string[];
 }
 
 /** Resolve the authenticated user and refresh mutable authorization state. */
@@ -25,7 +27,12 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
       name: true,
       role: true,
       branchId: true,
+      defaultStockLocationId: true,
       defaultFinanceAccountId: true,
+      stockLocationAccesses: {
+        where: { canView: true, location: { isActive: true } },
+        select: { locationId: true },
+      },
       isActive: true,
     },
   });
@@ -36,6 +43,8 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
     name: user.name,
     role: user.role,
     branchId: user.branchId,
+    defaultStockLocationId: user.defaultStockLocationId,
     defaultFinanceAccountId: user.defaultFinanceAccountId,
+    locationIds: user.stockLocationAccesses.map((access) => access.locationId),
   };
 });

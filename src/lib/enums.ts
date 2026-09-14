@@ -87,6 +87,7 @@ export const ORDER_STATUSES = ['PENDING', 'COMPLETED', 'CANCELLED', 'RETURNED', 
 export const INVENTORY_CATEGORIES = [
   'GREEN_COFFEE',
   'ROASTED',
+  'FINISHED_GOOD',
   'DRIP_BAGS',
   'PACKAGING',
   'PRODUCTION_SUPPLY',
@@ -105,6 +106,26 @@ export const EXPENSE_CATEGORY_TYPES = [
   'MAINTENANCE',
   'EQUIPMENT',
   'OVERHEAD',
+] as const;
+
+// Sales points may post only routine operating expenses through the narrow
+// local-expense workflow. Inventory and capital purchases stay central.
+export const LOCAL_OPEX_CATEGORY_TYPES = [
+  'SHIPPING',
+  'SALARIES',
+  'RENT',
+  'MARKETING',
+  'UTILITIES',
+  'TECH',
+  'MAINTENANCE',
+  'OVERHEAD',
+] as const;
+
+export const RETURN_DISPOSITIONS = [
+  'RESTOCK',
+  'REPACK',
+  'RETURN_TO_SUPPLIER',
+  'WASTE',
 ] as const;
 
 export const ROLES = [
@@ -247,9 +268,45 @@ export const ENUM_LABELS: Record<string, Label> = {
   // Inventory categories
   GREEN_COFFEE: { en: 'Green coffee', ar: 'بن أخضر' },
   ROASTED: { en: 'Roasted coffee', ar: 'بن محمّص' },
+  FINISHED_GOOD: { en: 'Finished goods', ar: 'بضائع جاهزة للبيع' },
   PRODUCTION_SUPPLY: { en: 'Production supply', ar: 'مستلزمات إنتاج' },
   PACKAGING: { en: 'Packaging', ar: 'تغليف' },
   ACCESSORY: { en: 'Accessory', ar: 'مستلزم' },
+  RAW_WAREHOUSE: { en: 'Raw-material warehouse', ar: 'مخزن المواد الأولية' },
+  ROASTERY: { en: 'Roastery', ar: 'المحمصة' },
+  PACKING: { en: 'Packing area', ar: 'منطقة التعبئة' },
+  FINISHED_WAREHOUSE: { en: 'Finished-goods warehouse', ar: 'مخزن البضائع الجاهزة' },
+  SALES_POINT: { en: 'Sales point', ar: 'نقطة بيع' },
+  QUARANTINE: { en: 'Quarantine', ar: 'حجر المخزون' },
+  GENERAL: { en: 'General stock', ar: 'مخزون عام' },
+  TRANSFER_OUT: { en: 'Transfer dispatch', ar: 'إرسال تحويل' },
+  TRANSFER_IN: { en: 'Transfer receipt', ar: 'استلام تحويل' },
+  RETURN_IN: { en: 'Customer return', ar: 'مرتجع عميل' },
+  RESTOCK: { en: 'Restocked', ar: 'إعادة للمخزون' },
+  REPACK: { en: 'Route for repacking', ar: 'إرسال لإعادة التعبئة' },
+  RETURN_TO_SUPPLIER: { en: 'Return to supplier', ar: 'إرجاع إلى المورد' },
+  REVERSAL: { en: 'Reversal', ar: 'عكس حركة' },
+  OPENING: { en: 'Opening balance', ar: 'رصيد افتتاحي' },
+  PURCHASE_RECEIPT: { en: 'Purchase receipt', ar: 'استلام مشتريات' },
+  ROAST: { en: 'Roast production', ar: 'إنتاج التحميص' },
+  PACK: { en: 'Packing run', ar: 'تشغيلة تعبئة' },
+  SALE: { en: 'Sale', ar: 'بيع' },
+  RETURN: { en: 'Return', ar: 'مرتجع' },
+  COUNT: { en: 'Physical count', ar: 'جرد فعلي' },
+  ADJUSTMENT: { en: 'Approved adjustment', ar: 'تسوية معتمدة' },
+  WASTE: { en: 'Waste', ar: 'هدر' },
+  DRAFT: { en: 'Draft', ar: 'مسودة' },
+  SUBMITTED: { en: 'Submitted', ar: 'مُرسل للمراجعة' },
+  CONFIRMED: { en: 'Confirmed', ar: 'معتمد' },
+  PARTIALLY_RECEIVED: { en: 'Partially received', ar: 'مستلم جزئياً' },
+  RECEIVED: { en: 'Received', ar: 'مستلم' },
+  REJECTED: { en: 'Rejected', ar: 'مرفوض' },
+  REVERSED: { en: 'Reversed', ar: 'معكوس' },
+  APPROVED: { en: 'Approved', ar: 'معتمد' },
+  RESOLVED: { en: 'Resolved', ar: 'تمت المعالجة' },
+  SHORTAGE: { en: 'Shortage', ar: 'نقص' },
+  DAMAGE: { en: 'Damage', ar: 'تلف' },
+  EXCESS: { en: 'Excess', ar: 'زيادة' },
   // Expense categories
   SHIPPING: { en: 'Shipping', ar: 'الشحن' },
   SALARIES: { en: 'Salaries', ar: 'الرواتب' },
@@ -269,6 +326,7 @@ export const ENUM_LABELS: Record<string, Label> = {
   FRANCHISEE_VIEWER: { en: 'Franchisee', ar: 'صاحب الامتياز' },
   VIEWER: { en: 'Viewer', ar: 'مشاهد' },
   PENDING: { en: 'Pending', ar: 'قيد الانتظار' },
+  ROUTINE: { en: 'Routine count', ar: 'جرد دوري' },
   // Finance — account types
   CASH: { en: 'Cash', ar: 'نقد' },
   BANK: { en: 'Bank', ar: 'بنك' },
@@ -292,6 +350,8 @@ export const ENUM_LABELS: Record<string, Label> = {
   CAPITAL_IN: { en: 'Capital contribution', ar: 'مساهمة رأس مال' },
   DRAWING: { en: 'Withdrawal', ar: 'سحب' },
   TRANSFER: { en: 'Transfer', ar: 'تحويل' },
+  INVENTORY_GAIN: { en: 'Inventory gain', ar: 'زيادة مخزون' },
+  INVENTORY_LOSS: { en: 'Inventory loss', ar: 'نقص مخزون' },
   // Finance — obligation kinds
   PAYABLE: { en: 'Payable', ar: 'ذمم دائنة' },
   RECEIVABLE: { en: 'Receivable', ar: 'ذمم مدينة' },

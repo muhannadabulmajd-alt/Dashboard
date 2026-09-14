@@ -1,6 +1,7 @@
 import 'server-only';
 import type { AiPendingActionType, Role } from '@prisma/client';
 import { can, type Capability } from '@/lib/rbac';
+import { canManageExistingCustomer } from '@/server/records/customer-policy';
 import { AI_ASSISTANT_TOOLS } from './tool-definitions';
 
 const TOOL_CAPABILITIES: Record<string, Capability> = {
@@ -27,6 +28,14 @@ const TOOL_CAPABILITIES: Record<string, Capability> = {
   prepare_update_customer: 'manage:customers',
   prepare_update_party: 'manage:finance',
   prepare_adjust_inventory: 'manage:inventory',
+  prepare_receive_stock: 'manage:inventory',
+  prepare_pack_finished_goods: 'manage:inventory',
+  prepare_dispatch_stock_transfer: 'manage:inventory',
+  prepare_receive_stock_transfer: 'manage:inventory',
+  prepare_record_local_expense: 'record:local-expense',
+  prepare_return_to_quarantine: 'manage:inventory',
+  prepare_dispose_returned_goods: 'manage:inventory',
+  prepare_reverse_stock_document: 'manage:inventory',
   prepare_create_roast_batch: 'manage:batches',
   prepare_record_payment: 'manage:finance',
   prepare_record_refund: 'manage:finance',
@@ -45,6 +54,14 @@ const ACTION_CAPABILITIES: Partial<Record<AiPendingActionType, Capability>> = {
   UPDATE_CUSTOMER: 'manage:customers',
   UPDATE_PARTY: 'manage:finance',
   ADJUST_INVENTORY: 'manage:inventory',
+  RECEIVE_STOCK: 'manage:inventory',
+  PACK_FINISHED_GOODS: 'manage:inventory',
+  DISPATCH_STOCK_TRANSFER: 'manage:inventory',
+  RECEIVE_STOCK_TRANSFER: 'manage:inventory',
+  RECORD_LOCAL_EXPENSE: 'record:local-expense',
+  RETURN_TO_QUARANTINE: 'manage:inventory',
+  DISPOSE_RETURNED_GOODS: 'manage:inventory',
+  REVERSE_STOCK_DOCUMENT: 'manage:inventory',
   CREATE_ROAST_BATCH: 'manage:batches',
   RECORD_PAYMENT: 'manage:finance',
   RECORD_REFUND: 'manage:finance',
@@ -53,16 +70,49 @@ const ACTION_CAPABILITIES: Partial<Record<AiPendingActionType, Capability>> = {
   CREATE_DASHBOARD_DRAFT: 'manage:dashboards',
 };
 
+const OWNER_ADMIN_TOOLS = new Set([
+  'prepare_receive_stock',
+  'prepare_dispatch_stock_transfer',
+  'prepare_dispose_returned_goods',
+  'prepare_reverse_stock_document',
+]);
+const OWNER_ADMIN_ACTIONS = new Set<AiPendingActionType>([
+  'RECEIVE_STOCK',
+  'DISPATCH_STOCK_TRANSFER',
+  'DISPOSE_RETURNED_GOODS',
+  'REVERSE_STOCK_DOCUMENT',
+]);
+const CENTRAL_CUSTOMER_TOOLS = new Set(['prepare_update_customer']);
+const CENTRAL_CUSTOMER_ACTIONS = new Set<AiPendingActionType>(['UPDATE_CUSTOMER']);
+
+function ownerAdmin(role: Role): boolean {
+  return role === 'OWNER' || role === 'ADMIN';
+}
+
 export function assistantToolsForRole(role: Role) {
-  return AI_ASSISTANT_TOOLS.filter((tool) => can(role, TOOL_CAPABILITIES[tool.name]));
+  return AI_ASSISTANT_TOOLS.filter((tool) => (
+    can(role, TOOL_CAPABILITIES[tool.name])
+    && (!OWNER_ADMIN_TOOLS.has(tool.name) || ownerAdmin(role))
+    && (!CENTRAL_CUSTOMER_TOOLS.has(tool.name) || canManageExistingCustomer(role))
+  ));
 }
 
 export function assertAssistantToolAllowed(role: Role, toolName: string): void {
   const capability = TOOL_CAPABILITIES[toolName];
-  if (!capability || !can(role, capability)) throw new Error('ai_tool_forbidden');
+  if (
+    !capability
+    || !can(role, capability)
+    || (OWNER_ADMIN_TOOLS.has(toolName) && !ownerAdmin(role))
+    || (CENTRAL_CUSTOMER_TOOLS.has(toolName) && !canManageExistingCustomer(role))
+  ) throw new Error('ai_tool_forbidden');
 }
 
 export function canExecuteAssistantAction(role: Role, type: AiPendingActionType): boolean {
   const capability = ACTION_CAPABILITIES[type];
-  return Boolean(capability && can(role, capability));
+  return Boolean(
+    capability
+    && can(role, capability)
+    && (!OWNER_ADMIN_ACTIONS.has(type) || ownerAdmin(role))
+    && (!CENTRAL_CUSTOMER_ACTIONS.has(type) || canManageExistingCustomer(role)),
+  );
 }

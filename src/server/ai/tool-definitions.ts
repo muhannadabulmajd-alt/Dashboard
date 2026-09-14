@@ -6,8 +6,10 @@ import {
   EXPENSE_CATEGORY_TYPES,
   FULFILLMENT_METHODS,
   INVENTORY_CATEGORIES,
+  LOCAL_OPEX_CATEGORY_TYPES,
   PARTY_TYPES,
   PAYMENT_METHODS,
+  RETURN_DISPOSITIONS,
 } from '@/lib/enums';
 import { MEASUREMENT_UNITS } from '@/lib/units';
 
@@ -123,9 +125,10 @@ export const AI_ASSISTANT_TOOLS: FunctionTool[] = [
   ),
   tool(
     'inventory_summary',
-    'Read current inventory quantities, FIFO value, and low-stock state; optionally search by item name.',
+    'Read current inventory quantities and low-stock state; under Inventory V2, resolve one permitted location and include on-hand, reserved, available, in-transit, quarantine, producible, and next-expiry values.',
     object({
       query: nullableString,
+      locationQuery: nullableString,
       lowStockOnly: { type: 'boolean' },
       limit: { type: 'integer', minimum: 1, maximum: 25 },
     }),
@@ -222,6 +225,7 @@ export const AI_ASSISTANT_TOOLS: FunctionTool[] = [
       channel: nullableString,
       governorate: nullableString,
       fulfillmentMethod: enumSchema(FULFILLMENT_METHODS, true),
+      locationQuery: nullableString,
       status: nullableString,
       deliveryFee: nonnegativeInteger,
       deliveryCost: nonnegativeInteger,
@@ -360,17 +364,160 @@ export const AI_ASSISTANT_TOOLS: FunctionTool[] = [
   ),
   tool(
     'prepare_adjust_inventory',
-    'Prepare a physical inventory adjustment to an exact target quantity with up to three decimal places. The preview must show current quantity, target quantity, and difference.',
+    'Prepare a physical inventory count to an exact target quantity with up to three decimal places. Under Inventory V2 this submits a location-specific count for approval and never changes stock immediately.',
     object({
       inventoryItemQuery: nullableString,
+      locationQuery: nullableString,
       targetQuantity: nullableNumber,
       occurredAt: nullableString,
       reason: nullableString,
     }),
   ),
   tool(
+    'prepare_receive_stock',
+    'Prepare an Inventory V2 purchase receipt at one permitted location. Preserve the supplier, lot, expiry, quantity, unit cost, payment routing, reference, and notes. A missing supplier may be created atomically only after confirmation.',
+    object({
+      inventoryItemQuery: nullableString,
+      locationQuery: nullableString,
+      quantity: nullableNumber,
+      unitCost: nullableNumber,
+      occurredAt: nullableString,
+      bestBefore: nullableString,
+      supplierLot: nullableString,
+      supplierQuery: nullableString,
+      newSupplier: { anyOf: [partyDetails, { type: 'null' }] },
+      paymentMode: enumSchema(['CREDIT', 'PAID'], true),
+      accountQuery: nullableString,
+      dueDate: nullableString,
+      reference: nullableString,
+      notes: nullableString,
+    }),
+  ),
+  tool(
+    'prepare_pack_finished_goods',
+    'Prepare an Inventory V2 packing run at one permitted production location. It consumes the active versioned recipe and creates an exact finished-goods lot; never guess the output SKU, quantity, or location.',
+    object({
+      outputInventoryItemQuery: nullableString,
+      locationQuery: nullableString,
+      outputQuantity: nullableNumber,
+      rejectedQuantity: nullableNumber,
+      packedAt: nullableString,
+      bestBefore: nullableString,
+      notes: nullableString,
+    }),
+  ),
+  tool(
+    'prepare_dispatch_stock_transfer',
+    'Prepare an Inventory V2 stock transfer dispatch from one exact location to another. Preserve every item and three-decimal quantity. Dispatch moves exact lots into the destination branch transit location and requires confirmation.',
+    object({
+      sourceLocationQuery: nullableString,
+      destinationLocationQuery: nullableString,
+      lines: {
+        anyOf: [
+          {
+            type: 'array',
+            minItems: 1,
+            maxItems: 100,
+            items: object({
+              inventoryItemQuery: nullableString,
+              quantity: nullableNumber,
+            }),
+          },
+          { type: 'null' },
+        ],
+      },
+      occurredAt: nullableString,
+      expectedAt: nullableString,
+      notes: nullableString,
+    }),
+  ),
+  tool(
+    'prepare_receive_stock_transfer',
+    'Prepare receipt of a dispatched Inventory V2 transfer at its exact destination. Use receiveAll=true only when all outstanding stock physically arrived. Record every shortage, damage, or excess with quantity and evidence notes.',
+    object({
+      transferQuery: nullableString,
+      receiveAll: nullableBoolean,
+      lines: {
+        anyOf: [
+          {
+            type: 'array',
+            maxItems: 100,
+            items: object({
+              inventoryItemQuery: nullableString,
+              quantity: nullableNumber,
+            }),
+          },
+          { type: 'null' },
+        ],
+      },
+      discrepancies: {
+        anyOf: [
+          {
+            type: 'array',
+            maxItems: 100,
+            items: object({
+              inventoryItemQuery: nullableString,
+              type: enumSchema(['SHORTAGE', 'DAMAGE', 'EXCESS'], true),
+              quantity: nullableNumber,
+              notes: nullableString,
+            }),
+          },
+          { type: 'null' },
+        ],
+      },
+      occurredAt: nullableString,
+      notes: nullableString,
+    }),
+  ),
+  tool(
+    'prepare_record_local_expense',
+    'Prepare a controlled routine sales-point expense in IQD. Use only the allowed local OPEX categories. Atlas uses the linked user default location account and requires the attached receipt or an explicit no-receipt reason.',
+    object({
+      locationQuery: nullableString,
+      amount: nullableNumber,
+      categoryType: enumSchema(LOCAL_OPEX_CATEGORY_TYPES, true),
+      description: nullableString,
+      occurredAt: nullableString,
+      noReceiptReason: nullableString,
+    }),
+  ),
+  tool(
+    'prepare_return_to_quarantine',
+    'Prepare a customer return of sold finished goods into the exact branch quarantine location. Match one order line, preserve the three-decimal quantity and reason, and never return more than the exact sold quantity still returnable.',
+    object({
+      orderQuery: nullableString,
+      productQuery: nullableString,
+      quantity: nullableNumber,
+      occurredAt: nullableString,
+      reason: nullableString,
+    }),
+  ),
+  tool(
+    'prepare_dispose_returned_goods',
+    'Prepare central disposition of quarantined returned goods as RESTOCK, REPACK, RETURN_TO_SUPPLIER, or WASTE. Match the exact return document and item; destination or supplier is required only for the applicable disposition.',
+    object({
+      returnQuery: nullableString,
+      inventoryItemQuery: nullableString,
+      quantity: nullableNumber,
+      disposition: enumSchema(RETURN_DISPOSITIONS, true),
+      destinationLocationQuery: nullableString,
+      supplierQuery: nullableString,
+      occurredAt: nullableString,
+      reason: nullableString,
+    }),
+  ),
+  tool(
+    'prepare_reverse_stock_document',
+    'Prepare reversal of one eligible Inventory V2 stock document. This is high risk and requires a second confirmation with the exact stock document number. Never use it for sales, counts, opening balances, or documents with dependents.',
+    object({
+      documentQuery: nullableString,
+      occurredAt: nullableString,
+      reason: nullableString,
+    }),
+  ),
+  tool(
     'prepare_create_roast_batch',
-    'Prepare a roasting batch with optional green-input and roasted-output inventory movements.',
+    'Prepare a location-specific roasting batch. Under Inventory V2 both green-input and roasted-output items, output weight, and a permitted production location are required.',
     object({
       batchNumber: nullableString,
       origin: nullableString,
@@ -378,10 +525,12 @@ export const AI_ASSISTANT_TOOLS: FunctionTool[] = [
       roastLevel: nullableString,
       greenInputGrams: nullableNumber,
       roastedOutputGrams: nullableNumber,
+      abnormalLossGrams: nullableNumber,
       qcScore: nullableNumber,
       qcNotes: nullableString,
       greenInventoryItemQuery: nullableString,
       roastedInventoryItemQuery: nullableString,
+      locationQuery: nullableString,
       branchQuery: nullableString,
     }),
   ),

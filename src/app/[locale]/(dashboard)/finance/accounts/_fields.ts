@@ -7,6 +7,7 @@ export function accountFields(
   t: (key: string) => string,
   locale: AppLocale,
   branchOptions: { value: string; label: string }[],
+  locationOptions: { value: string; label: string }[],
 ): FieldDef[] {
   const opts = (vals: readonly string[]) => vals.map((v) => ({ value: v, label: enumLabel(v, locale) }));
   return [
@@ -22,6 +23,13 @@ export function accountFields(
     },
     { name: 'bankName', label: t('f.bank'), type: 'text', hint: t('h.bank') },
     { name: 'branchId', label: t('f.branch'), type: 'select', options: branchOptions, hint: t('h.branch') },
+    ...(locationOptions.length ? [{
+      name: 'stockLocationId',
+      label: t('f.stockLocation'),
+      type: 'select' as const,
+      options: locationOptions,
+      hint: t('h.accountLocation'),
+    }] : []),
     { name: 'openingBalance', label: t('f.opening'), type: 'number', hint: t('h.openingBalance') },
     { name: 'notes', label: t('f.notes'), type: 'text', hint: t('h.notes') },
   ];

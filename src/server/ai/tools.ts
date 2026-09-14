@@ -21,7 +21,26 @@ import { getInventoryItems } from '@/server/db/repositories/inventory.repo';
 import { getBatchRows } from '@/server/db/repositories/roastery.repo';
 import { getCatalogForAlerts, getOrderLines, getOrders } from '@/server/db/repositories/sales.repo';
 import { prisma } from '@/server/db/client';
-import { buildBranchScope } from '@/server/filters/where-builder';
+import {
+  buildBranchScope,
+  buildFinanceEntryScopeWhere,
+  buildMovementScopeWhere,
+  buildOrderScopeWhere,
+  type DataScope,
+} from '@/server/filters/where-builder';
+import { getInventoryV2Config } from '@/server/inventory-v2/config';
+import {
+  stockLocationWhereForPermission,
+  type LocationPermission,
+} from '@/server/inventory-v2/access';
+import { getInventoryLocationOverview } from '@/server/inventory-v2/overview';
+import { getReturnedLotBalances } from '@/server/inventory-v2/returns';
+import { stockDocumentReversalBlockCode } from '@/server/inventory-v2/reversals';
+import { outstandingTransferLots } from '@/server/inventory-v2/transfers';
+import {
+  localExpenseAccountMatchesLocation,
+  localExpenseRequiresReview,
+} from '@/server/inventory-v2/local-expense-policy';
 import { getPaymentFacts, getProfitFacts } from '@/server/finance/facts';
 import { getBalanceSheetSnapshot } from '@/server/finance/balance-sheet';
 import { getCashFlowReport, getPartyStatementsReport } from '@/server/finance/reports';
@@ -56,7 +75,15 @@ import {
   PrepareOrderStatusSchema,
   PrepareCustomerUpdateSchema,
   PrepareDashboardDraftSchema,
+  PrepareDispatchStockTransferSchema,
+  PrepareDisposeReturnedGoodsSchema,
   PrepareInventoryAdjustmentSchema,
+  PrepareLocalExpenseSchema,
+  PreparePackingSchema,
+  PrepareReceiveStockTransferSchema,
+  PrepareReceiveStockSchema,
+  PrepareReturnToQuarantineSchema,
+  PrepareReverseStockDocumentSchema,
   PrepareLedgerLineSchema,
   PreparePartyUpdateSchema,
   PreparePartyDetailsSchema,
@@ -77,18 +104,26 @@ import {
   ResolvedCustomerEnrichmentSchema,
   ResolvedCustomerUpdateActionSchema,
   ResolvedDashboardDraftActionSchema,
+  ResolvedDispatchStockTransferActionSchema,
+  ResolvedDisposeReturnedGoodsActionSchema,
   ResolvedExpenseActionSchema,
   ResolvedInventoryAdjustmentActionSchema,
+  ResolvedLocalExpenseActionSchema,
   ResolvedLedgerLineActionSchema,
   ResolvedOrderActionSchema,
   ResolvedOrderStatusActionSchema,
+  ResolvedPackingActionSchema,
   ResolvedPartyActionSchema,
   ResolvedPartyUpdateActionSchema,
   ResolvedPaymentActionSchema,
   ResolvedPurchaseActionSchema,
   ResolvedRefundActionSchema,
+  ResolvedReceiveStockTransferActionSchema,
+  ResolvedReturnToQuarantineActionSchema,
+  ResolvedReverseStockDocumentActionSchema,
   ResolvedReversalActionSchema,
   ResolvedRoastBatchActionSchema,
+  ResolvedStockReceiptActionSchema,
   ResolvedSpendReclassificationActionSchema,
   ResolvedTransferActionSchema,
 } from './action-data';
@@ -194,10 +229,10 @@ function toInputJson(value: unknown): Prisma.InputJsonValue {
 }
 
 function highRiskChallenge(type: AiPendingActionType, validatedData: unknown): string | undefined {
-  if (!['RECORD_REFUND', 'REVERSE_RECORD', 'RECLASSIFY_SPEND'].includes(type)) return undefined;
+  if (!['RECORD_REFUND', 'REVERSE_RECORD', 'RECLASSIFY_SPEND', 'REVERSE_STOCK_DOCUMENT'].includes(type)) return undefined;
   if (!validatedData || typeof validatedData !== 'object') throw new Error('high_risk_challenge_missing');
-  const value = validatedData as { orderNumber?: unknown; recordNumber?: unknown };
-  const challenge = String(value.orderNumber ?? value.recordNumber ?? '').trim();
+  const value = validatedData as { orderNumber?: unknown; recordNumber?: unknown; documentNumber?: unknown };
+  const challenge = String(value.orderNumber ?? value.recordNumber ?? value.documentNumber ?? '').trim();
   if (!challenge) throw new Error('high_risk_challenge_missing');
   return challenge;
 }
@@ -220,7 +255,8 @@ async function actionResult(input: {
       customer_duplicate: ['A matching customer now exists. Please use the existing customer.', 'يوجد عميل مطابق الآن. استخدم العميل الموجود من فضلك.'],
       product_missing: ['A selected product is no longer available.', 'أحد المنتجات المختارة لم يعد متاحاً.'],
       product_inactive: ['A selected product is inactive.', 'أحد المنتجات المختارة غير فعال.'],
-      stock_insufficient: ['There is not enough available stock for this order.', 'المخزون المتاح لا يكفي لهذا الطلب.'],
+      stock_insufficient: ['There is not enough available stock for this action.', 'المخزون المتاح لا يكفي لهذا الإجراء.'],
+      stock_location_not_sellable: ['A selected product is not configured for sale at that stock location.', 'أحد المنتجات المختارة غير مهيأ للبيع في موقع المخزون المحدد.'],
       customer_inactive: ['The selected customer is inactive.', 'العميل المختار غير فعال.'],
       customer_name_conflict: ['The supplied customer name conflicts with the matched customer. No data was changed.', 'اسم العميل المرسل لا يطابق العميل المحدد. لم يتم تغيير أي بيانات.'],
       account_inactive: ['The selected finance account is unavailable.', 'الحساب المالي المختار غير متاح.'],
@@ -232,9 +268,60 @@ async function actionResult(input: {
       party_inactive: ['The selected party is inactive.', 'الجهة المختارة غير فعالة.'],
       branch_inactive: ['The selected branch is inactive.', 'الفرع المختار غير فعال.'],
       inventory_item_missing: ['The selected inventory item is unavailable.', 'مادة المخزون المختارة غير متاحة.'],
+      inventory_location_not_configured: ['The selected item is not configured at that stock location.', 'مادة المخزون المختارة غير مهيأة في ذلك الموقع.'],
+      inventory_not_producible_here: ['The selected item cannot be used for production at that location.', 'لا يمكن استخدام مادة المخزون المختارة للإنتاج في ذلك الموقع.'],
+      inventory_unit_changed: ['The inventory unit changed after the preview. Please prepare it again.', 'تغيرت وحدة المخزون بعد المعاينة. أعد إعدادها من فضلك.'],
+      location_invalid: ['The selected stock location is unavailable.', 'موقع المخزون المختار غير متاح.'],
+      location_stale: ['Stock changed at the selected location. Please prepare a fresh preview.', 'تغير المخزون في الموقع المختار. أعد إعداد معاينة جديدة.'],
+      location_branch_mismatch: ['The selected location does not belong to the selected branch.', 'الموقع المختار لا يتبع الفرع المحدد.'],
+      roasted_output_required: ['Roasted output weight is required.', 'وزن الناتج المحمص مطلوب.'],
       supplier_invalid: ['The selected supplier is unavailable.', 'المورد المختار غير متاح.'],
+      party_match_ambiguous: ['More than one matching party exists. Please choose the exact record.', 'يوجد أكثر من جهة مطابقة. اختر السجل المحدد من فضلك.'],
+      best_before_invalid: ['The best-before date cannot be earlier than the stock date.', 'لا يمكن أن يسبق تاريخ الصلاحية تاريخ حركة المخزون.'],
+      packing_output_invalid: ['The selected finished-goods item is no longer linked to that product.', 'مادة المنتج النهائي المختارة لم تعد مرتبطة بذلك المنتج.'],
+      packing_output_not_finished_good: ['The selected output is not configured as finished goods.', 'الناتج المختار غير مهيأ كمنتج نهائي.'],
+      packing_output_not_sellable: ['The selected output is not sellable at that location.', 'الناتج المختار غير قابل للبيع في ذلك الموقع.'],
+      packing_recipe_stale: ['The active product recipe changed. Please prepare a fresh packing preview.', 'تغيرت وصفة المنتج الفعالة. أعد إعداد معاينة تعبئة جديدة.'],
+      packing_recipe_empty: ['The selected product has no usable recipe components.', 'المنتج المختار لا يحتوي مكونات وصفة قابلة للاستخدام.'],
+      packing_component_not_producible: ['A recipe component is not configured for production at that location.', 'أحد مكونات الوصفة غير مهيأ للإنتاج في ذلك الموقع.'],
+      transfer_source_invalid: ['The transfer source location is unavailable.', 'موقع مصدر التحويل غير متاح.'],
+      transfer_destination_invalid: ['The transfer destination location is unavailable.', 'موقع وجهة التحويل غير متاح.'],
+      transit_location_invalid: ['The destination transit location is unavailable or changed.', 'موقع النقل المؤقت للوجهة غير متاح أو تغير.'],
+      transfer_source_item_not_configured: ['An item is no longer configured at the transfer source.', 'إحدى المواد لم تعد مهيأة في مصدر التحويل.'],
+      transfer_destination_item_not_configured: ['An item is no longer configured at the transfer destination.', 'إحدى المواد لم تعد مهيأة في وجهة التحويل.'],
+      transfer_not_found: ['The selected stock transfer no longer exists.', 'تحويل المخزون المحدد لم يعد موجوداً.'],
+      transfer_not_receivable: ['The selected stock transfer is no longer awaiting receipt.', 'تحويل المخزون المحدد لم يعد بانتظار الاستلام.'],
+      document_stale: ['The stock transfer changed after the preview. Please prepare a fresh preview.', 'تغير تحويل المخزون بعد المعاينة. أعد إعداد معاينة جديدة.'],
+      transfer_receipt_exceeds_dispatch: ['A received quantity exceeds the outstanding dispatched quantity.', 'إحدى الكميات المستلمة تتجاوز الكمية المرسلة المتبقية.'],
+      transfer_discrepancy_item_invalid: ['A discrepancy item is not outstanding on this transfer.', 'مادة فرق الاستلام ليست ضمن الكميات المتبقية في هذا التحويل.'],
+      transfer_discrepancy_exceeds_outstanding: ['A discrepancy exceeds the outstanding transfer quantity.', 'فرق الاستلام يتجاوز كمية التحويل المتبقية.'],
+      user_inactive: ['The linked Atlas user is no longer active.', 'مستخدم أطلس المرتبط لم يعد فعالاً.'],
+      expense_default_account_changed: ['The user default expense account changed. Please prepare a fresh preview.', 'تغير حساب المصروف الافتراضي للمستخدم. أعد إعداد معاينة جديدة.'],
+      expense_default_account_invalid: ['The user default expense account is unavailable for this location.', 'حساب المصروف الافتراضي للمستخدم غير متاح لهذا الموقع.'],
+      expense_policy_changed: ['The sales-point expense policy changed. Please prepare a fresh preview.', 'تغيرت سياسة مصروفات نقطة البيع. أعد إعداد معاينة جديدة.'],
+      expense_receipt_invalid: ['The attached receipt is unavailable, expired, or invalid.', 'إيصال المصروف المرفق غير متاح أو منتهي أو غير صالح.'],
+      return_order_line_invalid: ['The selected sold order line changed or is unavailable.', 'بند الطلب المباع المحدد تغير أو لم يعد متاحاً.'],
+      return_inventory_link_ambiguous: ['The sold line is not linked to one traceable finished-goods item.', 'بند البيع غير مرتبط بمادة منتج نهائي واحدة قابلة للتتبع.'],
+      return_fulfillment_invalid: ['The order fulfillment location is unavailable for this return.', 'موقع تجهيز الطلب غير متاح لهذا الإرجاع.'],
+      return_quarantine_invalid: ['The branch quarantine location is unavailable or changed.', 'موقع الحجر الخاص بالفرع غير متاح أو تغير.'],
+      return_exceeds_sold_quantity: ['The return quantity exceeds the sold quantity still eligible for return.', 'كمية الإرجاع تتجاوز الكمية المباعة المتبقية القابلة للإرجاع.'],
+      return_document_invalid: ['The selected return document is unavailable or changed.', 'مستند الإرجاع المحدد غير متاح أو تغير.'],
+      return_disposition_exceeds_quarantine: ['The disposition quantity exceeds the returned stock remaining in quarantine.', 'كمية المعالجة تتجاوز مخزون الإرجاع المتبقي في الحجر.'],
+      return_destination_invalid: ['The selected return destination is incompatible or not configured for this item.', 'وجهة معالجة الإرجاع المحددة غير متوافقة أو غير مهيأة لهذه المادة.'],
+      return_supplier_invalid: ['The selected return supplier is unavailable or changed.', 'مورد الإرجاع المحدد غير متاح أو تغير.'],
+      return_waste_policy_invalid: ['The source location has no active inventory-loss accounting policy.', 'موقع المصدر لا يملك سياسة محاسبية فعالة لخسائر المخزون.'],
+      stock_document_invalid: ['The selected stock document is unavailable or changed.', 'مستند المخزون المحدد غير متاح أو تغير.'],
+      stock_document_not_reversible: ['This stock document cannot be reversed through the general reversal workflow.', 'لا يمكن عكس مستند المخزون هذا عبر مسار العكس العام.'],
+      stock_document_requires_domain_reversal: ['This document requires its dedicated count or discrepancy correction workflow.', 'يتطلب هذا المستند مسار تصحيح الجرد أو الفروقات المخصص له.'],
+      stock_document_has_dependents: ['Reverse the dependent stock documents first.', 'اعكس مستندات المخزون التابعة أولاً.'],
+      stock_document_has_discrepancies: ['Resolve the document discrepancies before reversal.', 'عالج فروقات المستند قبل العكس.'],
+      stock_document_already_reversed: ['This stock document has already been reversed.', 'تم عكس مستند المخزون هذا مسبقاً.'],
+      location_version_coverage_mismatch: ['The stock document location set changed. Prepare a fresh preview.', 'تغيرت مجموعة مواقع مستند المخزون. أعد إعداد معاينة جديدة.'],
+      stock_document_output_consumed: ['Stock produced by this document has been consumed or reserved and cannot be reversed.', 'تم استهلاك أو حجز المخزون الناتج عن هذا المستند ولا يمكن عكسه.'],
+      stock_finance_not_reversible: ['A linked finance record has downstream activity and cannot be reversed safely.', 'يوجد سجل مالي مرتبط له حركة لاحقة ولا يمكن عكسه بأمان.'],
       order_missing: ['The selected order no longer exists.', 'الطلب المختار لم يعد موجوداً.'],
       account_invalid: ['The selected finance account is incompatible with this action.', 'الحساب المالي المختار غير متوافق مع هذا الإجراء.'],
+      account_location_mismatch: ['The selected payment account does not belong to the stock location.', 'حساب الدفع المختار لا يتبع موقع المخزون.'],
       transfer_same_account: ['The transfer source and destination accounts must be different.', 'يجب أن يختلف حساب التحويل المصدر عن الحساب المستلم.'],
     };
     const copy = messages[issue.code] ?? ['Atlas could not safely prepare this action.', 'تعذر على أطلس إعداد هذا الإجراء بأمان.'];
@@ -458,7 +545,7 @@ async function searchOrders(raw: unknown, context: ToolContext): Promise<ToolExe
   const scope = buildBranchScope(context.user);
   const rows = await prisma.order.findMany({
     where: {
-      ...(scope.branchId ? { branchId: scope.branchId } : {}),
+      ...buildOrderScopeWhere(scope),
       OR: [
         { orderNumber: { contains: input.query, mode: 'insensitive' } },
         { customer: { externalId: { contains: input.query, mode: 'insensitive' } } },
@@ -561,6 +648,80 @@ async function inventorySummary(raw: unknown, context: ToolContext): Promise<Too
   const input = InventorySummarySchema.parse(raw);
   const filters = DashboardFiltersSchema.parse({ range: 'all' });
   const range = resolveRange({ range: 'all' });
+  if (getInventoryV2Config().enabled) {
+    const location = await resolveStockLocation(input.locationQuery, context, 'view');
+    if (!location.ok) return location.result;
+    if (!location.value) {
+      return noMatch(context.locale, 'locationQuery', localized(context.locale, 'stock location', 'موقع مخزون'));
+    }
+    const [overview, valuedItems] = await Promise.all([
+      getInventoryLocationOverview(context.user, {
+        locationId: location.value.id,
+        area: 'overview',
+      }),
+      getInventoryItems(filters, { locationIds: [location.value.id] }, range),
+    ]);
+    const values = new Map(valuedItems.map((item) => {
+      const row = stockRow(item);
+      return [item.id, row.value] as const;
+    }));
+    const query = input.query?.trim().toLocaleLowerCase('ar-IQ') ?? null;
+    const allRows = overview.rows.map(({ policy, availability }) => ({
+      item: policy.inventoryItem,
+      availability,
+      belowReorder: policy.reorderPoint !== null && availability.available <= Number(policy.reorderPoint),
+      value: values.get(policy.inventoryItemId) ?? 0,
+    }));
+    const rows = allRows
+      .filter((row) => !query || [row.item.nameEn, row.item.nameAr, row.item.category]
+        .some((value) => value.toLocaleLowerCase('ar-IQ').includes(query)))
+      .filter((row) => !input.lowStockOnly || row.belowReorder)
+      .sort((left, right) => Number(right.belowReorder) - Number(left.belowReorder)
+        || left.availability.available - right.availability.available)
+      .slice(0, input.limit);
+    const inventoryValue = Math.round(allRows.reduce((sum, row) => sum + row.value, 0));
+    const total = (key: 'onHand' | 'reserved' | 'available' | 'inTransit' | 'quarantine' | 'producible') => (
+      allRows.reduce((sum, row) => sum + row.availability[key], 0)
+    );
+    const locationName = context.locale === 'ar'
+      ? location.value.nameAr || location.value.nameEn
+      : location.value.nameEn || location.value.nameAr;
+    return cardResult({
+      title: localized(context.locale, 'Location inventory', 'مخزون الموقع'),
+      answer: localized(
+        context.locale,
+        `${locationName}: ${formatNumber(allRows.length, context.locale)} configured items with ${formatQuantity(total('available'), context.locale)} available.`,
+        `${locationName}: ${formatNumber(allRows.length, context.locale)} مادة مهيأة والمتاح ${formatQuantity(total('available'), context.locale)}.`,
+      ),
+      generatedAt: generatedAt(context.now),
+      metrics: [
+        { label: localized(context.locale, 'On hand', 'الموجود'), value: formatQuantity(total('onHand'), context.locale) },
+        { label: localized(context.locale, 'Reserved', 'المحجوز'), value: formatQuantity(total('reserved'), context.locale) },
+        { label: localized(context.locale, 'Available', 'المتاح'), value: formatQuantity(total('available'), context.locale) },
+        { label: localized(context.locale, 'In transit', 'قيد النقل'), value: formatQuantity(total('inTransit'), context.locale) },
+        { label: localized(context.locale, 'Quarantine', 'الحجر'), value: formatQuantity(total('quarantine'), context.locale) },
+        { label: localized(context.locale, 'Inventory value', 'قيمة المخزون'), value: formatMoney(inventoryValue, 'IQD', context.locale) },
+      ],
+      rows: rows.map((row) => ({
+        id: row.item.id,
+        title: context.locale === 'ar' ? row.item.nameAr : row.item.nameEn,
+        subtitle: [
+          row.item.category,
+          `${localized(context.locale, 'reserved', 'محجوز')} ${formatQuantity(row.availability.reserved, context.locale)}`,
+          `${localized(context.locale, 'transit', 'قيد النقل')} ${formatQuantity(row.availability.inTransit, context.locale)}`,
+          `${localized(context.locale, 'quarantine', 'حجر')} ${formatQuantity(row.availability.quarantine, context.locale)}`,
+          `${localized(context.locale, 'producible', 'قابل للإنتاج')} ${formatQuantity(row.availability.producible, context.locale)}`,
+          row.availability.nextExpiry
+            ? `${localized(context.locale, 'next expiry', 'أقرب انتهاء')} ${row.availability.nextExpiry.toISOString().slice(0, 10)}`
+            : null,
+          row.belowReorder ? localized(context.locale, 'Low stock', 'مخزون منخفض') : null,
+        ].filter(Boolean).join(' · '),
+        value: `${formatQuantity(row.availability.available, context.locale)} ${row.item.unit}`,
+        href: `/admin/records/inventory/${row.item.id}?locationId=${encodeURIComponent(location.value!.id)}`,
+      })),
+      href: `/inventory?locationId=${encodeURIComponent(location.value.id)}`,
+    }, context, 'inventory-location-summary');
+  }
   const items = await getInventoryItems(filters, buildBranchScope(context.user), range);
   const query = input.query?.trim().toLocaleLowerCase('ar-IQ') ?? null;
   const rows = items
@@ -1298,6 +1459,11 @@ async function prepareOrder(raw: unknown, context: ToolContext): Promise<ToolExe
   if (!governorate.ok) return governorate.result;
   if (!status.ok) return status.result;
   const statusRole = (await getOrderStatusRoleMap()).get(status.code) ?? 'UNKNOWN';
+  const inventoryV2 = getInventoryV2Config().enabled;
+  const fulfillmentLocation = inventoryV2
+    ? await resolveStockLocation(input.locationQuery, context, 'sell')
+    : { ok: true as const, value: null };
+  if (!fulfillmentLocation.ok) return fulfillmentLocation.result;
 
   let customerExternalId: string | null = null;
   let customerLabel = localized(context.locale, 'Walk-in / no customer', 'بيع مباشر / بدون عميل');
@@ -1461,7 +1627,12 @@ async function prepareOrder(raw: unknown, context: ToolContext): Promise<ToolExe
   );
   let financeAccountId: string | null = null;
   if ((financeMode === 'PAID' || financeMode === 'PARTIAL' || directAutomaticPayment) && accountQuery) {
-    const match = await matchFinanceAccount(accountQuery);
+    const match = await matchFinanceAccount(
+      accountQuery,
+      fulfillmentLocation.value
+        ? { locationIds: [fulfillmentLocation.value.id] }
+        : buildBranchScope(context.user),
+    );
     if (match.kind === 'none') return noMatch(context.locale, 'financeAccountQuery', localized(context.locale, 'finance account', 'حساب مالي'));
     if (match.kind === 'ambiguous') return ambiguousMatch(context.locale, 'financeAccountQuery', match.candidates, (row) => `${String(row.name)} · ${String(row.currency)}`, (row) => String(row.id));
     financeAccountId = match.value.id;
@@ -1501,6 +1672,13 @@ async function prepareOrder(raw: unknown, context: ToolContext): Promise<ToolExe
     channel: channel.code,
     governorate: governorate.code,
     fulfillmentMethod: input.fulfillmentMethod,
+    ...(fulfillmentLocation.value ? {
+      fulfillmentLocationId: fulfillmentLocation.value.id,
+      fulfillmentLocationName: context.locale === 'ar'
+        ? fulfillmentLocation.value.nameAr
+        : fulfillmentLocation.value.nameEn,
+      expectedLocationVersion: fulfillmentLocation.value.stockVersion,
+    } : {}),
     status: status.code,
     deliveryFee: input.deliveryFee,
     deliveryCost: input.deliveryCost,
@@ -1577,10 +1755,23 @@ async function prepareOrder(raw: unknown, context: ToolContext): Promise<ToolExe
       { label: localized(context.locale, 'Channel', 'القناة'), value: channelLabel },
       { label: localized(context.locale, 'Governorate', 'المحافظة'), value: governorateLabel },
       { label: localized(context.locale, 'Fulfillment', 'التجهيز'), value: fulfillmentLabel },
+      ...(fulfillmentLocation.value ? [{
+        label: localized(context.locale, 'Stock location', 'موقع المخزون'),
+        value: context.locale === 'ar'
+          ? fulfillmentLocation.value.nameAr
+          : fulfillmentLocation.value.nameEn,
+      }] : []),
       { label: localized(context.locale, 'Status', 'الحالة'), value: statusLabel },
       { label: localized(context.locale, 'Payment', 'الدفع'), value: validated.financeMode },
       { label: localized(context.locale, 'Total', 'الإجمالي'), value: formatMoney(total, 'IQD', context.locale) },
     ],
+    warnings: inventoryV2
+      ? [localized(
+          context.locale,
+          'Atlas rechecks local availability at confirmation. Any shortage keeps the order pending and creates a replenishment request; negative stock is never allowed.',
+          'يعيد أطلس فحص مخزون الموقع عند التأكيد. أي نقص يبقي الطلب قيد الانتظار وينشئ طلب تزويد؛ ولا يُسمح بالمخزون السالب.',
+        )]
+      : [],
   });
 }
 
@@ -1608,6 +1799,86 @@ type ResolvedBranch = {
   nameEn: string;
   nameAr: string;
 };
+
+type ResolvedStockLocation = {
+  id: string;
+  code: string;
+  nameEn: string;
+  nameAr: string;
+  type: string;
+  stockVersion: number;
+  branchId: string;
+  branch: { nameEn: string; nameAr: string };
+};
+
+async function resolveStockLocation(
+  query: string | null | undefined,
+  context: ToolContext,
+  permission: LocationPermission,
+): Promise<OptionalResolution<ResolvedStockLocation>> {
+  const rows = await prisma.stockLocation.findMany({
+    where: {
+      isActive: true,
+      ...stockLocationWhereForPermission(context.user, permission),
+    },
+    select: {
+      id: true,
+      code: true,
+      nameEn: true,
+      nameAr: true,
+      type: true,
+      stockVersion: true,
+      branchId: true,
+      branch: { select: { nameEn: true, nameAr: true } },
+    },
+    orderBy: [{ branch: { nameEn: 'asc' } }, { nameEn: 'asc' }],
+  });
+  if (!rows.length) {
+    return {
+      ok: false,
+      result: noMatch(context.locale, 'locationQuery', localized(context.locale, 'permitted stock location', 'موقع مخزون مسموح')),
+    };
+  }
+  if (!query) {
+    const preferred = rows.find((row) => row.id === context.user.defaultStockLocationId);
+    if (preferred) return { ok: true, value: preferred };
+    if (rows.length === 1) return { ok: true, value: rows[0] };
+    return {
+      ok: false,
+      result: ambiguousMatch(
+        context.locale,
+        'locationQuery',
+        rows,
+        (row) => `${context.locale === 'ar' ? row.nameAr : row.nameEn} · ${context.locale === 'ar' ? row.branch.nameAr : row.branch.nameEn} · ${row.code}`,
+        (row) => row.code,
+      ),
+    };
+  }
+  const normalized = normalizeAssistantText(query);
+  const names = (row: ResolvedStockLocation) => [row.id, row.code, row.nameEn, row.nameAr]
+    .map((value) => normalizeAssistantText(value));
+  const exact = rows.filter((row) => names(row).includes(normalized));
+  if (exact.length === 1) return { ok: true, value: exact[0] };
+  const candidates = exact.length > 1
+    ? exact
+    : rows.filter((row) => names(row).some((value) => value.includes(normalized))).slice(0, 8);
+  if (!candidates.length) {
+    return {
+      ok: false,
+      result: noMatch(context.locale, 'locationQuery', localized(context.locale, 'permitted stock location', 'موقع مخزون مسموح')),
+    };
+  }
+  return {
+    ok: false,
+    result: ambiguousMatch(
+      context.locale,
+      'locationQuery',
+      candidates,
+      (row) => `${context.locale === 'ar' ? row.nameAr : row.nameEn} · ${context.locale === 'ar' ? row.branch.nameAr : row.branch.nameEn} · ${row.code}`,
+      (row) => row.code,
+    ),
+  };
+}
 
 async function resolveOptionalParty(
   query: string | null,
@@ -1648,11 +1919,21 @@ async function resolveOptionalParty(
 
 async function resolveOptionalBranch(
   query: string | null,
-  locale: AppLocale,
+  context: ToolContext,
 ): Promise<OptionalResolution<ResolvedBranch>> {
   if (!query) return { ok: true, value: null };
+  const scope = buildBranchScope(context.user);
+  const accessWhere = scope.locationIds !== undefined
+    ? { stockLocations: { some: { id: { in: scope.locationIds } } } }
+    : scope.branchId
+      ? { id: scope.branchId }
+      : {};
   const rows = await prisma.branch.findMany({
-    where: { isActive: true, OR: [{ id: query }, { code: { equals: query, mode: 'insensitive' } }, { nameEn: { contains: query, mode: 'insensitive' } }, { nameAr: { contains: query, mode: 'insensitive' } }] },
+    where: {
+      isActive: true,
+      ...accessWhere,
+      OR: [{ id: query }, { code: { equals: query, mode: 'insensitive' } }, { nameEn: { contains: query, mode: 'insensitive' } }, { nameAr: { contains: query, mode: 'insensitive' } }],
+    },
     select: { id: true, code: true, nameEn: true, nameAr: true },
     take: 8,
   });
@@ -1660,10 +1941,10 @@ async function resolveOptionalBranch(
   if (rows.length > 1) {
     return {
       ok: false,
-      result: ambiguousMatch(locale, 'branchQuery', rows, (row) => `${String(row.nameEn)} / ${String(row.nameAr)}`, (row) => String(row.id)),
+      result: ambiguousMatch(context.locale, 'branchQuery', rows, (row) => `${String(row.nameEn)} / ${String(row.nameAr)}`, (row) => String(row.id)),
     };
   }
-  return { ok: false, result: noMatch(locale, 'branchQuery', localized(locale, 'branch', 'فرع')) };
+  return { ok: false, result: noMatch(context.locale, 'branchQuery', localized(context.locale, 'branch', 'فرع')) };
 }
 
 type FinanceEntryMatch = {
@@ -1699,7 +1980,7 @@ async function matchFinanceEntry(
   const scope = buildBranchScope(context.user);
   const rows = await prisma.financeEntry.findMany({
     where: {
-      ...(scope.branchId ? { branchId: scope.branchId } : {}),
+      ...buildFinanceEntryScopeWhere(scope),
       ...(options.obligationOnly ? { obligation: true } : {}),
       OR: [
         { id: query },
@@ -1757,6 +2038,7 @@ function financeEntryLabel(row: FinanceEntryMatch): string {
 async function resolveFinanceAccount(
   query: string | null,
   context: ToolContext,
+  scope: DataScope = buildBranchScope(context.user),
 ): Promise<{ ok: true; value: { id: string; name: string; currency: string } } | { ok: false; result: ToolExecution }> {
   const requested = query || context.user.defaultFinanceAccountId || null;
   if (!requested) {
@@ -1765,7 +2047,7 @@ async function resolveFinanceAccount(
       result: missingResult(context.locale, [localized(context.locale, 'payment account', 'حساب الدفع')]),
     };
   }
-  const account = await matchFinanceAccount(requested);
+  const account = await matchFinanceAccount(requested, scope);
   if (account.kind === 'none') return { ok: false, result: noMatch(context.locale, 'accountQuery', localized(context.locale, 'finance account', 'حساب مالي')) };
   if (account.kind === 'ambiguous') {
     return {
@@ -1835,7 +2117,7 @@ async function resolveLedgerLines(
       }
     }
 
-    const branch = await resolveOptionalBranch(input.branchQuery, context.locale);
+    const branch = await resolveOptionalBranch(input.branchQuery, context);
     if (!branch.ok) return branch;
     const unit = existingInventory?.unit || input.unit || (itemType === 'INVENTORY' ? null : 'unit');
     if (!unit) {
@@ -1916,7 +2198,7 @@ async function prepareExpense(raw: unknown, context: ToolContext): Promise<ToolE
   if (!account.ok) return account.result;
   const party = await resolveOptionalParty(input.partyQuery, context.locale, 'partyQuery', undefined, true, input.newParty);
   if (!party.ok) return party.result;
-  const branch = await resolveOptionalBranch(input.branchQuery, context.locale);
+  const branch = await resolveOptionalBranch(input.branchQuery, context);
   if (!branch.ok) return branch.result;
   const resolvedLines = input.lines
     ? await resolveLedgerLines(input.lines, context, branch.value?.id ?? null)
@@ -1991,7 +2273,7 @@ async function preparePurchase(raw: unknown, context: ToolContext): Promise<Tool
   const supplier = await resolveOptionalParty(input.supplierQuery, context.locale, 'supplierQuery', 'SUPPLIER', true, input.newSupplier);
   if (!supplier.ok) return supplier.result;
   if (!supplier.value && !supplier.newParty) return noMatch(context.locale, 'supplierQuery', localized(context.locale, 'supplier', 'مورد'));
-  const branch = await resolveOptionalBranch(input.branchQuery, context.locale);
+  const branch = await resolveOptionalBranch(input.branchQuery, context);
   if (!branch.ok) return branch.result;
   const resolvedLines = input.lines
     ? await resolveLedgerLines(input.lines, context, branch.value?.id ?? null)
@@ -2110,7 +2392,7 @@ async function prepareTransfer(raw: unknown, context: ToolContext): Promise<Tool
 
   const from = await resolveFinanceAccount(input.fromAccountQuery, context);
   if (!from.ok) return from.result;
-  const to = await matchFinanceAccount(input.toAccountQuery as string);
+  const to = await matchFinanceAccount(input.toAccountQuery as string, buildBranchScope(context.user));
   if (to.kind === 'none') {
     return noMatch(context.locale, 'toAccountQuery', localized(context.locale, 'destination account', 'الحساب المستلم'));
   }
@@ -2196,7 +2478,7 @@ async function prepareOrderStatus(raw: unknown, context: ToolContext): Promise<T
   );
   let accountId: string | null = null;
   if (accountQuery) {
-    const account = await matchFinanceAccount(accountQuery);
+    const account = await matchFinanceAccount(accountQuery, buildBranchScope(context.user));
     if (account.kind === 'none') return noMatch(context.locale, 'accountQuery', localized(context.locale, 'finance account', 'حساب مالي'));
     if (account.kind === 'ambiguous') return ambiguousMatch(context.locale, 'accountQuery', account.candidates, (row) => `${String(row.name)} · ${String(row.currency)}`, (row) => String(row.id));
     accountId = account.value.id;
@@ -2426,7 +2708,15 @@ async function prepareInventoryAdjustment(raw: unknown, context: ToolContext): P
   if (input.occurredAt && !dateValue(input.occurredAt)) missing.push(localized(context.locale, 'valid adjustment date', 'تاريخ تعديل صحيح'));
   if (missing.length) return missingResult(context.locale, missing);
 
-  const matched = await matchInventoryItem(input.inventoryItemQuery as string, buildBranchScope(context.user));
+  const inventoryV2 = getInventoryV2Config().enabled;
+  const location = inventoryV2
+    ? await resolveStockLocation(input.locationQuery, context, 'count')
+    : { ok: true as const, value: null };
+  if (!location.ok) return location.result;
+  const scope = location.value
+    ? { locationIds: [location.value.id] }
+    : buildBranchScope(context.user);
+  const matched = await matchInventoryItem(input.inventoryItemQuery as string, scope);
   if (matched.kind === 'none') return noMatch(context.locale, 'inventoryItemQuery', localized(context.locale, 'inventory item', 'مادة مخزون'));
   if (matched.kind === 'ambiguous') {
     return ambiguousMatch(
@@ -2440,6 +2730,7 @@ async function prepareInventoryAdjustment(raw: unknown, context: ToolContext): P
   const current = await prisma.stockMovement.aggregate({
     where: {
       inventoryItemId: matched.value.id,
+      ...buildMovementScopeWhere(scope),
       OR: [
         { financeEntryId: null },
         { financeEntry: { archivedAt: null, reversedAt: null, reversalOfId: null } },
@@ -2456,6 +2747,12 @@ async function prepareInventoryAdjustment(raw: unknown, context: ToolContext): P
     targetQuantity: input.targetQuantity,
     occurredAt: occurredAt.toISOString(),
     reason: input.reason,
+    ...(location.value ? {
+      locationId: location.value.id,
+      locationName: context.locale === 'ar' ? location.value.nameAr : location.value.nameEn,
+      expectedLocationVersion: location.value.stockVersion,
+      idempotencyKey: `ai-count:${context.sourceMessageId}`,
+    } : {}),
   });
   const delta = validated.targetQuantity - currentQuantity;
   return actionResult({
@@ -2463,16 +2760,1308 @@ async function prepareInventoryAdjustment(raw: unknown, context: ToolContext): P
     type: 'ADJUST_INVENTORY',
     extractedData: input,
     validatedData: validated,
-    title: localized(context.locale, 'Adjust inventory', 'تعديل المخزون'),
-    summary: localized(context.locale, `Set ${itemName} to the verified physical quantity.`, `ضبط ${itemName} على الكمية الفعلية المؤكدة.`),
+    title: inventoryV2
+      ? localized(context.locale, 'Submit inventory count', 'إرسال جرد مخزون')
+      : localized(context.locale, 'Adjust inventory', 'تعديل المخزون'),
+    summary: inventoryV2
+      ? localized(context.locale, `Submit the verified physical quantity for ${itemName} for central approval.`, `إرسال الكمية الفعلية المؤكدة لمادة ${itemName} للموافقة المركزية.`)
+      : localized(context.locale, `Set ${itemName} to the verified physical quantity.`, `ضبط ${itemName} على الكمية الفعلية المؤكدة.`),
     fields: [
       { label: localized(context.locale, 'Inventory item', 'مادة المخزون'), value: itemName },
+      ...(location.value ? [{
+        label: localized(context.locale, 'Location', 'الموقع'),
+        value: context.locale === 'ar' ? location.value.nameAr : location.value.nameEn,
+      }] : []),
       { label: localized(context.locale, 'Current quantity', 'الكمية الحالية'), value: `${formatQuantity(currentQuantity, context.locale)} ${matched.value.unit}` },
       { label: localized(context.locale, 'Target quantity', 'الكمية المستهدفة'), value: `${formatQuantity(validated.targetQuantity, context.locale)} ${matched.value.unit}` },
       { label: localized(context.locale, 'Difference', 'الفرق'), value: `${delta > 0 ? '+' : ''}${formatQuantity(delta, context.locale)} ${matched.value.unit}` },
       { label: localized(context.locale, 'Date', 'التاريخ'), value: validated.occurredAt.slice(0, 10) },
       { label: localized(context.locale, 'Reason', 'السبب'), value: validated.reason },
     ],
+    warnings: inventoryV2
+      ? [localized(
+          context.locale,
+          'Confirmation submits a count for Owner/Admin review. Stock changes only after approval.',
+          'يؤدي التأكيد إلى إرسال الجرد لمراجعة المالك/المشرف. لا يتغير المخزون إلا بعد الموافقة.',
+        )]
+      : [],
+  });
+}
+
+async function prepareStockReceipt(raw: unknown, context: ToolContext): Promise<ToolExecution> {
+  if (!getInventoryV2Config().enabled) throw new Error('inventory_v2_disabled');
+  const input = PrepareReceiveStockSchema.parse(raw);
+  const missing: string[] = [];
+  if (!input.inventoryItemQuery) missing.push(localized(context.locale, 'inventory item', 'مادة المخزون'));
+  if (input.quantity === null) missing.push(localized(context.locale, 'received quantity', 'الكمية المستلمة'));
+  if (input.unitCost === null) missing.push(localized(context.locale, 'unit cost', 'تكلفة الوحدة'));
+  if (!input.supplierQuery && !input.newSupplier) missing.push(localized(context.locale, 'supplier name or details', 'اسم المورد أو تفاصيله'));
+  if (!input.paymentMode) missing.push(localized(context.locale, 'payment mode', 'طريقة الدفع'));
+  if (input.occurredAt && !dateValue(input.occurredAt)) missing.push(localized(context.locale, 'valid receipt date', 'تاريخ استلام صحيح'));
+  if (input.bestBefore && !dateValue(input.bestBefore)) missing.push(localized(context.locale, 'valid best-before date', 'تاريخ صلاحية صحيح'));
+  if (input.dueDate && !dateValue(input.dueDate)) missing.push(localized(context.locale, 'valid due date', 'تاريخ استحقاق صحيح'));
+  if (missing.length) return missingResult(context.locale, missing);
+
+  const location = await resolveStockLocation(input.locationQuery, context, 'receive');
+  if (!location.ok) return location.result;
+  if (!location.value) return noMatch(context.locale, 'locationQuery', localized(context.locale, 'stock location', 'موقع مخزون'));
+  const item = await resolveInventoryForAction(
+    input.inventoryItemQuery,
+    'inventoryItemQuery',
+    context,
+    { locationIds: [location.value.id] },
+  );
+  if (!item.ok) return item.result;
+  if (!item.value) return noMatch(context.locale, 'inventoryItemQuery', localized(context.locale, 'inventory item', 'مادة مخزون'));
+  const supplier = await resolveOptionalParty(
+    input.supplierQuery,
+    context.locale,
+    'supplierQuery',
+    'SUPPLIER',
+    true,
+    input.newSupplier,
+  );
+  if (!supplier.ok) return supplier.result;
+  if (!supplier.value && !supplier.newParty) {
+    return missingResult(context.locale, [localized(context.locale, 'supplier', 'المورد')]);
+  }
+  const account = input.paymentMode === 'PAID'
+    ? await resolveFinanceAccount(input.accountQuery, context, { locationIds: [location.value.id] })
+    : { ok: true as const, value: null };
+  if (!account.ok) return account.result;
+
+  const occurredAt = dateValue(input.occurredAt) ?? context.now;
+  const bestBefore = dateValue(input.bestBefore);
+  const dueDate = input.paymentMode === 'CREDIT'
+    ? dateValue(input.dueDate) ?? occurredAt
+    : null;
+  const supplierName = supplier.value?.name ?? supplier.newParty!.name;
+  const locationName = context.locale === 'ar' ? location.value.nameAr : location.value.nameEn;
+  const validated = ResolvedStockReceiptActionSchema.parse({
+    inventoryItemId: item.value.id,
+    inventoryItemName: item.value.name,
+    inventoryUnit: item.value.unit,
+    locationId: location.value.id,
+    locationName,
+    expectedLocationVersion: location.value.stockVersion,
+    quantity: input.quantity,
+    unitCost: input.unitCost,
+    occurredAt: occurredAt.toISOString(),
+    bestBefore: bestBefore?.toISOString() ?? null,
+    supplierLot: input.supplierLot,
+    partyId: supplier.value?.id ?? null,
+    supplierName,
+    newSupplier: supplier.newParty,
+    paymentMode: input.paymentMode,
+    accountId: account.value?.id ?? null,
+    accountName: account.value?.name ?? null,
+    dueDate: dueDate?.toISOString() ?? null,
+    reference: input.reference,
+    notes: input.notes,
+    idempotencyKey: `ai-receipt:${context.sourceMessageId}`,
+  });
+  const total = validated.quantity * validated.unitCost;
+  return actionResult({
+    context,
+    type: 'RECEIVE_STOCK',
+    extractedData: input,
+    validatedData: validated,
+    title: localized(context.locale, 'Receive purchased stock', 'استلام مخزون مشتريات'),
+    summary: localized(
+      context.locale,
+      `Receive ${formatQuantity(validated.quantity, context.locale)} ${validated.inventoryUnit} of ${validated.inventoryItemName}.`,
+      `استلام ${formatQuantity(validated.quantity, context.locale)} ${validated.inventoryUnit} من ${validated.inventoryItemName}.`,
+    ),
+    fields: [
+      { label: localized(context.locale, 'Inventory item', 'مادة المخزون'), value: validated.inventoryItemName },
+      { label: localized(context.locale, 'Location', 'الموقع'), value: validated.locationName },
+      { label: localized(context.locale, 'Quantity', 'الكمية'), value: `${formatQuantity(validated.quantity, context.locale)} ${validated.inventoryUnit}` },
+      { label: localized(context.locale, 'Unit cost', 'تكلفة الوحدة'), value: formatMoney(validated.unitCost, 'IQD', context.locale) },
+      { label: localized(context.locale, 'Total cost', 'التكلفة الإجمالية'), value: formatMoney(total, 'IQD', context.locale) },
+      { label: localized(context.locale, 'Supplier', 'المورد'), value: validated.supplierName },
+      ...(validated.newSupplier ? [{
+        label: localized(context.locale, 'Supplier setup', 'إعداد المورد'),
+        value: localized(context.locale, 'Create new supplier with this receipt', 'إنشاء مورد جديد مع هذا الاستلام'),
+      }] : []),
+      { label: localized(context.locale, 'Payment', 'الدفع'), value: validated.paymentMode },
+      ...(validated.accountName ? [{ label: localized(context.locale, 'Payment account', 'حساب الدفع'), value: validated.accountName }] : []),
+      ...(validated.dueDate ? [{ label: localized(context.locale, 'Due date', 'تاريخ الاستحقاق'), value: validated.dueDate.slice(0, 10) }] : []),
+      { label: localized(context.locale, 'Receipt date', 'تاريخ الاستلام'), value: validated.occurredAt.slice(0, 10) },
+      ...(validated.bestBefore ? [{ label: localized(context.locale, 'Best before', 'الصلاحية'), value: validated.bestBefore.slice(0, 10) }] : []),
+      ...(validated.supplierLot ? [{ label: localized(context.locale, 'Supplier lot', 'دفعة المورد'), value: validated.supplierLot }] : []),
+      ...(validated.reference ? [{ label: localized(context.locale, 'Reference', 'المرجع'), value: validated.reference }] : []),
+      ...(validated.notes ? [{ label: localized(context.locale, 'Notes', 'الملاحظات'), value: validated.notes }] : []),
+    ],
+    warnings: [localized(
+      context.locale,
+      'Confirmation creates the supplier when needed, stock lot, inventory movement, and payable or payment atomically.',
+      'ينشئ التأكيد المورد عند الحاجة ودفعة المخزون وحركة المخزون والذمة أو الدفعة ضمن معاملة واحدة.',
+    )],
+  });
+}
+
+async function preparePackingRun(raw: unknown, context: ToolContext): Promise<ToolExecution> {
+  if (!getInventoryV2Config().enabled) throw new Error('inventory_v2_disabled');
+  const input = PreparePackingSchema.parse(raw);
+  const missing: string[] = [];
+  if (!input.outputInventoryItemQuery) missing.push(localized(context.locale, 'finished product or SKU', 'المنتج النهائي أو SKU'));
+  if (input.outputQuantity === null) missing.push(localized(context.locale, 'accepted output quantity', 'كمية الناتج المقبول'));
+  if (input.packedAt && !dateValue(input.packedAt)) missing.push(localized(context.locale, 'valid packing date', 'تاريخ تعبئة صحيح'));
+  if (input.bestBefore && !dateValue(input.bestBefore)) missing.push(localized(context.locale, 'valid best-before date', 'تاريخ صلاحية صحيح'));
+  if (missing.length) return missingResult(context.locale, missing);
+
+  const location = await resolveStockLocation(input.locationQuery, context, 'produce');
+  if (!location.ok) return location.result;
+  if (!location.value) return noMatch(context.locale, 'locationQuery', localized(context.locale, 'production location', 'موقع إنتاج'));
+  const output = await resolveInventoryForAction(
+    input.outputInventoryItemQuery,
+    'outputInventoryItemQuery',
+    context,
+    { locationIds: [location.value.id] },
+  );
+  if (!output.ok) return output.result;
+  if (!output.value) return noMatch(context.locale, 'outputInventoryItemQuery', localized(context.locale, 'finished inventory item', 'مادة مخزون نهائية'));
+  const outputRow = await prisma.inventoryItem.findUnique({
+    where: { id: output.value.id },
+    select: {
+      id: true,
+      productId: true,
+      product: { select: { id: true, sku: true, nameEn: true, nameAr: true, isActive: true } },
+    },
+  });
+  if (!outputRow?.productId || !outputRow.product?.isActive) {
+    return noMatch(context.locale, 'outputInventoryItemQuery', localized(context.locale, 'sellable product-linked inventory item', 'مادة مخزون مرتبطة بمنتج قابل للبيع'));
+  }
+  const recipe = await prisma.productRecipeVersion.findFirst({
+    where: { productId: outputRow.productId, isActive: true },
+    orderBy: [{ effectiveFrom: 'desc' }, { version: 'desc' }],
+    select: {
+      id: true,
+      version: true,
+      components: { select: { name: true, quantity: true, inventoryItemId: true }, orderBy: { id: 'asc' } },
+    },
+  });
+  if (!recipe?.components.length) {
+    return noMatch(context.locale, 'outputInventoryItemQuery', localized(context.locale, 'active product recipe', 'وصفة منتج فعالة'));
+  }
+  const packedAt = dateValue(input.packedAt) ?? context.now;
+  const bestBefore = dateValue(input.bestBefore);
+  const rejectedQuantity = input.rejectedQuantity ?? 0;
+  const productName = context.locale === 'ar'
+    ? outputRow.product.nameAr || outputRow.product.nameEn
+    : outputRow.product.nameEn || outputRow.product.nameAr;
+  const locationName = context.locale === 'ar' ? location.value.nameAr : location.value.nameEn;
+  const validated = ResolvedPackingActionSchema.parse({
+    locationId: location.value.id,
+    locationName,
+    expectedLocationVersion: location.value.stockVersion,
+    productId: outputRow.productId,
+    productName,
+    outputInventoryItemId: output.value.id,
+    outputInventoryItemName: output.value.name,
+    outputUnit: output.value.unit,
+    recipeVersionId: recipe.id,
+    recipeVersion: recipe.version,
+    outputQuantity: input.outputQuantity,
+    rejectedQuantity,
+    packedAt: packedAt.toISOString(),
+    bestBefore: bestBefore?.toISOString() ?? null,
+    notes: input.notes,
+    idempotencyKey: `ai-pack:${context.sourceMessageId}`,
+  });
+  const productionQuantity = validated.outputQuantity + validated.rejectedQuantity;
+  const components = recipe.components.map((component) => (
+    `${component.name}: ${formatQuantity(Number(component.quantity) * productionQuantity, context.locale)}`
+  ));
+  return actionResult({
+    context,
+    type: 'PACK_FINISHED_GOODS',
+    extractedData: input,
+    validatedData: validated,
+    title: localized(context.locale, 'Pack finished goods', 'تعبئة منتجات نهائية'),
+    summary: localized(
+      context.locale,
+      `Pack ${formatQuantity(validated.outputQuantity, context.locale)} ${validated.outputUnit} of ${validated.productName}.`,
+      `تعبئة ${formatQuantity(validated.outputQuantity, context.locale)} ${validated.outputUnit} من ${validated.productName}.`,
+    ),
+    fields: [
+      { label: localized(context.locale, 'Product', 'المنتج'), value: `${validated.productName} · ${outputRow.product.sku}` },
+      { label: localized(context.locale, 'Finished inventory item', 'مادة المخزون النهائية'), value: validated.outputInventoryItemName },
+      { label: localized(context.locale, 'Location', 'الموقع'), value: validated.locationName },
+      { label: localized(context.locale, 'Accepted output', 'الناتج المقبول'), value: `${formatQuantity(validated.outputQuantity, context.locale)} ${validated.outputUnit}` },
+      { label: localized(context.locale, 'Rejected output', 'الناتج المرفوض'), value: `${formatQuantity(validated.rejectedQuantity, context.locale)} ${validated.outputUnit}` },
+      { label: localized(context.locale, 'Recipe version', 'إصدار الوصفة'), value: String(validated.recipeVersion) },
+      { label: localized(context.locale, 'Materials consumed', 'المواد المستهلكة'), value: components.join(', ') },
+      { label: localized(context.locale, 'Packing date', 'تاريخ التعبئة'), value: validated.packedAt.slice(0, 10) },
+      ...(validated.bestBefore ? [{ label: localized(context.locale, 'Best before', 'الصلاحية'), value: validated.bestBefore.slice(0, 10) }] : []),
+      ...(validated.notes ? [{ label: localized(context.locale, 'Notes', 'الملاحظات'), value: validated.notes }] : []),
+    ],
+    warnings: [localized(
+      context.locale,
+      'Confirmation rechecks the active recipe, material availability, exact lots, and location version before consuming inputs and creating the finished lot.',
+      'يعيد التأكيد فحص الوصفة الفعالة وتوفر المواد والدفعات الدقيقة وإصدار الموقع قبل استهلاك المدخلات وإنشاء دفعة المنتج النهائي.',
+    )],
+  });
+}
+
+async function prepareDispatchStockTransfer(raw: unknown, context: ToolContext): Promise<ToolExecution> {
+  if (!getInventoryV2Config().enabled) throw new Error('inventory_v2_disabled');
+  const input = PrepareDispatchStockTransferSchema.parse(raw);
+  const missing: string[] = [];
+  if (!input.sourceLocationQuery) missing.push(localized(context.locale, 'source location', 'موقع المصدر'));
+  if (!input.destinationLocationQuery) missing.push(localized(context.locale, 'destination location', 'موقع الوجهة'));
+  if (!input.lines?.length) missing.push(localized(context.locale, 'at least one transfer item and quantity', 'مادة تحويل واحدة على الأقل مع الكمية'));
+  input.lines?.forEach((line, index) => {
+    if (!line.inventoryItemQuery) missing.push(localized(context.locale, `item ${index + 1}`, `المادة ${index + 1}`));
+    if (line.quantity === null) missing.push(localized(context.locale, `quantity ${index + 1}`, `الكمية ${index + 1}`));
+  });
+  if (input.occurredAt && !dateValue(input.occurredAt)) missing.push(localized(context.locale, 'valid dispatch date', 'تاريخ إرسال صحيح'));
+  if (input.expectedAt && !dateValue(input.expectedAt)) missing.push(localized(context.locale, 'valid expected arrival date', 'تاريخ وصول متوقع صحيح'));
+  if (missing.length) return missingResult(context.locale, missing);
+
+  const source = await resolveStockLocation(input.sourceLocationQuery, context, 'dispatch');
+  if (!source.ok) return source.result;
+  const destination = await resolveStockLocation(input.destinationLocationQuery, context, 'view');
+  if (!destination.ok) return destination.result;
+  if (!source.value || !destination.value) {
+    return missingResult(context.locale, [localized(context.locale, 'source and destination locations', 'موقعي المصدر والوجهة')]);
+  }
+  if (source.value.id === destination.value.id) {
+    return clarificationResult({
+      field: 'destinationLocationQuery',
+      message: localized(context.locale, 'Choose a destination different from the source.', 'اختر وجهة مختلفة عن المصدر.'),
+    });
+  }
+  const transit = await prisma.stockLocation.findFirst({
+    where: {
+      branchId: destination.value.branchId,
+      type: 'IN_TRANSIT',
+      isActive: true,
+      isSystem: true,
+    },
+    select: { id: true, nameEn: true, nameAr: true, stockVersion: true },
+  });
+  if (!transit) {
+    return noMatch(context.locale, 'destinationLocationQuery', localized(context.locale, 'destination transit location', 'موقع النقل المؤقت للوجهة'));
+  }
+  const consolidated = new Map<string, {
+    inventoryItemId: string;
+    inventoryItemName: string;
+    unit: string;
+    quantity: number;
+  }>();
+  for (const [index, line] of input.lines!.entries()) {
+    const item = await resolveInventoryForAction(
+      line.inventoryItemQuery,
+      `lines.${index}.inventoryItemQuery`,
+      context,
+      { locationIds: [source.value.id] },
+    );
+    if (!item.ok) return item.result;
+    if (!item.value) return noMatch(context.locale, `lines.${index}.inventoryItemQuery`, localized(context.locale, 'inventory item', 'مادة مخزون'));
+    const current = consolidated.get(item.value.id);
+    consolidated.set(item.value.id, {
+      inventoryItemId: item.value.id,
+      inventoryItemName: item.value.name,
+      unit: item.value.unit,
+      quantity: Number(((current?.quantity ?? 0) + line.quantity!).toFixed(3)),
+    });
+  }
+  const occurredAt = dateValue(input.occurredAt) ?? context.now;
+  const expectedAt = dateValue(input.expectedAt);
+  if (expectedAt && expectedAt < occurredAt) {
+    return clarificationResult({
+      field: 'expectedAt',
+      message: localized(context.locale, 'Expected arrival cannot be earlier than dispatch.', 'لا يمكن أن يسبق الوصول المتوقع تاريخ الإرسال.'),
+    });
+  }
+  const sourceName = context.locale === 'ar' ? source.value.nameAr : source.value.nameEn;
+  const destinationName = context.locale === 'ar' ? destination.value.nameAr : destination.value.nameEn;
+  const transitName = context.locale === 'ar' ? transit.nameAr : transit.nameEn;
+  const validated = ResolvedDispatchStockTransferActionSchema.parse({
+    sourceLocationId: source.value.id,
+    sourceLocationName: sourceName,
+    destinationLocationId: destination.value.id,
+    destinationLocationName: destinationName,
+    transitLocationId: transit.id,
+    transitLocationName: transitName,
+    expectedSourceVersion: source.value.stockVersion,
+    expectedTransitVersion: transit.stockVersion,
+    lines: [...consolidated.values()],
+    occurredAt: occurredAt.toISOString(),
+    expectedAt: expectedAt?.toISOString() ?? null,
+    notes: input.notes,
+    idempotencyKey: `ai-transfer-dispatch:${context.sourceMessageId}`,
+  });
+  return actionResult({
+    context,
+    type: 'DISPATCH_STOCK_TRANSFER',
+    extractedData: input,
+    validatedData: validated,
+    title: localized(context.locale, 'Dispatch stock transfer', 'إرسال تحويل مخزون'),
+    summary: localized(
+      context.locale,
+      `Dispatch ${validated.lines.length} item type(s) from ${sourceName} to ${destinationName}.`,
+      `إرسال ${validated.lines.length} نوع من المواد من ${sourceName} إلى ${destinationName}.`,
+    ),
+    fields: [
+      { label: localized(context.locale, 'Source', 'المصدر'), value: sourceName },
+      { label: localized(context.locale, 'Destination', 'الوجهة'), value: destinationName },
+      { label: localized(context.locale, 'In transit', 'قيد النقل'), value: transitName },
+      ...validated.lines.map((line, index) => ({
+        label: `${localized(context.locale, 'Item', 'المادة')} ${index + 1}`,
+        value: `${line.inventoryItemName} · ${formatQuantity(line.quantity, context.locale)} ${line.unit}`,
+      })),
+      { label: localized(context.locale, 'Dispatch date', 'تاريخ الإرسال'), value: validated.occurredAt.slice(0, 10) },
+      ...(validated.expectedAt ? [{ label: localized(context.locale, 'Expected arrival', 'الوصول المتوقع'), value: validated.expectedAt.slice(0, 10) }] : []),
+      ...(validated.notes ? [{ label: localized(context.locale, 'Notes', 'الملاحظات'), value: validated.notes }] : []),
+    ],
+    warnings: [localized(
+      context.locale,
+      'Confirmation consumes exact source lots and places the same quantities and costs in transit. Destination stock is unavailable until receipt.',
+      'يستهلك التأكيد دفعات المصدر الدقيقة ويضع الكميات والتكاليف نفسها قيد النقل. لا يتاح مخزون الوجهة حتى الاستلام.',
+    )],
+  });
+}
+
+type TransferReceiptItem = {
+  id: string;
+  externalKey: string | null;
+  nameEn: string;
+  nameAr: string;
+  unit: string;
+  outstanding: number;
+};
+
+function matchTransferReceiptItem(query: string, items: TransferReceiptItem[]) {
+  const normalized = normalizeAssistantText(query);
+  const values = (item: TransferReceiptItem) => [item.id, item.externalKey, item.nameEn, item.nameAr]
+    .filter(Boolean)
+    .map((value) => normalizeAssistantText(String(value)));
+  const exact = items.filter((item) => values(item).includes(normalized));
+  if (exact.length === 1) return { kind: 'one' as const, value: exact[0] };
+  const candidates = exact.length > 1
+    ? exact
+    : items.filter((item) => values(item).some((value) => value.includes(normalized)));
+  if (!candidates.length) return { kind: 'none' as const };
+  if (candidates.length === 1) return { kind: 'one' as const, value: candidates[0] };
+  return { kind: 'ambiguous' as const, candidates };
+}
+
+async function prepareReceiveStockTransfer(raw: unknown, context: ToolContext): Promise<ToolExecution> {
+  if (!getInventoryV2Config().enabled) throw new Error('inventory_v2_disabled');
+  const input = PrepareReceiveStockTransferSchema.parse(raw);
+  const missing: string[] = [];
+  if (!input.transferQuery) missing.push(localized(context.locale, 'transfer number', 'رقم التحويل'));
+  if (input.receiveAll !== true && !input.lines?.length && !input.discrepancies?.length) {
+    missing.push(localized(context.locale, 'receive all confirmation or received quantities', 'تأكيد استلام الكل أو الكميات المستلمة'));
+  }
+  if (input.receiveAll === true && input.lines?.length) {
+    return clarificationResult({
+      field: 'lines',
+      message: localized(context.locale, 'Choose receive all or list partial quantities, not both.', 'اختر استلام الكل أو اذكر الكميات الجزئية، وليس الاثنين معاً.'),
+    });
+  }
+  input.lines?.forEach((line, index) => {
+    if (!line.inventoryItemQuery) missing.push(localized(context.locale, `received item ${index + 1}`, `المادة المستلمة ${index + 1}`));
+    if (line.quantity === null) missing.push(localized(context.locale, `received quantity ${index + 1}`, `الكمية المستلمة ${index + 1}`));
+  });
+  input.discrepancies?.forEach((row, index) => {
+    if (!row.inventoryItemQuery) missing.push(localized(context.locale, `discrepancy item ${index + 1}`, `مادة الفرق ${index + 1}`));
+    if (!row.type) missing.push(localized(context.locale, `discrepancy type ${index + 1}`, `نوع الفرق ${index + 1}`));
+    if (row.quantity === null) missing.push(localized(context.locale, `discrepancy quantity ${index + 1}`, `كمية الفرق ${index + 1}`));
+    if (!row.notes || row.notes.length < 3) missing.push(localized(context.locale, `discrepancy evidence ${index + 1}`, `دليل الفرق ${index + 1}`));
+  });
+  if (input.occurredAt && !dateValue(input.occurredAt)) missing.push(localized(context.locale, 'valid receipt date', 'تاريخ استلام صحيح'));
+  if (missing.length) return missingResult(context.locale, missing);
+
+  const permittedLocationWhere = stockLocationWhereForPermission(context.user, 'receive');
+  const candidates = await prisma.stockDocument.findMany({
+    where: {
+      type: 'TRANSFER',
+      parentDocumentId: null,
+      status: { in: ['DISPATCHED', 'PARTIALLY_RECEIVED'] },
+      destinationLocation: { is: { isActive: true, ...permittedLocationWhere } },
+    },
+    select: {
+      id: true,
+      documentNumber: true,
+      version: true,
+      destinationLocationId: true,
+      destinationLocation: {
+        select: { id: true, branchId: true, nameEn: true, nameAr: true, stockVersion: true },
+      },
+    },
+    orderBy: { occurredAt: 'desc' },
+    take: 100,
+  });
+  const query = normalizeAssistantText(input.transferQuery!);
+  const exact = candidates.filter((row) => [row.id, row.documentNumber]
+    .map(normalizeAssistantText)
+    .includes(query));
+  const matches = exact.length
+    ? exact
+    : candidates.filter((row) => normalizeAssistantText(row.documentNumber).includes(query));
+  if (!matches.length) return noMatch(context.locale, 'transferQuery', localized(context.locale, 'receivable stock transfer', 'تحويل مخزون قابل للاستلام'));
+  if (matches.length > 1) {
+    return ambiguousMatch(
+      context.locale,
+      'transferQuery',
+      matches,
+      (row) => `${String(row.documentNumber)} · ${String(context.locale === 'ar' ? row.destinationLocation?.nameAr : row.destinationLocation?.nameEn)}`,
+      (row) => String(row.documentNumber),
+    );
+  }
+  const transfer = matches[0];
+  const destination = transfer.destinationLocation;
+  if (!destination || !transfer.destinationLocationId) {
+    return noMatch(context.locale, 'transferQuery', localized(context.locale, 'transfer destination', 'وجهة التحويل'));
+  }
+  const transit = await prisma.stockLocation.findFirst({
+    where: { branchId: destination.branchId, type: 'IN_TRANSIT', isActive: true, isSystem: true },
+    select: { id: true, nameEn: true, nameAr: true, stockVersion: true },
+  });
+  if (!transit) return noMatch(context.locale, 'transferQuery', localized(context.locale, 'destination transit location', 'موقع النقل المؤقت للوجهة'));
+  const outstandingLots = await prisma.$transaction((tx) => outstandingTransferLots(tx, transfer.id, transit.id));
+  const outstandingIds = [...outstandingLots.keys()];
+  if (!outstandingIds.length) {
+    return clarificationResult({
+      field: 'transferQuery',
+      message: localized(context.locale, 'This transfer has no outstanding stock to receive.', 'لا يحتوي هذا التحويل على مخزون متبقٍ للاستلام.'),
+    });
+  }
+  const inventoryRows = await prisma.inventoryItem.findMany({
+    where: { id: { in: outstandingIds } },
+    select: { id: true, externalKey: true, nameEn: true, nameAr: true, unit: true },
+  });
+  const items: TransferReceiptItem[] = inventoryRows.map((item) => ({
+    ...item,
+    outstanding: Number((outstandingLots.get(item.id) ?? []).reduce((sum, lot) => sum + lot.quantity, 0).toFixed(3)),
+  }));
+  const resolveItem = (itemQuery: string, field: string): ToolExecution | TransferReceiptItem => {
+    const matched = matchTransferReceiptItem(itemQuery, items);
+    if (matched.kind === 'none') return noMatch(context.locale, field, localized(context.locale, 'outstanding transfer item', 'مادة متبقية في التحويل'));
+    if (matched.kind === 'ambiguous') {
+      return ambiguousMatch(
+        context.locale,
+        field,
+        matched.candidates,
+        (row) => `${String(context.locale === 'ar' ? row.nameAr : row.nameEn)} · ${String(row.externalKey ?? row.id)} · ${String(row.outstanding)} ${String(row.unit)}`,
+        (row) => String(row.externalKey ?? row.id),
+      );
+    }
+    return matched.value;
+  };
+  const discrepancies: Array<z.infer<typeof ResolvedReceiveStockTransferActionSchema>['discrepancies'][number]> = [];
+  for (const [index, row] of (input.discrepancies ?? []).entries()) {
+    const resolved = resolveItem(row.inventoryItemQuery!, `discrepancies.${index}.inventoryItemQuery`);
+    if ('events' in resolved) return resolved;
+    discrepancies.push({
+      inventoryItemId: resolved.id,
+      inventoryItemName: context.locale === 'ar' ? resolved.nameAr || resolved.nameEn : resolved.nameEn || resolved.nameAr,
+      unit: resolved.unit,
+      type: row.type!,
+      quantity: row.quantity!,
+      notes: row.notes!,
+    });
+  }
+  const receivedByItem = new Map<string, number>();
+  if (input.receiveAll === true) {
+    for (const item of items) receivedByItem.set(item.id, item.outstanding);
+    for (const row of discrepancies) {
+      if (row.type !== 'EXCESS') {
+        receivedByItem.set(row.inventoryItemId, Number(Math.max(0, (receivedByItem.get(row.inventoryItemId) ?? 0) - row.quantity).toFixed(3)));
+      }
+    }
+  } else {
+    for (const [index, row] of (input.lines ?? []).entries()) {
+      const resolved = resolveItem(row.inventoryItemQuery!, `lines.${index}.inventoryItemQuery`);
+      if ('events' in resolved) return resolved;
+      receivedByItem.set(
+        resolved.id,
+        Number(((receivedByItem.get(resolved.id) ?? 0) + row.quantity!).toFixed(3)),
+      );
+    }
+  }
+  const byId = new Map(items.map((item) => [item.id, item]));
+  const lines = [...receivedByItem.entries()]
+    .filter(([, quantity]) => quantity > 0)
+    .map(([inventoryItemId, quantity]) => {
+      const item = byId.get(inventoryItemId)!;
+      return {
+        inventoryItemId,
+        inventoryItemName: context.locale === 'ar' ? item.nameAr || item.nameEn : item.nameEn || item.nameAr,
+        unit: item.unit,
+        quantity,
+      };
+    });
+  const occurredAt = dateValue(input.occurredAt) ?? context.now;
+  const destinationName = context.locale === 'ar' ? destination.nameAr : destination.nameEn;
+  const transitName = context.locale === 'ar' ? transit.nameAr : transit.nameEn;
+  const validated = ResolvedReceiveStockTransferActionSchema.parse({
+    stockDocumentId: transfer.id,
+    transferNumber: transfer.documentNumber,
+    expectedDocumentVersion: transfer.version,
+    destinationLocationId: destination.id,
+    destinationLocationName: destinationName,
+    transitLocationId: transit.id,
+    transitLocationName: transitName,
+    expectedDestinationVersion: destination.stockVersion,
+    expectedTransitVersion: transit.stockVersion,
+    lines,
+    discrepancies,
+    occurredAt: occurredAt.toISOString(),
+    notes: input.notes,
+    idempotencyKey: `ai-transfer-receive:${context.sourceMessageId}`,
+  });
+  return actionResult({
+    context,
+    type: 'RECEIVE_STOCK_TRANSFER',
+    extractedData: input,
+    validatedData: validated,
+    title: localized(context.locale, 'Receive stock transfer', 'استلام تحويل مخزون'),
+    summary: localized(
+      context.locale,
+      `Receive transfer ${validated.transferNumber} into ${destinationName}.`,
+      `استلام التحويل ${validated.transferNumber} في ${destinationName}.`,
+    ),
+    fields: [
+      { label: localized(context.locale, 'Transfer', 'التحويل'), value: validated.transferNumber },
+      { label: localized(context.locale, 'Destination', 'الوجهة'), value: destinationName },
+      ...validated.lines.map((line, index) => ({
+        label: `${localized(context.locale, 'Received item', 'المادة المستلمة')} ${index + 1}`,
+        value: `${line.inventoryItemName} · ${formatQuantity(line.quantity, context.locale)} ${line.unit}`,
+      })),
+      ...validated.discrepancies.map((row, index) => ({
+        label: `${localized(context.locale, 'Discrepancy', 'الفرق')} ${index + 1}`,
+        value: `${row.inventoryItemName} · ${row.type} · ${formatQuantity(row.quantity, context.locale)} ${row.unit} · ${row.notes}`,
+      })),
+      { label: localized(context.locale, 'Receipt date', 'تاريخ الاستلام'), value: validated.occurredAt.slice(0, 10) },
+      ...(validated.notes ? [{ label: localized(context.locale, 'Notes', 'الملاحظات'), value: validated.notes }] : []),
+    ],
+    warnings: validated.discrepancies.length
+      ? [localized(
+          context.locale,
+          'Confirmation receives only the listed quantities. Reported shortages, damage, or excess remain under central review and are never silently adjusted.',
+          'يستلم التأكيد الكميات المذكورة فقط. تبقى حالات النقص أو التلف أو الزيادة تحت المراجعة المركزية ولا تعدل بصمت.',
+        )]
+      : [localized(
+          context.locale,
+          'Confirmation moves the exact outstanding lots from transit into destination stock.',
+          'ينقل التأكيد الدفعات المتبقية الدقيقة من النقل المؤقت إلى مخزون الوجهة.',
+        )],
+  });
+}
+
+async function prepareLocalExpense(raw: unknown, context: ToolContext): Promise<ToolExecution> {
+  if (!getInventoryV2Config().enabled) throw new Error('inventory_v2_disabled');
+  const input = PrepareLocalExpenseSchema.parse(raw);
+  const missing: string[] = [];
+  if (input.amount === null) missing.push(localized(context.locale, 'expense amount', 'مبلغ المصروف'));
+  if (!input.categoryType) missing.push(localized(context.locale, 'routine expense category', 'فئة المصروف التشغيلي'));
+  if (!input.description || input.description.length < 3) missing.push(localized(context.locale, 'expense description', 'وصف المصروف'));
+  if (input.occurredAt && !dateValue(input.occurredAt)) missing.push(localized(context.locale, 'valid expense date', 'تاريخ مصروف صحيح'));
+  if (input.amount !== null && !Number.isInteger(input.amount)) {
+    return clarificationResult({
+      field: 'amount',
+      message: localized(context.locale, 'Enter the IQD amount as a whole number.', 'أدخل مبلغ الدينار العراقي كعدد صحيح.'),
+    });
+  }
+  if (missing.length) return missingResult(context.locale, missing);
+
+  const location = await resolveStockLocation(input.locationQuery, context, 'recordExpense');
+  if (!location.ok) return location.result;
+  if (!location.value) return noMatch(context.locale, 'locationQuery', localized(context.locale, 'expense location', 'موقع المصروف'));
+  if (!context.user.defaultFinanceAccountId) {
+    return clarificationResult({
+      field: 'account',
+      message: localized(
+        context.locale,
+        'A default sales-point expense account must be configured for this Atlas user before recording expenses.',
+        'يجب تهيئة حساب مصروفات افتراضي لنقطة البيع لهذا المستخدم قبل تسجيل المصروفات.',
+      ),
+    });
+  }
+  const [account, policy, attachments] = await Promise.all([
+    prisma.financeAccount.findUnique({
+      where: { id: context.user.defaultFinanceAccountId },
+      select: {
+        id: true,
+        name: true,
+        isActive: true,
+        currency: true,
+        type: true,
+        branchId: true,
+        stockLocationId: true,
+      },
+    }),
+    prisma.locationExpensePolicy.findUnique({
+      where: { locationId: location.value.id },
+      select: {
+        isActive: true,
+        allowedCategories: true,
+        maxImmediateAmount: true,
+        receiptRequiredAbove: true,
+      },
+    }),
+    prisma.aiAttachment.findMany({
+      where: {
+        userId: context.user.id,
+        sourceMessageId: context.sourceMessageId,
+        status: 'READY',
+        kind: { in: ['RECEIPT_IMAGE', 'DOCUMENT'] },
+        expiresAt: { gt: context.now },
+      },
+      select: { id: true, fileName: true },
+      orderBy: { createdAt: 'asc' },
+    }),
+  ]);
+  if (!account || !localExpenseAccountMatchesLocation(account, {
+    id: location.value.id,
+    branchId: location.value.branchId,
+  })) {
+    return clarificationResult({
+      field: 'account',
+      message: localized(
+        context.locale,
+        'The configured default expense account does not belong to this stock location.',
+        'حساب المصروف الافتراضي المهيأ لا يتبع موقع المخزون هذا.',
+      ),
+    });
+  }
+  if (attachments.length > 1) {
+    return clarificationResult({
+      field: 'receipt',
+      message: localized(
+        context.locale,
+        'Attach only one receipt image or PDF for each local expense.',
+        'أرفق صورة إيصال واحدة أو ملف PDF واحد لكل مصروف محلي.',
+      ),
+    });
+  }
+  const attachment = attachments[0] ?? null;
+  if (attachment && input.noReceiptReason) {
+    return clarificationResult({
+      field: 'noReceiptReason',
+      message: localized(context.locale, 'A receipt is attached, so remove the no-receipt reason.', 'يوجد إيصال مرفق، لذا احذف سبب عدم وجود الإيصال.'),
+    });
+  }
+  if (!attachment && (!input.noReceiptReason || input.noReceiptReason.length < 3)) {
+    return missingResult(context.locale, [localized(context.locale, 'receipt attachment or explicit no-receipt reason', 'إيصال مرفق أو سبب صريح لعدم وجوده')]);
+  }
+  const willRequireReview = localExpenseRequiresReview(policy, {
+    amount: input.amount!,
+    categoryType: input.categoryType!,
+    hasReceipt: Boolean(attachment),
+  });
+  const occurredAt = dateValue(input.occurredAt) ?? context.now;
+  const locationName = context.locale === 'ar' ? location.value.nameAr : location.value.nameEn;
+  const validated = ResolvedLocalExpenseActionSchema.parse({
+    userId: context.user.id,
+    locationId: location.value.id,
+    locationName,
+    expectedLocationVersion: location.value.stockVersion,
+    amount: input.amount,
+    categoryType: input.categoryType,
+    description: input.description,
+    occurredAt: occurredAt.toISOString(),
+    financeAccountId: account.id,
+    financeAccountName: account.name,
+    receiptAttachmentId: attachment?.id ?? null,
+    receiptFileName: attachment?.fileName ?? null,
+    noReceiptReason: input.noReceiptReason,
+    willRequireReview,
+    idempotencyKey: `ai-local-expense:${context.sourceMessageId}`,
+  });
+  return actionResult({
+    context,
+    type: 'RECORD_LOCAL_EXPENSE',
+    extractedData: input,
+    validatedData: validated,
+    title: localized(context.locale, 'Record local expense', 'تسجيل مصروف محلي'),
+    summary: localized(
+      context.locale,
+      `${willRequireReview ? 'Submit' : 'Post'} ${formatMoney(validated.amount, 'IQD', context.locale)} at ${locationName}.`,
+      `${willRequireReview ? 'إرسال' : 'ترحيل'} مصروف بقيمة ${formatMoney(validated.amount, 'IQD', context.locale)} في ${locationName}.`,
+    ),
+    fields: [
+      { label: localized(context.locale, 'Location', 'الموقع'), value: locationName },
+      { label: localized(context.locale, 'Amount', 'المبلغ'), value: formatMoney(validated.amount, 'IQD', context.locale) },
+      { label: localized(context.locale, 'Category', 'الفئة'), value: enumLabel(validated.categoryType, context.locale) },
+      { label: localized(context.locale, 'Description', 'الوصف'), value: validated.description },
+      { label: localized(context.locale, 'Account', 'الحساب'), value: validated.financeAccountName },
+      { label: localized(context.locale, 'Date', 'التاريخ'), value: validated.occurredAt.slice(0, 10) },
+      ...(validated.receiptFileName ? [{ label: localized(context.locale, 'Receipt', 'الإيصال'), value: validated.receiptFileName }] : []),
+      ...(validated.noReceiptReason ? [{ label: localized(context.locale, 'No-receipt reason', 'سبب عدم وجود الإيصال'), value: validated.noReceiptReason }] : []),
+      {
+        label: localized(context.locale, 'Handling', 'المعالجة'),
+        value: willRequireReview
+          ? localized(context.locale, 'Submit for central review', 'إرسال للمراجعة المركزية')
+          : localized(context.locale, 'Post immediately under location policy', 'ترحيل فوري وفق سياسة الموقع'),
+      },
+    ],
+    warnings: [localized(
+      context.locale,
+      willRequireReview
+        ? 'Confirmation creates an auditable request only. Finance is posted after central approval.'
+        : 'Confirmation records the local OPEX against the configured location account.',
+      willRequireReview
+        ? 'ينشئ التأكيد طلباً مدققاً فقط. يُرحل القيد المالي بعد الموافقة المركزية.'
+        : 'يسجل التأكيد المصروف التشغيلي المحلي على حساب الموقع المهيأ.',
+    )],
+  });
+}
+
+async function prepareReturnToQuarantine(raw: unknown, context: ToolContext): Promise<ToolExecution> {
+  if (!getInventoryV2Config().enabled) throw new Error('inventory_v2_disabled');
+  const input = PrepareReturnToQuarantineSchema.parse(raw);
+  const missing: string[] = [];
+  if (!input.orderQuery) missing.push(localized(context.locale, 'order', 'الطلب'));
+  if (input.quantity === null) missing.push(localized(context.locale, 'return quantity', 'كمية الإرجاع'));
+  if (!input.reason || input.reason.length < 3) missing.push(localized(context.locale, 'return reason', 'سبب الإرجاع'));
+  if (input.occurredAt && !dateValue(input.occurredAt)) missing.push(localized(context.locale, 'valid return date', 'تاريخ إرجاع صحيح'));
+  if (input.quantity !== null && !Number.isInteger(input.quantity * 1000)) {
+    return clarificationResult({
+      field: 'quantity',
+      message: localized(context.locale, 'Return quantity supports at most three decimal places.', 'تدعم كمية الإرجاع ثلاث مراتب عشرية كحد أقصى.'),
+    });
+  }
+  if (missing.length) return missingResult(context.locale, missing);
+
+  const scope = buildBranchScope(context.user);
+  const matched = await matchOrder(input.orderQuery!, scope);
+  if (matched.kind === 'none') return noMatch(context.locale, 'orderQuery', localized(context.locale, 'order', 'طلب'));
+  if (matched.kind === 'ambiguous') {
+    return ambiguousMatch(
+      context.locale,
+      'orderQuery',
+      matched.candidates,
+      (row) => `${String(row.orderNumber)} · ${String(row.status)}`,
+      (row) => String(row.orderNumber),
+    );
+  }
+  const order = await prisma.order.findFirst({
+    where: { id: matched.value.id, ...buildOrderScopeWhere(scope) },
+    select: {
+      id: true,
+      orderNumber: true,
+      fulfillmentLocation: {
+        select: {
+          id: true,
+          branchId: true,
+          nameEn: true,
+          nameAr: true,
+          stockVersion: true,
+          isActive: true,
+          isSystem: true,
+        },
+      },
+      lines: {
+        select: {
+          id: true,
+          sku: true,
+          product: { select: { nameEn: true, nameAr: true } },
+          stockMovements: {
+            where: { reason: { in: ['SOLD', 'QUARANTINE'] }, costLayerId: { not: null } },
+            select: {
+              reason: true,
+              quantity: true,
+              inventoryItem: { select: { id: true, nameEn: true, nameAr: true, unit: true, isActive: true } },
+            },
+          },
+        },
+      },
+    },
+  });
+  const fulfillment = order?.fulfillmentLocation;
+  if (!order || !fulfillment?.isActive || fulfillment.isSystem) {
+    return clarificationResult({
+      field: 'orderQuery',
+      message: localized(context.locale, 'That order has no active fulfillment location for a traceable return.', 'لا يملك هذا الطلب موقع تجهيز فعالاً لإرجاع قابل للتتبع.'),
+    });
+  }
+  const permitted = await prisma.stockLocation.findFirst({
+    where: {
+      id: fulfillment.id,
+      ...stockLocationWhereForPermission(context.user, 'receive'),
+    },
+    select: { id: true },
+  });
+  if (!permitted) {
+    return clarificationResult({
+      field: 'orderQuery',
+      message: localized(context.locale, 'You cannot receive returns for that order location.', 'لا تملك صلاحية استلام إرجاعات في موقع هذا الطلب.'),
+    });
+  }
+  const quarantine = await prisma.stockLocation.findFirst({
+    where: {
+      branchId: fulfillment.branchId,
+      type: 'QUARANTINE',
+      isActive: true,
+      isSystem: true,
+    },
+    select: { id: true, nameEn: true, nameAr: true, stockVersion: true },
+  });
+  if (!quarantine) {
+    return clarificationResult({
+      field: 'orderQuery',
+      message: localized(context.locale, 'The order branch has no active quarantine location.', 'لا يملك فرع الطلب موقع حجر فعالاً.'),
+    });
+  }
+  const lines = order.lines.flatMap((line) => {
+    const sold = line.stockMovements.filter((movement) => movement.reason === 'SOLD');
+    const returned = line.stockMovements.filter((movement) => movement.reason === 'QUARANTINE');
+    const itemIds = [...new Set(sold.map((movement) => movement.inventoryItem.id))];
+    if (itemIds.length !== 1) return [];
+    const item = sold.find((movement) => movement.inventoryItem.id === itemIds[0])?.inventoryItem;
+    if (!item?.isActive) return [];
+    const soldQuantity = sold.reduce(
+      (sum, movement) => sum + Math.abs(Math.min(0, Number(movement.quantity))),
+      0,
+    );
+    const returnedQuantity = returned.reduce(
+      (sum, movement) => sum + Math.max(0, Number(movement.quantity)),
+      0,
+    );
+    const returnableQuantity = Number(Math.max(0, soldQuantity - returnedQuantity).toFixed(3));
+    if (returnableQuantity <= 0) return [];
+    return [{ ...line, inventoryItem: item, returnableQuantity }];
+  });
+  if (!lines.length) {
+    return clarificationResult({
+      field: 'orderQuery',
+      message: localized(context.locale, 'This order has no traceable sold stock remaining for return.', 'لا يحتوي هذا الطلب مخزوناً مباعاً قابلاً للتتبع ومتبقياً للإرجاع.'),
+    });
+  }
+  const normalizedProduct = input.productQuery ? normalizeAssistantText(input.productQuery) : null;
+  const exact = normalizedProduct
+    ? lines.filter((line) => [
+        line.id,
+        line.sku,
+        line.product.nameEn,
+        line.product.nameAr,
+        line.inventoryItem.id,
+        line.inventoryItem.nameEn,
+        line.inventoryItem.nameAr,
+      ].map(normalizeAssistantText).includes(normalizedProduct))
+    : [];
+  const candidates = exact.length
+    ? exact
+    : normalizedProduct
+      ? lines.filter((line) => [line.sku, line.product.nameEn, line.product.nameAr, line.inventoryItem.nameEn, line.inventoryItem.nameAr]
+          .map(normalizeAssistantText)
+          .some((value) => value.includes(normalizedProduct)))
+      : lines;
+  if (candidates.length !== 1) {
+    if (!candidates.length) return noMatch(context.locale, 'productQuery', localized(context.locale, 'returnable order item', 'مادة طلب قابلة للإرجاع'));
+    return ambiguousMatch(
+      context.locale,
+      'productQuery',
+      candidates,
+      (line) => `${context.locale === 'ar' ? line.product.nameAr || line.product.nameEn : line.product.nameEn || line.product.nameAr} · ${line.sku} · ${formatQuantity(line.returnableQuantity, context.locale)} ${line.inventoryItem.unit}`,
+      (line) => line.id,
+    );
+  }
+  const line = candidates[0];
+  if (input.quantity! - line.returnableQuantity > 0.0005) {
+    return clarificationResult({
+      field: 'quantity',
+      message: localized(
+        context.locale,
+        `Only ${formatQuantity(line.returnableQuantity, context.locale)} ${line.inventoryItem.unit} remains returnable on this line.`,
+        `المتبقي القابل للإرجاع في هذا البند هو ${formatQuantity(line.returnableQuantity, context.locale)} ${line.inventoryItem.unit} فقط.`,
+      ),
+    });
+  }
+  const occurredAt = dateValue(input.occurredAt) ?? context.now;
+  const productName = context.locale === 'ar' ? line.product.nameAr || line.product.nameEn : line.product.nameEn || line.product.nameAr;
+  const itemName = context.locale === 'ar'
+    ? line.inventoryItem.nameAr || line.inventoryItem.nameEn
+    : line.inventoryItem.nameEn || line.inventoryItem.nameAr;
+  const fulfillmentName = context.locale === 'ar' ? fulfillment.nameAr || fulfillment.nameEn : fulfillment.nameEn || fulfillment.nameAr;
+  const quarantineName = context.locale === 'ar' ? quarantine.nameAr || quarantine.nameEn : quarantine.nameEn || quarantine.nameAr;
+  const validated = ResolvedReturnToQuarantineActionSchema.parse({
+    orderId: order.id,
+    orderNumber: order.orderNumber,
+    orderLineId: line.id,
+    productName,
+    sku: line.sku,
+    inventoryItemId: line.inventoryItem.id,
+    inventoryItemName: itemName,
+    unit: line.inventoryItem.unit,
+    fulfillmentLocationId: fulfillment.id,
+    fulfillmentLocationName: fulfillmentName,
+    expectedFulfillmentVersion: fulfillment.stockVersion,
+    quarantineLocationId: quarantine.id,
+    quarantineLocationName: quarantineName,
+    expectedQuarantineVersion: quarantine.stockVersion,
+    quantity: input.quantity,
+    occurredAt: occurredAt.toISOString(),
+    reason: input.reason,
+    idempotencyKey: `ai-return-quarantine:${context.sourceMessageId}`,
+  });
+  return actionResult({
+    context,
+    type: 'RETURN_TO_QUARANTINE',
+    extractedData: input,
+    validatedData: validated,
+    title: localized(context.locale, 'Return goods to quarantine', 'إرجاع البضاعة إلى الحجر'),
+    summary: localized(
+      context.locale,
+      `Return ${formatQuantity(validated.quantity, context.locale)} ${validated.unit} from ${validated.orderNumber} to quarantine.`,
+      `إرجاع ${formatQuantity(validated.quantity, context.locale)} ${validated.unit} من ${validated.orderNumber} إلى الحجر.`,
+    ),
+    fields: [
+      { label: localized(context.locale, 'Order', 'الطلب'), value: validated.orderNumber },
+      { label: localized(context.locale, 'Product', 'المنتج'), value: `${validated.productName} · ${validated.sku}` },
+      { label: localized(context.locale, 'Inventory item', 'مادة المخزون'), value: validated.inventoryItemName },
+      { label: localized(context.locale, 'Quantity', 'الكمية'), value: `${formatQuantity(validated.quantity, context.locale)} ${validated.unit}` },
+      { label: localized(context.locale, 'From', 'من'), value: validated.fulfillmentLocationName },
+      { label: localized(context.locale, 'To', 'إلى'), value: validated.quarantineLocationName },
+      { label: localized(context.locale, 'Date', 'التاريخ'), value: validated.occurredAt.slice(0, 10) },
+      { label: localized(context.locale, 'Reason', 'السبب'), value: validated.reason },
+    ],
+    warnings: [localized(
+      context.locale,
+      'Returned goods remain unavailable for sale until central operations records an inspected disposition.',
+      'تبقى البضاعة المرتجعة غير متاحة للبيع حتى تسجل العمليات المركزية نتيجة الفحص والمعالجة.',
+    )],
+  });
+}
+
+async function prepareDisposeReturnedGoods(raw: unknown, context: ToolContext): Promise<ToolExecution> {
+  if (!getInventoryV2Config().enabled) throw new Error('inventory_v2_disabled');
+  const input = PrepareDisposeReturnedGoodsSchema.parse(raw);
+  const missing: string[] = [];
+  if (!input.returnQuery) missing.push(localized(context.locale, 'return document', 'مستند الإرجاع'));
+  if (input.quantity === null) missing.push(localized(context.locale, 'disposition quantity', 'كمية المعالجة'));
+  if (!input.disposition) missing.push(localized(context.locale, 'disposition', 'نوع المعالجة'));
+  if (!input.reason || input.reason.length < 3) missing.push(localized(context.locale, 'inspection reason', 'سبب المعالجة بعد الفحص'));
+  if (input.occurredAt && !dateValue(input.occurredAt)) missing.push(localized(context.locale, 'valid disposition date', 'تاريخ معالجة صحيح'));
+  if (input.quantity !== null && !Number.isInteger(input.quantity * 1000)) {
+    return clarificationResult({
+      field: 'quantity',
+      message: localized(context.locale, 'Disposition quantity supports at most three decimal places.', 'تدعم كمية المعالجة ثلاث مراتب عشرية كحد أقصى.'),
+    });
+  }
+  if (missing.length) return missingResult(context.locale, missing);
+
+  const documents = await prisma.stockDocument.findMany({
+    where: {
+      type: 'RETURN',
+      destinationLocation: { is: { type: 'QUARANTINE', isActive: true } },
+      OR: [
+        { id: input.returnQuery! },
+        { documentNumber: { contains: input.returnQuery!, mode: 'insensitive' } },
+      ],
+    },
+    select: {
+      id: true,
+      documentNumber: true,
+      version: true,
+      destinationLocation: { select: { id: true, branchId: true, nameEn: true, nameAr: true, stockVersion: true } },
+    },
+    orderBy: { occurredAt: 'desc' },
+    take: 8,
+  });
+  const normalizedDocument = normalizeAssistantText(input.returnQuery!);
+  const exactDocuments = documents.filter((document) => (
+    document.id === input.returnQuery || normalizeAssistantText(document.documentNumber) === normalizedDocument
+  ));
+  const documentCandidates = exactDocuments.length ? exactDocuments : documents;
+  if (!documentCandidates.length) return noMatch(context.locale, 'returnQuery', localized(context.locale, 'return document', 'مستند إرجاع'));
+  if (documentCandidates.length > 1) {
+    return ambiguousMatch(
+      context.locale,
+      'returnQuery',
+      documentCandidates,
+      (document) => document.documentNumber,
+      (document) => document.documentNumber,
+    );
+  }
+  const document = documentCandidates[0];
+  const quarantineLocation = document.destinationLocation;
+  if (!quarantineLocation) {
+    return clarificationResult({
+      field: 'returnQuery',
+      message: localized(context.locale, 'The return document has no quarantine destination.', 'لا يحتوي مستند الإرجاع على وجهة حجر.'),
+    });
+  }
+  const returned = await getReturnedLotBalances(prisma, document.id);
+  const quantities = new Map<string, number>();
+  for (const lot of returned.lots) {
+    quantities.set(lot.inventoryItemId, Number(((quantities.get(lot.inventoryItemId) ?? 0) + lot.quantity).toFixed(3)));
+  }
+  const items = await prisma.inventoryItem.findMany({
+    where: { id: { in: [...quantities.keys()] }, isActive: true },
+    select: { id: true, nameEn: true, nameAr: true, unit: true },
+    orderBy: { nameEn: 'asc' },
+  });
+  const normalizedItem = input.inventoryItemQuery ? normalizeAssistantText(input.inventoryItemQuery) : null;
+  const exactItems = normalizedItem
+    ? items.filter((item) => [item.id, item.nameEn, item.nameAr].map(normalizeAssistantText).includes(normalizedItem))
+    : [];
+  const itemCandidates = exactItems.length
+    ? exactItems
+    : normalizedItem
+      ? items.filter((item) => [item.nameEn, item.nameAr].map(normalizeAssistantText).some((value) => value.includes(normalizedItem)))
+      : items;
+  if (!itemCandidates.length) return noMatch(context.locale, 'inventoryItemQuery', localized(context.locale, 'returned inventory item', 'مادة مخزون مرتجعة'));
+  if (itemCandidates.length > 1) {
+    return ambiguousMatch(
+      context.locale,
+      'inventoryItemQuery',
+      itemCandidates,
+      (item) => `${context.locale === 'ar' ? item.nameAr || item.nameEn : item.nameEn || item.nameAr} · ${formatQuantity(quantities.get(item.id) ?? 0, context.locale)} ${item.unit}`,
+      (item) => item.id,
+    );
+  }
+  const item = itemCandidates[0];
+  const availableQuantity = quantities.get(item.id) ?? 0;
+  if (input.quantity! - availableQuantity > 0.0005) {
+    return clarificationResult({
+      field: 'quantity',
+      message: localized(
+        context.locale,
+        `Only ${formatQuantity(availableQuantity, context.locale)} ${item.unit} remains in quarantine for this return.`,
+        `المتبقي في الحجر لهذا الإرجاع هو ${formatQuantity(availableQuantity, context.locale)} ${item.unit} فقط.`,
+      ),
+    });
+  }
+
+  const needsDestination = input.disposition === 'RESTOCK' || input.disposition === 'REPACK';
+  if (!needsDestination && input.destinationLocationQuery) {
+    return clarificationResult({
+      field: 'destinationLocationQuery',
+      message: localized(context.locale, 'That disposition does not use a destination stock location.', 'نوع المعالجة هذا لا يستخدم موقع مخزون وجهة.'),
+    });
+  }
+  const destination = needsDestination
+    ? await resolveStockLocation(input.destinationLocationQuery, context, 'approve')
+    : { ok: true as const, value: null };
+  if (!destination.ok) return destination.result;
+  if (needsDestination && !destination.value) {
+    return missingResult(context.locale, [localized(context.locale, 'destination location', 'موقع الوجهة')]);
+  }
+  if (destination.value) {
+    if (destination.value.branchId !== quarantineLocation.branchId || destination.value.id === quarantineLocation.id) {
+      return clarificationResult({
+        field: 'destinationLocationQuery',
+        message: localized(context.locale, 'Choose a different destination in the same branch as quarantine.', 'اختر وجهة مختلفة ضمن فرع موقع الحجر نفسه.'),
+      });
+    }
+    if (input.disposition === 'REPACK' && destination.value.type !== 'PACKING') {
+      return clarificationResult({
+        field: 'destinationLocationQuery',
+        message: localized(context.locale, 'Repacking requires an active packing location.', 'إعادة التعبئة تتطلب موقع تعبئة فعالاً.'),
+      });
+    }
+    const policy = await prisma.inventoryLocationPolicy.findUnique({
+      where: { inventoryItemId_locationId: { inventoryItemId: item.id, locationId: destination.value.id } },
+      select: { isActive: true, canSell: true, canProduce: true },
+    });
+    const permittedPolicy = input.disposition === 'RESTOCK' ? policy?.canSell : policy?.canProduce;
+    if (!policy?.isActive || !permittedPolicy) {
+      return clarificationResult({
+        field: 'destinationLocationQuery',
+        message: localized(context.locale, 'The returned item is not configured for this destination.', 'المادة المرتجعة غير مهيأة لهذه الوجهة.'),
+      });
+    }
+  }
+
+  if (input.disposition === 'RETURN_TO_SUPPLIER' && !input.supplierQuery) {
+    return missingResult(context.locale, [localized(context.locale, 'supplier', 'المورد')]);
+  }
+  if (input.disposition !== 'RETURN_TO_SUPPLIER' && input.supplierQuery) {
+    return clarificationResult({
+      field: 'supplierQuery',
+      message: localized(context.locale, 'A supplier is used only for return-to-supplier disposition.', 'يستخدم المورد فقط عند معالجة الإرجاع إلى المورد.'),
+    });
+  }
+  let supplier: { id: string; name: string } | null = null;
+  if (input.supplierQuery) {
+    const matchedSupplier = await matchParty(input.supplierQuery, 'SUPPLIER');
+    if (matchedSupplier.kind === 'none') return noMatch(context.locale, 'supplierQuery', localized(context.locale, 'supplier', 'مورد'));
+    if (matchedSupplier.kind === 'ambiguous') {
+      return ambiguousMatch(context.locale, 'supplierQuery', matchedSupplier.candidates, (row) => row.name, (row) => row.id);
+    }
+    supplier = { id: matchedSupplier.value.id, name: matchedSupplier.value.name };
+  }
+  const occurredAt = dateValue(input.occurredAt) ?? context.now;
+  const itemName = context.locale === 'ar' ? item.nameAr || item.nameEn : item.nameEn || item.nameAr;
+  const quarantineName = context.locale === 'ar'
+    ? quarantineLocation.nameAr || quarantineLocation.nameEn
+    : quarantineLocation.nameEn || quarantineLocation.nameAr;
+  const destinationName = destination.value
+    ? context.locale === 'ar' ? destination.value.nameAr || destination.value.nameEn : destination.value.nameEn || destination.value.nameAr
+    : null;
+  const validated = ResolvedDisposeReturnedGoodsActionSchema.parse({
+    returnDocumentId: document.id,
+    returnDocumentNumber: document.documentNumber,
+    expectedReturnDocumentVersion: document.version,
+    inventoryItemId: item.id,
+    inventoryItemName: itemName,
+    unit: item.unit,
+    quarantineLocationId: quarantineLocation.id,
+    quarantineLocationName: quarantineName,
+    expectedQuarantineVersion: quarantineLocation.stockVersion,
+    quantity: input.quantity,
+    disposition: input.disposition,
+    destinationLocationId: destination.value?.id ?? null,
+    destinationLocationName: destinationName,
+    expectedDestinationVersion: destination.value?.stockVersion ?? null,
+    supplierPartyId: supplier?.id ?? null,
+    supplierName: supplier?.name ?? null,
+    occurredAt: occurredAt.toISOString(),
+    reason: input.reason,
+    idempotencyKey: `ai-return-disposition:${context.sourceMessageId}`,
+  });
+  return actionResult({
+    context,
+    type: 'DISPOSE_RETURNED_GOODS',
+    extractedData: input,
+    validatedData: validated,
+    title: localized(context.locale, 'Dispose returned goods', 'معالجة البضاعة المرتجعة'),
+    summary: localized(
+      context.locale,
+      `${validated.disposition}: ${formatQuantity(validated.quantity, context.locale)} ${validated.unit} from ${validated.returnDocumentNumber}.`,
+      `${validated.disposition}: معالجة ${formatQuantity(validated.quantity, context.locale)} ${validated.unit} من ${validated.returnDocumentNumber}.`,
+    ),
+    fields: [
+      { label: localized(context.locale, 'Return document', 'مستند الإرجاع'), value: validated.returnDocumentNumber },
+      { label: localized(context.locale, 'Item', 'المادة'), value: validated.inventoryItemName },
+      { label: localized(context.locale, 'Quantity', 'الكمية'), value: `${formatQuantity(validated.quantity, context.locale)} ${validated.unit}` },
+      { label: localized(context.locale, 'Disposition', 'المعالجة'), value: validated.disposition },
+      { label: localized(context.locale, 'Quarantine', 'الحجر'), value: validated.quarantineLocationName },
+      ...(validated.destinationLocationName ? [{ label: localized(context.locale, 'Destination', 'الوجهة'), value: validated.destinationLocationName }] : []),
+      ...(validated.supplierName ? [{ label: localized(context.locale, 'Supplier', 'المورد'), value: validated.supplierName }] : []),
+      { label: localized(context.locale, 'Date', 'التاريخ'), value: validated.occurredAt.slice(0, 10) },
+      { label: localized(context.locale, 'Reason', 'السبب'), value: validated.reason },
+    ],
+    warnings: [localized(
+      context.locale,
+      validated.disposition === 'WASTE'
+        ? 'Confirmation permanently removes the selected quarantined lots and posts the configured inventory loss.'
+        : 'Confirmation moves only the exact selected returned lots and preserves their original costs.',
+      validated.disposition === 'WASTE'
+        ? 'يزيل التأكيد الدفعات المحددة من الحجر نهائياً ويرحل خسارة المخزون المهيأة.'
+        : 'ينقل التأكيد دفعات الإرجاع المحددة فقط مع الحفاظ على تكلفتها الأصلية.',
+    )],
+  });
+}
+
+async function prepareReverseStockDocument(raw: unknown, context: ToolContext): Promise<ToolExecution> {
+  if (!getInventoryV2Config().enabled) throw new Error('inventory_v2_disabled');
+  const input = PrepareReverseStockDocumentSchema.parse(raw);
+  const missing: string[] = [];
+  if (!input.documentQuery) missing.push(localized(context.locale, 'stock document', 'مستند المخزون'));
+  if (!input.reason || input.reason.length < 3) missing.push(localized(context.locale, 'reversal reason', 'سبب العكس'));
+  if (input.occurredAt && !dateValue(input.occurredAt)) missing.push(localized(context.locale, 'valid reversal date', 'تاريخ عكس صحيح'));
+  if (missing.length) return missingResult(context.locale, missing);
+
+  const documents = await prisma.stockDocument.findMany({
+    where: {
+      OR: [
+        { id: input.documentQuery! },
+        { documentNumber: { contains: input.documentQuery!, mode: 'insensitive' } },
+      ],
+    },
+    include: {
+      parentDocument: { select: { type: true } },
+      childDocuments: { select: { type: true, status: true } },
+      movements: {
+        select: {
+          locationId: true,
+          location: { select: { id: true, nameEn: true, nameAr: true, isActive: true, stockVersion: true } },
+        },
+      },
+      discrepancies: { select: { id: true } },
+      discrepancyResolutions: { select: { id: true } },
+      inventoryCount: { select: { id: true } },
+      reversedByDocument: { select: { id: true } },
+    },
+    orderBy: { occurredAt: 'desc' },
+    take: 8,
+  });
+  const normalized = normalizeAssistantText(input.documentQuery!);
+  const exact = documents.filter((document) => (
+    document.id === input.documentQuery || normalizeAssistantText(document.documentNumber) === normalized
+  ));
+  const candidates = exact.length ? exact : documents;
+  if (!candidates.length) return noMatch(context.locale, 'documentQuery', localized(context.locale, 'stock document', 'مستند مخزون'));
+  if (candidates.length > 1) {
+    return ambiguousMatch(
+      context.locale,
+      'documentQuery',
+      candidates,
+      (document) => `${document.documentNumber} · ${document.type} · ${document.status}`,
+      (document) => document.documentNumber,
+    );
+  }
+  const document = candidates[0];
+  const blockCode = stockDocumentReversalBlockCode({
+    type: document.type,
+    status: document.status,
+    parentType: document.parentDocument?.type ?? null,
+    activeChildCount: document.childDocuments.filter((child) => child.type !== 'REVERSAL' && child.status !== 'REVERSED').length,
+    discrepancyCount: document.discrepancies.length,
+    discrepancyResolutionCount: document.discrepancyResolutions.length,
+    hasInventoryCount: Boolean(document.inventoryCount),
+  });
+  if (blockCode || document.reversedByDocument) {
+    return clarificationResult({
+      field: 'documentQuery',
+      message: localized(
+        context.locale,
+        `This stock document cannot be reversed safely (${blockCode ?? 'already_reversed'}).`,
+        `لا يمكن عكس مستند المخزون هذا بأمان (${blockCode ?? 'already_reversed'}).`,
+      ),
+    });
+  }
+  const locations = [...new Map(document.movements.flatMap((movement) => (
+    movement.location ? [[movement.location.id, movement.location] as const] : []
+  ))).values()];
+  if (!locations.length || locations.some((location) => !location.isActive)) {
+    return clarificationResult({
+      field: 'documentQuery',
+      message: localized(context.locale, 'The document has no complete set of active stock locations.', 'لا يملك المستند مجموعة مكتملة من مواقع المخزون الفعالة.'),
+    });
+  }
+  const occurredAt = dateValue(input.occurredAt) ?? context.now;
+  const validated = ResolvedReverseStockDocumentActionSchema.parse({
+    stockDocumentId: document.id,
+    documentNumber: document.documentNumber,
+    documentType: document.type,
+    expectedDocumentVersion: document.version,
+    expectedLocationVersions: locations.map((location) => ({
+      locationId: location.id,
+      locationName: context.locale === 'ar' ? location.nameAr || location.nameEn : location.nameEn || location.nameAr,
+      stockVersion: location.stockVersion,
+    })),
+    occurredAt: occurredAt.toISOString(),
+    reason: input.reason,
+    idempotencyKey: `ai-stock-reversal:${context.sourceMessageId}`,
+  });
+  return actionResult({
+    context,
+    type: 'REVERSE_STOCK_DOCUMENT',
+    extractedData: input,
+    validatedData: validated,
+    title: localized(context.locale, 'Reverse stock document', 'عكس مستند مخزون'),
+    summary: localized(context.locale, `Reverse ${validated.documentNumber}.`, `عكس المستند ${validated.documentNumber}.`),
+    fields: [
+      { label: localized(context.locale, 'Document', 'المستند'), value: validated.documentNumber },
+      { label: localized(context.locale, 'Type', 'النوع'), value: validated.documentType },
+      { label: localized(context.locale, 'Locations', 'المواقع'), value: validated.expectedLocationVersions.map((row) => row.locationName).join(' · ') },
+      { label: localized(context.locale, 'Reversal date', 'تاريخ العكس'), value: validated.occurredAt.slice(0, 10) },
+      { label: localized(context.locale, 'Reason', 'السبب'), value: validated.reason },
+      { label: localized(context.locale, 'Final confirmation', 'التأكيد النهائي'), value: validated.documentNumber },
+    ],
+    warnings: [localized(
+      context.locale,
+      `This reverses the exact stock lots and any eligible linked finance records. A second confirmation with ${validated.documentNumber} is required.`,
+      `يعكس هذا الإجراء دفعات المخزون الدقيقة وأي سجلات مالية مرتبطة مؤهلة. يتطلب تأكيداً ثانياً بالرقم ${validated.documentNumber}.`,
+    )],
   });
 }
 
@@ -2480,9 +4069,10 @@ async function resolveInventoryForAction(
   query: string | null,
   field: string,
   context: ToolContext,
+  scope = buildBranchScope(context.user),
 ): Promise<OptionalResolution<{ id: string; name: string; unit: string; category: string }>> {
   if (!query) return { ok: true, value: null };
-  const matched = await matchInventoryItem(query, buildBranchScope(context.user));
+  const matched = await matchInventoryItem(query, scope);
   if (matched.kind === 'none') return { ok: false, result: noMatch(context.locale, field, localized(context.locale, 'inventory item', 'مادة مخزون')) };
   if (matched.kind === 'ambiguous') {
     return {
@@ -2509,18 +4099,31 @@ async function resolveInventoryForAction(
 
 async function prepareRoastBatch(raw: unknown, context: ToolContext): Promise<ToolExecution> {
   const input = PrepareRoastBatchSchema.parse(raw);
+  const inventoryV2 = getInventoryV2Config().enabled;
   const missing: string[] = [];
   if (!input.batchNumber) missing.push(localized(context.locale, 'batch number', 'رقم الدفعة'));
   if (!input.origin) missing.push(localized(context.locale, 'coffee origin', 'منشأ القهوة'));
   if (input.greenInputGrams === null) missing.push(localized(context.locale, 'green input grams', 'وزن البن الأخضر بالغرام'));
+  if (inventoryV2 && input.roastedOutputGrams === null) missing.push(localized(context.locale, 'roasted output grams', 'وزن الناتج المحمص بالغرام'));
+  if (inventoryV2 && !input.greenInventoryItemQuery) missing.push(localized(context.locale, 'green inventory item', 'مادة البن الأخضر'));
+  if (inventoryV2 && !input.roastedInventoryItemQuery) missing.push(localized(context.locale, 'roasted inventory item', 'مادة البن المحمص'));
   if (input.roastDate && !dateValue(input.roastDate)) missing.push(localized(context.locale, 'valid roast date', 'تاريخ تحميص صحيح'));
   if (missing.length) return missingResult(context.locale, missing);
 
-  const green = await resolveInventoryForAction(input.greenInventoryItemQuery, 'greenInventoryItemQuery', context);
+  const location = inventoryV2
+    ? await resolveStockLocation(input.locationQuery, context, 'produce')
+    : { ok: true as const, value: null };
+  if (!location.ok) return location.result;
+  const inventoryScope = location.value
+    ? { locationIds: [location.value.id] }
+    : buildBranchScope(context.user);
+  const green = await resolveInventoryForAction(input.greenInventoryItemQuery, 'greenInventoryItemQuery', context, inventoryScope);
   if (!green.ok) return green.result;
-  const roasted = await resolveInventoryForAction(input.roastedInventoryItemQuery, 'roastedInventoryItemQuery', context);
+  const roasted = await resolveInventoryForAction(input.roastedInventoryItemQuery, 'roastedInventoryItemQuery', context, inventoryScope);
   if (!roasted.ok) return roasted.result;
-  const branch = await resolveOptionalBranch(input.branchQuery, context.locale);
+  const branch = inventoryV2
+    ? { ok: true as const, value: null }
+    : await resolveOptionalBranch(input.branchQuery, context);
   if (!branch.ok) return branch.result;
   const roastDate = dateValue(input.roastDate) ?? context.now;
   const validated = ResolvedRoastBatchActionSchema.parse({
@@ -2530,11 +4133,18 @@ async function prepareRoastBatch(raw: unknown, context: ToolContext): Promise<To
     roastLevel: input.roastLevel,
     greenInputGrams: input.greenInputGrams,
     roastedOutputGrams: input.roastedOutputGrams,
+    abnormalLossGrams: input.abnormalLossGrams ?? 0,
     qcScore: input.qcScore,
     qcNotes: input.qcNotes,
     greenInventoryItemId: green.value?.id ?? null,
     roastedInventoryItemId: roasted.value?.id ?? null,
-    branchId: branch.value?.id ?? null,
+    branchId: location.value?.branchId ?? branch.value?.id ?? null,
+    ...(location.value ? {
+      locationId: location.value.id,
+      locationName: context.locale === 'ar' ? location.value.nameAr : location.value.nameEn,
+      expectedLocationVersion: location.value.stockVersion,
+      idempotencyKey: `ai-roast:${context.sourceMessageId}`,
+    } : {}),
   });
   return actionResult({
     context,
@@ -2553,6 +4163,8 @@ async function prepareRoastBatch(raw: unknown, context: ToolContext): Promise<To
         value: `${formatQuantity(validated.roastedOutputGrams, context.locale)} g${roasted.value ? ` · ${roasted.value.name}` : ''}`,
       }] : []),
       ...(validated.roastLevel ? [{ label: localized(context.locale, 'Roast level', 'درجة التحميص'), value: validated.roastLevel }] : []),
+      ...(validated.abnormalLossGrams ? [{ label: localized(context.locale, 'Abnormal loss', 'الفاقد غير الطبيعي'), value: `${formatQuantity(validated.abnormalLossGrams, context.locale)} g` }] : []),
+      ...(location.value ? [{ label: localized(context.locale, 'Location', 'الموقع'), value: context.locale === 'ar' ? location.value.nameAr : location.value.nameEn }] : []),
       ...(branch.value ? [{ label: localized(context.locale, 'Branch', 'الفرع'), value: context.locale === 'ar' ? branch.value.nameAr : branch.value.nameEn }] : []),
     ],
   });
@@ -2893,6 +4505,14 @@ const TOOL_HANDLERS: Record<string, (raw: unknown, context: ToolContext) => Prom
   prepare_update_customer: prepareCustomerUpdate,
   prepare_update_party: preparePartyUpdate,
   prepare_adjust_inventory: prepareInventoryAdjustment,
+  prepare_receive_stock: prepareStockReceipt,
+  prepare_pack_finished_goods: preparePackingRun,
+  prepare_dispatch_stock_transfer: prepareDispatchStockTransfer,
+  prepare_receive_stock_transfer: prepareReceiveStockTransfer,
+  prepare_record_local_expense: prepareLocalExpense,
+  prepare_return_to_quarantine: prepareReturnToQuarantine,
+  prepare_dispose_returned_goods: prepareDisposeReturnedGoods,
+  prepare_reverse_stock_document: prepareReverseStockDocument,
   prepare_create_roast_batch: prepareRoastBatch,
   prepare_record_payment: preparePayment,
   prepare_record_refund: prepareRefund,

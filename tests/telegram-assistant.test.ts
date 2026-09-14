@@ -167,13 +167,29 @@ describe('Telegram Atlas AI transport contracts', () => {
 
   it('filters tools and writes by the linked Atlas role', () => {
     const salesTools = assistantToolsForRole('SALES_CRM').map((tool) => tool.name);
+    const branchTools = assistantToolsForRole('BRANCH_MANAGER').map((tool) => tool.name);
     expect(salesTools).toContain('prepare_create_order');
     expect(salesTools).toContain('product_buyers');
     expect(salesTools).toContain('customer_insights');
     expect(salesTools).not.toContain('prepare_create_expense');
     expect(salesTools).not.toContain('finance_overview');
+    expect(branchTools).toContain('sales_summary');
+    expect(branchTools).toContain('inventory_summary');
+    expect(branchTools).toContain('prepare_create_customer');
+    expect(branchTools).toContain('prepare_create_order');
+    expect(branchTools).toContain('prepare_receive_stock_transfer');
+    expect(branchTools).toContain('prepare_record_local_expense');
+    expect(branchTools).toContain('prepare_return_to_quarantine');
+    expect(branchTools).not.toContain('prepare_update_customer');
+    expect(branchTools).not.toContain('prepare_receive_stock');
+    expect(branchTools).not.toContain('prepare_dispatch_stock_transfer');
+    expect(branchTools).not.toContain('prepare_dispose_returned_goods');
+    expect(branchTools).not.toContain('prepare_reverse_stock_document');
     expect(canExecuteAssistantAction('SALES_CRM', 'CREATE_ORDER')).toBe(true);
     expect(canExecuteAssistantAction('SALES_CRM', 'CREATE_EXPENSE')).toBe(false);
+    expect(canExecuteAssistantAction('BRANCH_MANAGER', 'CREATE_ORDER')).toBe(true);
+    expect(canExecuteAssistantAction('BRANCH_MANAGER', 'UPDATE_CUSTOMER')).toBe(false);
+    expect(canExecuteAssistantAction('BRANCH_MANAGER', 'RECORD_LOCAL_EXPENSE')).toBe(true);
     expect(canExecuteAssistantAction('VIEWER', 'CREATE_ORDER')).toBe(false);
   });
 

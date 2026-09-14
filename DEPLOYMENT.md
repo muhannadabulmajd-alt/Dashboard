@@ -32,11 +32,12 @@ Target stack: **Vercel** (Next.js host) + **Neon** (free serverless PostgreSQL).
 | `CRON_SECRET` | `openssl rand -hex 32` |
 | `ENCRYPTION_KEY` | `openssl rand -base64 32` (encrypts connector secrets — **don't change it later**) |
 | `NEXT_PUBLIC_USD_PER_IQD` | e.g. `0.00076` (display-only IQD→USD rate) |
+| `INVENTORY_V2_ENABLED` | `false` until location setup, opening counts, and shadow reconciliation pass |
 | `RESEND_API_KEY` | *(optional)* enables emailed scheduled reports |
 | `REPORT_FROM` | *(optional)* e.g. `Laheeb Atlas <reports@yourdomain.com>` (Resend-verified domain) |
 | `REPORT_RECIPIENTS` | *(optional)* comma-separated; defaults to owner/admin/finance users |
 | `OPENAI_API_KEY` | OpenAI project secret; use different keys for Preview and Production |
-| `AI_ASSISTANT_ENABLED` | `true` to expose the Owner/Admin assistant, `false` for immediate rollback |
+| `AI_ASSISTANT_ENABLED` | `true` to expose the role- and location-scoped assistant, `false` for immediate rollback |
 | `AI_ASSISTANT_MODEL` | `gpt-5.4-mini-2026-03-17` |
 | `AI_ASSISTANT_MAX_REQUESTS_PER_MINUTE` | `10` |
 | `AI_ASSISTANT_HISTORY_RETENTION_DAYS` | `90` |
@@ -75,9 +76,11 @@ Once you're in, you can **delete `ADMIN_PASSWORD`** from Vercel to turn the env-
 - **Scheduled report, connector, cleanup, and AI automation crons** are declared in `vercel.json` (all run at most once/day, so they work on Vercel's free Hobby plan). The AI automation runner checks due work daily at 03:07 UTC (06:07 Baghdad). They authenticate with `CRON_SECRET`.
 - **Emailed reports:** set `RESEND_API_KEY` + a verified `REPORT_FROM` domain; otherwise reports generate but only log.
 - **Connectors:** configure the credentialed HTTP-CSV connector at **/admin/connectors**; tokens are encrypted with `ENCRYPTION_KEY`.
-- **Atlas AI Assistant:** configure the AI variables above separately in Preview and Production. Chats remain private in Atlas, expire after the configured retention period, and OpenAI requests use `store: false`.
+- **Atlas AI Assistant:** configure the AI variables above separately in Preview and Production. Chats remain private in Atlas, expire after the configured retention period, and OpenAI requests use `store: false`. Owner/Admin retain global governance; Branch Manager access is limited to explicitly assigned locations and capabilities.
 - **Phase 2 rollout:** a newly migrated database starts with governed reads enabled and every mutation, media/report, and automation capability disabled. An Owner enables the phases from the AI Assistant capability controls in this order: orders/customers, spending/purchases, operations/payments, media/reports, then automations.
 - **Telegram:** each environment needs its own bot. Link every numeric Telegram ID to an active Atlas user under **Administration → Connectors**, then verify the bot and register its webhook once. Register again only when the bot token, webhook secret, or public deployment URL changes.
+- **Location-based inventory:** deploy the additive migration with `INVENTORY_V2_ENABLED=false`, run `pnpm check:inventory-v2`, resolve every blocking preflight finding, designate one central fulfillment location, record signed opening counts, and enable the flag only for the approved rollout stage.
+- **Inventory V2 database regression:** run `INVENTORY_V2_INTEGRATION=1 INVENTORY_V2_DATABASE_ISOLATED=true pnpm test:inventory-v2:integration` only against a disposable Neon branch or local test database. The safety guard rejects an unmarked remote database.
 
 ## Manual alternative (if you prefer the CLI)
 
@@ -105,4 +108,5 @@ ADMIN_EMAIL="you@laheeb.coffee" ADMIN_PASSWORD="a-strong-password" pnpm create-a
 - [ ] Separate Preview and Production `OPENAI_API_KEY` values configured; `AI_ASSISTANT_ENABLED=true` only where launch is intended.
 - [ ] AI transcription/media settings are configured and Phase 2 capabilities are enabled one stage at a time after smoke checks.
 - [ ] Separate Preview and Production Telegram bots are linked, verified, and registered; numeric user mappings have been reviewed.
+- [ ] `INVENTORY_V2_ENABLED=false` until Inventory V2 preflight, signed opening counts, and shadow reconciliation pass.
 - [ ] *(optional)* `RESEND_API_KEY` for emailed reports.

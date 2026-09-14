@@ -12,6 +12,8 @@ import { Plus, ShoppingBag } from 'lucide-react';
 import { BackLink } from '@/components/records/parts';
 import { SectionGuide } from '@/components/records/SectionGuide';
 import { Link } from '@/i18n/navigation';
+import { getOrderStatusRoleMap } from '@/server/lists/resolver';
+import { buildOrderScopeWhere } from '@/server/filters/where-builder';
 
 const CUSTOMER_SORTS: Record<string, Prisma.CustomerOrderByWithRelationInput> = {
   ordersDesc: { ordersCount: 'desc' },
@@ -27,7 +29,7 @@ export default async function CustomersRecordsPage({
   params: Promise<{ locale: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { locale } = await getPageContext(params, searchParams, 'manage:customers');
+  const { locale, scope } = await getPageContext(params, searchParams, 'manage:customers');
   const t = await getTranslations('records');
   const sp = await searchParams;
   const q = typeof sp.q === 'string' ? sp.q.trim() : '';
@@ -50,12 +52,41 @@ export default async function CustomersRecordsPage({
     ],
   };
 
-  const [total, withOrders, repeat, customers] = await Promise.all([
+  const statusRoles = await getOrderStatusRoleMap();
+  const saleStatuses = [...statusRoles].filter(([, role]) => role === 'SALE').map(([code]) => code);
+  const orderScope = buildOrderScopeWhere(scope);
+  const [total, visibleOrderGroups, customerRows] = await Promise.all([
     prisma.customer.count(),
-    prisma.customer.count({ where: { ordersCount: { gt: 0 } } }),
-    prisma.customer.count({ where: { ordersCount: { gt: 1 } } }),
-    prisma.customer.findMany({ where, orderBy: CUSTOMER_SORTS[sort] ?? CUSTOMER_SORTS.ordersDesc, take: 500 }),
+    prisma.order.groupBy({
+      by: ['customerId'],
+      where: {
+        customerId: { not: null },
+        status: { in: saleStatuses },
+        purpose: 'SALE',
+        ...orderScope,
+      },
+      _count: { _all: true },
+    }),
+    prisma.customer.findMany({
+      where,
+      orderBy: sort === 'ordersDesc' || !sort ? { createdAt: 'desc' } : CUSTOMER_SORTS[sort],
+      ...(sort === 'ordersDesc' || !sort ? {} : { take: 500 }),
+    }),
   ]);
+
+  const visibleOrderCounts = new Map(
+    visibleOrderGroups.flatMap((row) => row.customerId ? [[row.customerId, row._count._all] as const] : []),
+  );
+  const withOrders = visibleOrderGroups.length;
+  const repeat = visibleOrderGroups.filter((row) => row._count._all > 1).length;
+  const customers = sort === 'ordersDesc' || !sort
+    ? customerRows
+        .sort((a, b) => {
+          const countDifference = (visibleOrderCounts.get(b.id) ?? 0) - (visibleOrderCounts.get(a.id) ?? 0);
+          return countDifference || b.createdAt.getTime() - a.createdAt.getTime();
+        })
+        .slice(0, 500)
+    : customerRows;
 
   const stats: SummaryStat[] = [
     { label: t('k.total'), value: formatNumber(total, locale) },
@@ -82,7 +113,7 @@ export default async function CustomersRecordsPage({
       c.phone,
       enumLabel(c.governorate, locale),
       enumLabel(c.segment, locale),
-      c.ordersCount,
+      visibleOrderCounts.get(c.id) ?? 0,
       <Link key="o" href={`/admin/records/customers/${c.id}`} className="font-medium text-primary hover:underline">
         {t('open')}
       </Link>,

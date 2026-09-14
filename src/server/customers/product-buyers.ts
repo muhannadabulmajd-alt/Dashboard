@@ -6,8 +6,9 @@ import type { OrderLike, OrderLineWithProduct } from '@/lib/metrics/types';
 import { prisma } from '@/server/db/client';
 import { getOrderLines, getOrders } from '@/server/db/repositories/sales.repo';
 import { matchReportingProduct } from '@/server/products/matching';
+import type { DataScope } from '@/server/filters/where-builder';
 
-type Scope = { branchId?: string };
+type Scope = DataScope;
 
 export type ProductBuyerRow = {
   customerId: string;

@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   PrepareInventoryAdjustmentSchema,
+  PrepareDisposeReturnedGoodsSchema,
+  PrepareDispatchStockTransferSchema,
+  PrepareLocalExpenseSchema,
+  PreparePackingSchema,
+  PrepareReceiveStockTransferSchema,
+  PrepareReceiveStockSchema,
+  PrepareReturnToQuarantineSchema,
+  PrepareReverseStockDocumentSchema,
   PrepareOrderSchema,
   PreparePurchaseSchema,
   PrepareRefundSchema,
@@ -16,12 +24,21 @@ import {
 } from '@/server/ai/schemas';
 import {
   ResolvedInventoryAdjustmentActionSchema,
+  ResolvedDisposeReturnedGoodsActionSchema,
+  ResolvedDispatchStockTransferActionSchema,
+  ResolvedLocalExpenseActionSchema,
   ResolvedOrderActionSchema,
+  ResolvedPackingActionSchema,
   ResolvedRefundActionSchema,
+  ResolvedReceiveStockTransferActionSchema,
+  ResolvedReturnToQuarantineActionSchema,
+  ResolvedReverseStockDocumentActionSchema,
   ResolvedTransferActionSchema,
+  ResolvedStockReceiptActionSchema,
 } from '@/server/ai/action-data';
 import { AI_ASSISTANT_TOOLS } from '@/server/ai/tool-definitions';
 import { actionPreconditionIssues } from '@/server/ai/preconditions';
+import { documentKindForAction } from '@/server/ai/documents';
 import { QuickOrderDraftSchema } from '@/lib/ai-quick-order';
 import { compatibleCustomerMatches } from '@/server/commands/customers';
 import { buildDemandForecast } from '@/lib/ai-demand-forecast';
@@ -159,7 +176,7 @@ describe('AI write tool validation', () => {
   });
 
   it('publishes only strict allowlisted function schemas', () => {
-    expect(AI_ASSISTANT_TOOLS).toHaveLength(29);
+    expect(AI_ASSISTANT_TOOLS).toHaveLength(37);
     expect(new Set(AI_ASSISTANT_TOOLS.map((tool) => tool.name)).size).toBe(AI_ASSISTANT_TOOLS.length);
     for (const tool of AI_ASSISTANT_TOOLS) {
       expect(tool.strict).toBe(true);
@@ -171,6 +188,300 @@ describe('AI write tool validation', () => {
     expect(AI_ASSISTANT_TOOLS.some((tool) => tool.name === 'finance_overview')).toBe(true);
     expect(AI_ASSISTANT_TOOLS.some((tool) => tool.name === 'inventory_recommendations')).toBe(true);
     expect(AI_ASSISTANT_TOOLS.some((tool) => tool.name === 'demand_forecast')).toBe(true);
+  });
+
+  it('validates strict location-based receipt and packing payloads', () => {
+    expect(PrepareReceiveStockSchema.parse({
+      inventoryItemQuery: 'green coffee',
+      locationQuery: 'central raw warehouse',
+      quantity: 25.125,
+      unitCost: 8_500,
+      occurredAt: null,
+      bestBefore: null,
+      supplierLot: 'SUP-LOT-7',
+      supplierQuery: 'Supplier One',
+      newSupplier: null,
+      paymentMode: 'CREDIT',
+      accountQuery: null,
+      dueDate: null,
+      reference: null,
+      notes: null,
+    }).quantity).toBe(25.125);
+    expect(() => PrepareReceiveStockSchema.parse({
+      inventoryItemQuery: 'green coffee',
+      locationQuery: null,
+      quantity: 1,
+      unitCost: 1,
+      occurredAt: null,
+      bestBefore: null,
+      supplierLot: null,
+      supplierQuery: 'Supplier One',
+      newSupplier: null,
+      paymentMode: 'CREDIT',
+      accountQuery: null,
+      dueDate: null,
+      reference: null,
+      notes: null,
+      sql: 'select *',
+    })).toThrow();
+    expect(ResolvedStockReceiptActionSchema.safeParse({
+      inventoryItemId: 'item',
+      inventoryItemName: 'Green coffee',
+      inventoryUnit: 'kg',
+      locationId: 'raw',
+      locationName: 'Raw warehouse',
+      expectedLocationVersion: 1,
+      quantity: 25.125,
+      unitCost: 8_500,
+      occurredAt: '2026-09-09T08:00:00.000Z',
+      bestBefore: null,
+      supplierLot: null,
+      partyId: 'supplier',
+      supplierName: 'Supplier One',
+      newSupplier: null,
+      paymentMode: 'CREDIT',
+      accountId: null,
+      accountName: null,
+      dueDate: '2026-10-09T08:00:00.000Z',
+      reference: null,
+      notes: null,
+      idempotencyKey: 'ai-receipt:message-1',
+    }).success).toBe(true);
+    expect(PreparePackingSchema.parse({
+      outputInventoryItemQuery: 'SKU-1',
+      locationQuery: 'packing',
+      outputQuantity: 24,
+      rejectedQuantity: 1,
+      packedAt: null,
+      bestBefore: null,
+      notes: null,
+    }).outputQuantity).toBe(24);
+    expect(ResolvedPackingActionSchema.safeParse({
+      locationId: 'packing',
+      locationName: 'Packing',
+      expectedLocationVersion: 1,
+      productId: 'product',
+      productName: 'Coffee',
+      outputInventoryItemId: 'finished',
+      outputInventoryItemName: 'Coffee 225 g',
+      outputUnit: 'unit',
+      recipeVersionId: 'recipe',
+      recipeVersion: 2,
+      outputQuantity: 24,
+      rejectedQuantity: 1,
+      packedAt: '2026-09-09T08:00:00.000Z',
+      bestBefore: null,
+      notes: null,
+      idempotencyKey: 'ai-pack:message-1',
+    }).success).toBe(true);
+  });
+
+  it('validates strict stock transfer dispatch and receipt payloads', () => {
+    expect(PrepareDispatchStockTransferSchema.safeParse({
+      sourceLocationQuery: 'central',
+      destinationLocationQuery: 'sales point',
+      lines: [{ inventoryItemQuery: 'SKU-1', quantity: 2.125 }],
+      occurredAt: null,
+      expectedAt: null,
+      notes: null,
+    }).success).toBe(true);
+    expect(ResolvedDispatchStockTransferActionSchema.safeParse({
+      sourceLocationId: 'source',
+      sourceLocationName: 'Central',
+      destinationLocationId: 'destination',
+      destinationLocationName: 'Sales point',
+      transitLocationId: 'transit',
+      transitLocationName: 'In transit',
+      expectedSourceVersion: 1,
+      expectedTransitVersion: 2,
+      lines: [{ inventoryItemId: 'item', inventoryItemName: 'Coffee', unit: 'unit', quantity: 2.125 }],
+      occurredAt: '2026-09-09T08:00:00.000Z',
+      expectedAt: null,
+      notes: null,
+      idempotencyKey: 'ai-transfer-dispatch:message-1',
+    }).success).toBe(true);
+    expect(PrepareReceiveStockTransferSchema.safeParse({
+      transferQuery: 'STK-1',
+      receiveAll: true,
+      lines: null,
+      discrepancies: [],
+      occurredAt: null,
+      notes: null,
+    }).success).toBe(true);
+    expect(ResolvedReceiveStockTransferActionSchema.safeParse({
+      stockDocumentId: 'dispatch',
+      transferNumber: 'STK-1',
+      expectedDocumentVersion: 1,
+      destinationLocationId: 'destination',
+      destinationLocationName: 'Sales point',
+      transitLocationId: 'transit',
+      transitLocationName: 'In transit',
+      expectedDestinationVersion: 3,
+      expectedTransitVersion: 4,
+      lines: [{ inventoryItemId: 'item', inventoryItemName: 'Coffee', unit: 'unit', quantity: 2 }],
+      discrepancies: [],
+      occurredAt: '2026-09-09T08:00:00.000Z',
+      notes: null,
+      idempotencyKey: 'ai-transfer-receive:message-2',
+    }).success).toBe(true);
+  });
+
+  it('requires one trusted evidence source for a location-scoped local expense', () => {
+    expect(PrepareLocalExpenseSchema.parse({
+      locationQuery: 'Sales point A',
+      amount: 25_000,
+      categoryType: 'UTILITIES',
+      description: 'Local electricity expense',
+      occurredAt: null,
+      noReceiptReason: 'Supplier did not issue a receipt',
+    }).amount).toBe(25_000);
+
+    const action = {
+      userId: 'user-1',
+      locationId: 'sales-point-a',
+      locationName: 'Sales point A',
+      expectedLocationVersion: 2,
+      amount: 25_000,
+      categoryType: 'UTILITIES' as const,
+      description: 'Local electricity expense',
+      occurredAt: '2026-09-09T08:00:00.000Z',
+      financeAccountId: 'cash-a',
+      financeAccountName: 'Sales point cash',
+      receiptAttachmentId: null,
+      receiptFileName: null,
+      noReceiptReason: 'Supplier did not issue a receipt',
+      willRequireReview: false,
+      idempotencyKey: 'ai-local-expense:message-1',
+    };
+    expect(ResolvedLocalExpenseActionSchema.parse(action)).toEqual(action);
+    expect(() => ResolvedLocalExpenseActionSchema.parse({
+      ...action,
+      receiptAttachmentId: 'attachment-1',
+      receiptFileName: 'receipt.pdf',
+    })).toThrow('expense_evidence_required');
+    expect(() => ResolvedLocalExpenseActionSchema.parse({
+      ...action,
+      noReceiptReason: null,
+    })).toThrow('expense_evidence_required');
+    expect(() => PrepareLocalExpenseSchema.parse({
+      locationQuery: null,
+      amount: 25_000,
+      categoryType: 'UTILITIES',
+      description: 'Local electricity expense',
+      occurredAt: null,
+      noReceiptReason: null,
+      accountId: 'untrusted-client-account',
+    })).toThrow();
+  });
+
+  it('validates strict returned-goods and stock-reversal contracts', () => {
+    expect(PrepareReturnToQuarantineSchema.parse({
+      orderQuery: 'LHB-ORD-260909-0001',
+      productQuery: 'SKU-1',
+      quantity: 1.125,
+      occurredAt: null,
+      reason: 'Customer returned sealed packs',
+    }).quantity).toBe(1.125);
+    const returned = {
+      orderId: 'order-1',
+      orderNumber: 'LHB-ORD-260909-0001',
+      orderLineId: 'line-1',
+      productName: 'Coffee 225 g',
+      sku: 'SKU-1',
+      inventoryItemId: 'item-finished',
+      inventoryItemName: 'Coffee 225 g',
+      unit: 'unit',
+      fulfillmentLocationId: 'sales-point',
+      fulfillmentLocationName: 'Sales point',
+      expectedFulfillmentVersion: 3,
+      quarantineLocationId: 'quarantine',
+      quarantineLocationName: 'Quarantine',
+      expectedQuarantineVersion: 2,
+      quantity: 1.125,
+      occurredAt: '2026-09-09T08:00:00.000Z',
+      reason: 'Customer returned sealed packs',
+      idempotencyKey: 'ai-return:message-1',
+    };
+    expect(ResolvedReturnToQuarantineActionSchema.parse(returned)).toEqual(returned);
+    expect(() => ResolvedReturnToQuarantineActionSchema.parse({
+      ...returned,
+      quarantineLocationId: returned.fulfillmentLocationId,
+    })).toThrow('return_quarantine_same_location');
+
+    expect(PrepareDisposeReturnedGoodsSchema.parse({
+      returnQuery: 'LHB-RET-260909-0001',
+      inventoryItemQuery: 'SKU-1',
+      quantity: 1,
+      disposition: 'RESTOCK',
+      destinationLocationQuery: 'Finished warehouse',
+      supplierQuery: null,
+      occurredAt: null,
+      reason: 'Inspection passed',
+    }).disposition).toBe('RESTOCK');
+    const disposition = {
+      returnDocumentId: 'return-1',
+      returnDocumentNumber: 'LHB-RET-260909-0001',
+      expectedReturnDocumentVersion: 1,
+      inventoryItemId: 'item-finished',
+      inventoryItemName: 'Coffee 225 g',
+      unit: 'unit',
+      quarantineLocationId: 'quarantine',
+      quarantineLocationName: 'Quarantine',
+      expectedQuarantineVersion: 2,
+      quantity: 1,
+      disposition: 'RESTOCK' as const,
+      destinationLocationId: 'finished-warehouse',
+      destinationLocationName: 'Finished warehouse',
+      expectedDestinationVersion: 4,
+      supplierPartyId: null,
+      supplierName: null,
+      occurredAt: '2026-09-09T09:00:00.000Z',
+      reason: 'Inspection passed',
+      idempotencyKey: 'ai-return-disposition:message-2',
+    };
+    expect(ResolvedDisposeReturnedGoodsActionSchema.parse(disposition)).toEqual(disposition);
+    expect(() => ResolvedDisposeReturnedGoodsActionSchema.parse({
+      ...disposition,
+      destinationLocationId: null,
+    })).toThrow('return_destination_invalid');
+    expect(() => ResolvedDisposeReturnedGoodsActionSchema.parse({
+      ...disposition,
+      destinationLocationName: null,
+    })).toThrow('return_destination_incomplete');
+
+    expect(PrepareReverseStockDocumentSchema.parse({
+      documentQuery: 'LHB-STK-260909-0001',
+      occurredAt: null,
+      reason: 'Duplicate receipt confirmed by supervisor',
+    }).documentQuery).toBe('LHB-STK-260909-0001');
+    const reversal = {
+      stockDocumentId: 'document-1',
+      documentNumber: 'LHB-STK-260909-0001',
+      documentType: 'PURCHASE_RECEIPT',
+      expectedDocumentVersion: 2,
+      expectedLocationVersions: [{
+        locationId: 'raw-warehouse',
+        locationName: 'Raw warehouse',
+        stockVersion: 5,
+      }],
+      occurredAt: '2026-09-09T10:00:00.000Z',
+      reason: 'Duplicate receipt confirmed by supervisor',
+      idempotencyKey: 'ai-stock-reversal:message-3',
+    };
+    expect(ResolvedReverseStockDocumentActionSchema.parse(reversal)).toEqual(reversal);
+    expect(() => ResolvedReverseStockDocumentActionSchema.parse({
+      ...reversal,
+      expectedLocationVersions: [
+        reversal.expectedLocationVersions[0],
+        reversal.expectedLocationVersions[0],
+      ],
+    })).toThrow('location_version_duplicate');
+  });
+
+  it('assigns persisted inventory PDFs to every returned-goods mutation', () => {
+    expect(documentKindForAction('RETURN_TO_QUARANTINE')).toBe('INVENTORY_MOVEMENT');
+    expect(documentKindForAction('DISPOSE_RETURNED_GOODS')).toBe('INVENTORY_MOVEMENT');
+    expect(documentKindForAction('REVERSE_STOCK_DOCUMENT')).toBe('CHANGE_CONFIRMATION');
   });
 
   it('bounds governed cross-module analytics without accepting arbitrary query fields', () => {

@@ -10,6 +10,13 @@ import { getListOptions, getOrderStatusRoleMap } from '@/server/lists/resolver';
 import { updateOrder } from '@/server/records/orders';
 import { createCustomerInline } from '@/server/records/customers';
 import { invoicePaymentSnapshot } from '@/lib/invoice';
+import {
+  financeAccountWhereForScope,
+  orderWhereForScope,
+  resolveLocationObjectScope,
+} from '@/server/inventory-v2/object-scope';
+import { getInventoryV2Config } from '@/server/inventory-v2/config';
+import { listOrderLocations } from '@/server/inventory-v2/order-stock';
 
 export default async function EditOrderPage({
   params,
@@ -18,17 +25,27 @@ export default async function EditOrderPage({
   params: Promise<{ locale: string; id: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { locale } = await getPageContext(params, searchParams, 'manage:orders');
+  const { locale, user } = await getPageContext(params, searchParams, 'manage:orders');
   const { id } = await params;
   const t = await getTranslations('records');
   const ti = await getTranslations('invoice');
-  const [catalog, channels, governorates, fulfillment, statuses, accounts, paymentMethods, financeEntries, customers, providers, statusRoles] = await Promise.all([
+  const objectScope = await resolveLocationObjectScope(user);
+  const orderScope = orderWhereForScope(objectScope);
+  const inventoryV2Enabled = getInventoryV2Config().enabled;
+  const [catalog, channels, governorates, fulfillment, statuses, accounts, paymentMethods, financeEntries, customers, providers, statusRoles, locations] = await Promise.all([
     getOrderCatalog(locale, t('ungrouped')),
     getListOptions('channel', locale),
     getListOptions('governorate', locale),
     getListOptions('fulfillment', locale),
     getListOptions('orderStatus', locale),
-    prisma.financeAccount.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true, currency: true } }),
+    prisma.financeAccount.findMany({
+      where: {
+        isActive: true,
+        ...financeAccountWhereForScope(objectScope),
+      },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true, currency: true },
+    }),
     getListOptions('paymentMethod', locale),
     prisma.financeEntry.findMany({
       where: { OR: [{ orderId: id }, { settles: { is: { orderId: id } } }] },
@@ -64,10 +81,11 @@ export default async function EditOrderPage({
       select: { id: true, name: true },
     }),
     getOrderStatusRoleMap(),
+    inventoryV2Enabled ? listOrderLocations(user) : Promise.resolve([]),
   ]);
 
-  const o = await prisma.order.findUnique({
-    where: { id },
+  const o = await prisma.order.findFirst({
+    where: { id, ...orderScope },
     include: { customer: { select: { externalId: true } }, lines: { orderBy: { id: 'asc' } } },
   });
   if (!o) notFound();
@@ -85,6 +103,7 @@ export default async function EditOrderPage({
       channel: o.channel,
       governorate: o.governorate,
       fulfillmentMethod: o.fulfillmentMethod,
+      fulfillmentLocationId: o.fulfillmentLocationId ?? '',
       status: o.status,
       deliveryFee: String(o.deliveryFee),
       deliveryCost: String(o.deliveryCost),
@@ -134,6 +153,7 @@ export default async function EditOrderPage({
     channel: t('f.channel'),
     governorate: t('f.governorate'),
     fulfillment: t('f.fulfillment'),
+    fulfillmentLocation: t('orderForm.fulfillmentLocation'),
     status: t('f.status'),
     deliveryFee: t('f.deliveryFee'),
     deliveryCost: t('f.deliveryCost'),
@@ -209,6 +229,10 @@ export default async function EditOrderPage({
     refund_required: t('err.refund_required'),
     order_update_failed: t('err.order_update_failed'),
     finance_configuration: t('err.finance_configuration'),
+    fulfillment_location_required: t('err.fulfillment_location_required'),
+    location_stale: t('err.location_stale'),
+    inventory_v2_location_change_requires_transfer: t('err.inventory_v2_location_change_requires_transfer'),
+    inventory_v2_use_order_revision: t('err.inventory_v2_use_order_revision'),
   };
 
   return (
@@ -221,6 +245,14 @@ export default async function EditOrderPage({
         channelOptions={channels}
         governorateOptions={governorates}
         fulfillmentOptions={fulfillment}
+        requireLocation={inventoryV2Enabled}
+        locationOptions={locations.map((location) => ({
+          value: location.id,
+          version: location.stockVersion,
+          label: locale === 'ar'
+            ? `${location.nameAr} · ${location.branchNameAr}`
+            : `${location.nameEn} · ${location.branchNameEn}`,
+        }))}
         statusOptions={statuses}
         accountOptions={accounts.map((a) => ({ value: a.id, label: `${a.name} (${a.currency})` }))}
         providerOptions={providers.map((provider) => ({ value: provider.id, label: provider.name }))}

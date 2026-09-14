@@ -15,6 +15,8 @@ export type BulkOrderRow = {
   totalValue: number;
   paymentStatus: string;
   status: string;
+  locationId?: string | null;
+  locationVersion?: number | null;
 };
 
 type Option = { value: string; label: string };
@@ -102,6 +104,15 @@ export function OrdersBulkTable({
       {open ? <div className="fixed inset-0 z-50 flex items-end bg-black/45 p-0 sm:items-center sm:justify-center sm:p-4" role="dialog" aria-modal="true">
         <form action={formAction} className="max-h-[92vh] w-full overflow-y-auto rounded-t-2xl bg-card p-4 shadow-2xl sm:max-w-lg sm:rounded-xl">
           <input type="hidden" name="locale" value={locale} /><input type="hidden" name="orderIds" value={JSON.stringify(selected)} />
+          <input
+            type="hidden"
+            name="locationVersions"
+            value={JSON.stringify(Object.fromEntries(selectedRows.flatMap((row) =>
+              row.locationId && row.locationVersion
+                ? [[row.locationId, row.locationVersion]]
+                : [],
+            )))}
+          />
           <div className="mb-4 flex items-center justify-between"><div><h2 className="text-lg font-bold">{labels.bulkActions}</h2><p className="text-xs text-muted-foreground">{labels.selected.replace('{count}', String(selected.length))}</p></div><button type="button" onClick={() => setOpen(false)} className="grid size-11 place-items-center rounded-lg border"><X className="size-5" /></button></div>
           <div className="grid gap-4">
             <label className="grid gap-1 text-sm font-semibold">{labels.action}<select name="operation" value={operation} onChange={(event) => setOperation(event.target.value)} className={control}><option value="STATUS">{labels.updateStatus}</option><option value="RECORD_PAID">{labels.recordPaid}</option><option value="ASSIGN_PROVIDER">{labels.assignProvider}</option></select></label>

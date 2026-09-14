@@ -14,6 +14,7 @@ import { getOrderCatalog } from '@/server/records/order-catalog';
 import { getListOptions } from '@/server/lists/resolver';
 import { getOrderOperationalDefaults } from '@/server/records/order-defaults';
 import { resolveAiPageContext } from '@/lib/ai-page-context';
+import { buildCustomerScopeWhere, buildOrderScopeWhere } from '@/server/filters/where-builder';
 
 export default async function AiAssistantPage({
   params,
@@ -23,7 +24,7 @@ export default async function AiAssistantPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const resolvedSearchParams = await searchParams;
-  const { locale, user } = await getPageContext(params, Promise.resolve(resolvedSearchParams), 'use:ai-assistant');
+  const { locale, user, scope } = await getPageContext(params, Promise.resolve(resolvedSearchParams), 'use:ai-assistant');
   const t = await getTranslations('aiAssistant');
   const config = getAiAssistantConfig();
   const available = config.enabled && config.apiKeyConfigured;
@@ -75,7 +76,11 @@ export default async function AiAssistantPage({
   }),
   getOrderCatalog(locale, locale === 'ar' ? 'بدون مجموعة' : 'Ungrouped'),
   prisma.customer.findMany({
-    where: { isActive: true, externalId: { not: null } },
+    where: {
+      isActive: true,
+      externalId: { not: null },
+      ...buildCustomerScopeWhere(scope),
+    },
     select: {
       externalId: true,
       nameEn: true,
@@ -83,6 +88,7 @@ export default async function AiAssistantPage({
       phone: true,
       governorate: true,
       orders: {
+        where: buildOrderScopeWhere(scope),
         orderBy: { placedAt: 'desc' },
         take: 1,
         select: { channel: true, governorate: true, fulfillmentMethod: true },

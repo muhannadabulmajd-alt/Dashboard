@@ -4,8 +4,9 @@ import { buildOrderWhere } from '@/server/filters/where-builder';
 import type { DashboardFilters } from '@/lib/filters';
 import type { ResolvedRange } from '@/lib/dates';
 import type { ShipmentLike } from '@/lib/metrics/types';
+import type { DataScope } from '@/server/filters/where-builder';
 
-type Scope = { branchId?: string };
+type Scope = DataScope;
 
 export async function getShipments(
   filters: DashboardFilters,

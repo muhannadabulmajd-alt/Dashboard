@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { prisma } from '@/server/db/client';
 import { ROLES } from '@/lib/enums';
 import { requireCap, audit, reqField, optField, type ActionState } from './shared';
+import { getInventoryV2Config } from '@/server/inventory-v2/config';
 
 const LIST = '/[locale]/(dashboard)/admin/users';
 const CAP = 'manage:users' as const;
@@ -42,8 +43,24 @@ export async function updateUser(id: string, _prev: ActionState, fd: FormData): 
     return { error: 'lastOwner' };
 
   if (r.data.defaultFinanceAccountId) {
+    const locationScope = getInventoryV2Config().enabled && r.data.role !== 'OWNER' && r.data.role !== 'ADMIN'
+      ? await prisma.userLocationAccess.findMany({
+          where: { userId: id, canView: true, canRecordExpense: true },
+          select: { locationId: true, location: { select: { branchId: true } } },
+        })
+      : null;
     const account = await prisma.financeAccount.findFirst({
-      where: { id: r.data.defaultFinanceAccountId, isActive: true, currency: 'IQD', type: { not: 'PAYMENT_GATEWAY' } },
+      where: {
+        id: r.data.defaultFinanceAccountId,
+        isActive: true,
+        currency: 'IQD',
+        type: { not: 'PAYMENT_GATEWAY' },
+        ...(locationScope
+          ? {
+              stockLocationId: { in: locationScope.map((row) => row.locationId) },
+            }
+          : {}),
+      },
       select: { id: true },
     });
     if (!account) return { error: 'invalid' };

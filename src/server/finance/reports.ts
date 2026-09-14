@@ -10,29 +10,38 @@ import type { ResolvedRange } from '@/lib/dates';
 import * as M from '@/lib/metrics';
 import { allocationTotal, classifyPurchase, type PurchaseAllocation } from '@/lib/metrics/purchases';
 import { getProfitFacts } from '@/server/finance/facts';
+import {
+  buildFinanceEntryScopeWhere,
+  type DataScope,
+} from '@/server/filters/where-builder';
 
-type Scope = { branchId?: string };
+type Scope = DataScope;
 type LocalizedName = { en: string; ar: string };
 
-function scopedBranchIds(filters: DashboardFilters, scope: Scope): string[] {
-  if (scope.branchId) return [scope.branchId];
-  return filters.branchId ?? [];
-}
-
 function branchEntryWhere(filters: DashboardFilters, scope: Scope): Prisma.FinanceEntryWhereInput {
-  const ids = scopedBranchIds(filters, scope);
+  if (scope.locationIds !== undefined || scope.branchId) {
+    return buildFinanceEntryScopeWhere(scope);
+  }
+  const ids = filters.branchId ?? [];
   if (!ids.length) return {};
   return ids.length === 1 ? { branchId: ids[0] } : { branchId: { in: ids } };
 }
 
 function branchEntityWhere(filters: DashboardFilters, scope: Scope): Prisma.BranchWhereInput {
-  const ids = scopedBranchIds(filters, scope);
+  if (scope.locationIds !== undefined) {
+    return { isActive: true, stockLocations: { some: { id: { in: scope.locationIds } } } };
+  }
+  if (scope.branchId) return { id: scope.branchId };
+  const ids = filters.branchId ?? [];
   if (!ids.length) return { isActive: true };
   return ids.length === 1 ? { id: ids[0] } : { id: { in: ids } };
 }
 
 function partyBranchWhere(filters: DashboardFilters, scope: Scope): Prisma.PartyWhereInput {
-  const ids = scopedBranchIds(filters, scope);
+  if (scope.locationIds !== undefined) {
+    return { entries: { some: { stockLocationId: { in: scope.locationIds } } } };
+  }
+  const ids = scope.branchId ? [scope.branchId] : filters.branchId ?? [];
   if (!ids.length) return {};
   const branchId = ids.length === 1 ? ids[0] : { in: ids };
   return {

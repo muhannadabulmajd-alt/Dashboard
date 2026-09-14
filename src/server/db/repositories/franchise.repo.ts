@@ -4,8 +4,9 @@ import { getOrderLines, getOrders } from './sales.repo';
 import type { DashboardFilters } from '@/lib/filters';
 import type { ResolvedRange } from '@/lib/dates';
 import { netSales } from '@/lib/metrics';
+import type { DataScope } from '@/server/filters/where-builder';
 
-type Scope = { branchId?: string };
+type Scope = DataScope;
 
 export interface BranchPerf {
   id: string;
@@ -30,8 +31,10 @@ export async function getBranchPerformance(
   const branches = await prisma.branch.findMany({
     where: {
       isActive: true,
-      ...(scope.branchId
-        ? { id: scope.branchId }
+      ...(scope.locationIds !== undefined
+        ? { stockLocations: { some: { id: { in: scope.locationIds } } } }
+        : scope.branchId
+          ? { id: scope.branchId }
         : filters.branchId?.length
           ? { id: { in: filters.branchId } }
           : {}),

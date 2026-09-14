@@ -2,8 +2,9 @@ import 'server-only';
 import { prisma } from '../client';
 import type { CustomerLike } from '@/lib/metrics/types';
 import { getOrderStatusRoleMap } from '@/server/lists/resolver';
+import { buildOrderScopeWhere, type DataScope } from '@/server/filters/where-builder';
 
-type Scope = { branchId?: string };
+type Scope = DataScope;
 
 export async function getCustomers(scope: Scope): Promise<CustomerLike[]> {
   const roles = await getOrderStatusRoleMap();
@@ -11,10 +12,11 @@ export async function getCustomers(scope: Scope): Promise<CustomerLike[]> {
   const orderWhere = {
     status: { in: saleStatuses },
     purpose: 'SALE' as const,
-    ...(scope.branchId ? { branchId: scope.branchId } : {}),
+    ...buildOrderScopeWhere(scope),
   };
+  const isRestricted = scope.locationIds !== undefined || Boolean(scope.branchId);
   const rows = await prisma.customer.findMany({
-    where: scope.branchId ? { orders: { some: orderWhere } } : {},
+    where: isRestricted ? { orders: { some: orderWhere } } : {},
     select: {
       id: true,
       governorate: true,
@@ -39,7 +41,7 @@ export async function getOrderHistory(
 ): Promise<{ customerId: string | null; placedAt: Date; status: string; metricRole: string }[]> {
   const roles = await getOrderStatusRoleMap();
   const orders = await prisma.order.findMany({
-    where: scope.branchId ? { branchId: scope.branchId } : {},
+    where: buildOrderScopeWhere(scope),
     select: { customerId: true, placedAt: true, status: true },
   });
   return orders.map((order) => ({ ...order, metricRole: roles.get(order.status) ?? 'UNKNOWN' }));

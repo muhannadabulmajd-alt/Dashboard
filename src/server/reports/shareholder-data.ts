@@ -271,6 +271,7 @@ export async function buildShareholderReportData(
     archivedAt: entry.archivedAt,
     reversedAt: entry.reversedAt,
     reversalOfId: entry.reversalOfId,
+    isOpeningBalance: entry.isOpeningBalance,
   }));
   const totals = financeTotals(financeEntries);
   const spendingEntries = entries.filter((entry) => entry.type === 'PURCHASE' || entry.type === 'EXPENSE');

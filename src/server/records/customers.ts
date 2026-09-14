@@ -10,6 +10,7 @@ import {
   customerDisplayLabel,
   updateCustomerCommand,
 } from '@/server/commands/customers';
+import { canManageExistingCustomer } from './customer-policy';
 import { requireCap, audit, reqField, optField, type ActionState } from './shared';
 
 const LIST = '/[locale]/(dashboard)/admin/records/customers';
@@ -81,7 +82,7 @@ export async function updateCustomer(
   fd: FormData,
 ): Promise<ActionState> {
   const user = await requireCap(CAP);
-  if (!user) return { error: 'forbidden' };
+  if (!user || !canManageExistingCustomer(user.role)) return { error: 'forbidden' };
   const r = parse(fd);
   if (!r.success) return { error: 'invalid' };
   const locale = reqField(fd, 'locale') || 'ar';
@@ -98,7 +99,7 @@ export async function updateCustomer(
 
 export async function archiveCustomer(id: string, locale: string, active: boolean): Promise<void> {
   const user = await requireCap(CAP);
-  if (!user) return;
+  if (!user || !canManageExistingCustomer(user.role)) return;
   await prisma.customer.update({ where: { id }, data: { isActive: active } });
   await audit(user.id, active ? 'RESTORE' : 'ARCHIVE', 'Customer', { id });
   revalidatePath(LIST, 'page');
@@ -107,7 +108,7 @@ export async function archiveCustomer(id: string, locale: string, active: boolea
 
 export async function deleteCustomer(id: string, locale: string): Promise<void> {
   const user = await requireCap(CAP);
-  if (!user) return;
+  if (!user || !canManageExistingCustomer(user.role)) return;
   try {
     await prisma.customer.delete({ where: { id } });
     await audit(user.id, 'DELETE', 'Customer', { id });

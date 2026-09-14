@@ -7,6 +7,11 @@ import { RecordForm } from '@/components/records/form';
 import { BackLink } from '@/components/records/parts';
 import { updateBatch } from '@/server/records/batches';
 import { batchFields } from '../../_fields';
+import { getInventoryV2Config } from '@/server/inventory-v2/config';
+import {
+  resolveLocationObjectScope,
+  roastBatchWhereForScope,
+} from '@/server/inventory-v2/object-scope';
 
 export default async function EditBatchPage({
   params,
@@ -15,11 +20,15 @@ export default async function EditBatchPage({
   params: Promise<{ locale: string; id: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { locale } = await getPageContext(params, searchParams, 'manage:batches');
+  const { locale, user } = await getPageContext(params, searchParams, 'manage:batches');
   const { id } = await params;
   const t = await getTranslations('records');
   const tk = (k: string) => t(k);
-  const b = await prisma.roastBatch.findUnique({ where: { id } });
+  if (getInventoryV2Config().enabled) notFound();
+  const scope = await resolveLocationObjectScope(user);
+  const b = await prisma.roastBatch.findFirst({
+    where: { id, ...roastBatchWhereForScope(scope) },
+  });
   if (!b) notFound();
 
   const initial = {

@@ -8,6 +8,8 @@ import { INVENTORY_CATEGORIES } from '@/lib/enums';
 import { decimalNumber } from '@/lib/decimal';
 import { syncActiveCost, recomputeProductsForItem } from '@/server/inventory/fifo';
 import { syncInventoryReceiptFinance } from '@/server/finance/sync';
+import { getInventoryV2Config } from '@/server/inventory-v2/config';
+import { assertInventoryItemObjectAccess } from '@/server/inventory-v2/object-scope';
 import type { TrustedCommandContext } from '@/server/commands/actor-context';
 import { COMMAND_TRANSACTION_OPTIONS } from '@/server/commands/transaction-checkpoints';
 import {
@@ -59,6 +61,9 @@ export async function adjustInventoryFromInput(
   const user = await resolveCommandActor(CAP, options.actorContext);
   if (!user || (user.role !== 'OWNER' && user.role !== 'ADMIN')) {
     throw new Error('forbidden');
+  }
+  if (getInventoryV2Config().enabled) {
+    throw new Error('inventory_v2_direct_adjustment_disabled');
   }
   const parsed = InventoryAdjustmentCommandSchema.parse(input);
 
@@ -161,6 +166,9 @@ const withRelations = <T extends { productId?: string; branchId?: string }>(data
 export async function createInventory(_prev: ActionState, fd: FormData): Promise<ActionState> {
   const user = await requireCap(CAP);
   if (!user) return { error: 'forbidden' };
+  if (getInventoryV2Config().enabled && user.role !== 'OWNER' && user.role !== 'ADMIN') {
+    return { error: 'forbidden' };
+  }
   const r = parse(fd);
   if (!r.success) return { error: 'invalid' };
   const locale = reqField(fd, 'locale') || 'ar';
@@ -177,6 +185,14 @@ export async function updateInventory(
 ): Promise<ActionState> {
   const user = await requireCap(CAP);
   if (!user) return { error: 'forbidden' };
+  if (getInventoryV2Config().enabled && user.role !== 'OWNER' && user.role !== 'ADMIN') {
+    return { error: 'forbidden' };
+  }
+  try {
+    await assertInventoryItemObjectAccess(user, id);
+  } catch {
+    return { error: 'forbidden' };
+  }
   const r = parse(fd);
   if (!r.success) return { error: 'invalid' };
   const locale = reqField(fd, 'locale') || 'ar';
@@ -237,6 +253,14 @@ const receiveSchema = z.object({
 export async function receiveStock(itemId: string, _prev: ActionState, fd: FormData): Promise<ActionState> {
   const user = await requireCap(CAP);
   if (!user) return { error: 'forbidden' };
+  if (getInventoryV2Config().enabled) {
+    return { error: 'inventory_v2_location_required' };
+  }
+  try {
+    await assertInventoryItemObjectAccess(user, itemId);
+  } catch {
+    return { error: 'forbidden' };
+  }
   const r = receiveSchema.safeParse({
     qtyReceived: reqField(fd, 'qtyReceived'),
     unitCost: reqField(fd, 'unitCost'),
@@ -300,6 +324,8 @@ export async function receiveStock(itemId: string, _prev: ActionState, fd: FormD
 export async function archiveInventory(id: string, locale: string, active: boolean): Promise<void> {
   const user = await requireCap(CAP);
   if (!user) return;
+  if (getInventoryV2Config().enabled && user.role !== 'OWNER' && user.role !== 'ADMIN') return;
+  await assertInventoryItemObjectAccess(user, id);
   await prisma.inventoryItem.update({ where: { id }, data: { isActive: active } });
   await audit(user.id, active ? 'RESTORE' : 'ARCHIVE', 'InventoryItem', { id });
   revalidatePath(LIST, 'page');
@@ -309,6 +335,14 @@ export async function archiveInventory(id: string, locale: string, active: boole
 export async function deleteInventory(id: string, locale: string): Promise<void> {
   const user = await requireCap(CAP);
   if (!user) return;
+  await assertInventoryItemObjectAccess(user, id);
+  if (getInventoryV2Config().enabled) {
+    if (user.role !== 'OWNER' && user.role !== 'ADMIN') return;
+    await prisma.inventoryItem.update({ where: { id }, data: { isActive: false } });
+    await audit(user.id, 'ARCHIVE', 'InventoryItem', { id, reason: 'inventory-v2-no-delete' });
+    revalidatePath(LIST, 'page');
+    redirect(`/${locale}/admin/records/inventory`);
+  }
   try {
     await prisma.inventoryItem.delete({ where: { id } });
     await audit(user.id, 'DELETE', 'InventoryItem', { id });

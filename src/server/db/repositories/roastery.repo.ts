@@ -2,8 +2,9 @@ import 'server-only';
 import { prisma } from '../client';
 import type { DashboardFilters } from '@/lib/filters';
 import type { ResolvedRange } from '@/lib/dates';
+import { buildBatchScopeWhere, type DataScope } from '@/server/filters/where-builder';
 
-type Scope = { branchId?: string };
+type Scope = DataScope;
 
 export interface BatchRow {
   batchNumber: string;
@@ -22,8 +23,8 @@ export async function getBatchRows(
   scope: Scope,
   range: ResolvedRange,
 ): Promise<BatchRow[]> {
-  const branchWhere = scope.branchId
-    ? { branchId: scope.branchId }
+  const branchWhere = scope.locationIds !== undefined || scope.branchId
+    ? buildBatchScopeWhere(scope)
     : filters.branchId?.length
       ? { branchId: { in: filters.branchId } }
       : {};

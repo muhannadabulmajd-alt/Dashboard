@@ -16,6 +16,7 @@ const schema = z.object({
   currency: z.enum(CURRENCIES),
   bankName: z.string().optional(),
   branchId: z.string().optional(),
+  stockLocationId: z.string().optional(),
   openingBalance: z.coerce.number().int().default(0),
   notes: z.string().optional(),
 });
@@ -27,9 +28,22 @@ function parse(fd: FormData) {
     currency: reqField(fd, 'currency'),
     bankName: optField(fd, 'bankName'),
     branchId: optField(fd, 'branchId'),
+    stockLocationId: optField(fd, 'stockLocationId'),
     openingBalance: optField(fd, 'openingBalance'),
     notes: optField(fd, 'notes'),
   });
+}
+
+async function accountLocationData(input: z.infer<typeof schema>) {
+  if (!input.stockLocationId) {
+    return { branchId: input.branchId ?? null, stockLocationId: null };
+  }
+  const location = await prisma.stockLocation.findFirst({
+    where: { id: input.stockLocationId, isActive: true, isSystem: false },
+    select: { id: true, branchId: true },
+  });
+  if (!location) throw new Error('invalid_location');
+  return { branchId: location.branchId, stockLocationId: location.id };
 }
 
 export async function createAccount(_prev: ActionState, fd: FormData): Promise<ActionState> {
@@ -38,10 +52,21 @@ export async function createAccount(_prev: ActionState, fd: FormData): Promise<A
   const r = parse(fd);
   if (!r.success) return { error: 'invalid' };
   const locale = reqField(fd, 'locale') || 'ar';
+  let locationData: Awaited<ReturnType<typeof accountLocationData>>;
+  try {
+    locationData = await accountLocationData(r.data);
+  } catch {
+    return { error: 'invalid_location', fieldErrors: { stockLocationId: 'invalid_location' } };
+  }
   const row = await prisma.financeAccount.create({
-    data: { ...r.data, branchId: r.data.branchId ?? null },
+    data: { ...r.data, ...locationData },
   });
-  await audit(user.id, 'CREATE', 'FinanceAccount', { id: row.id, name: row.name });
+  await audit(user.id, 'CREATE', 'FinanceAccount', {
+    id: row.id,
+    name: row.name,
+    branchId: row.branchId,
+    stockLocationId: row.stockLocationId,
+  });
   revalidatePath(LIST, 'page');
   redirect(`/${locale}/finance/accounts/${row.id}`);
 }
@@ -56,11 +81,22 @@ export async function updateAccount(
   const r = parse(fd);
   if (!r.success) return { error: 'invalid' };
   const locale = reqField(fd, 'locale') || 'ar';
+  let locationData: Awaited<ReturnType<typeof accountLocationData>>;
+  try {
+    locationData = await accountLocationData(r.data);
+  } catch {
+    return { error: 'invalid_location', fieldErrors: { stockLocationId: 'invalid_location' } };
+  }
   await prisma.financeAccount.update({
     where: { id },
-    data: { ...r.data, branchId: r.data.branchId ?? null },
+    data: { ...r.data, ...locationData },
   });
-  await audit(user.id, 'UPDATE', 'FinanceAccount', { id, name: r.data.name });
+  await audit(user.id, 'UPDATE', 'FinanceAccount', {
+    id,
+    name: r.data.name,
+    branchId: locationData.branchId,
+    stockLocationId: locationData.stockLocationId,
+  });
   revalidatePath(LIST, 'page');
   redirect(`/${locale}/finance/accounts/${id}`);
 }

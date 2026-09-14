@@ -16,6 +16,11 @@ import { Link } from '@/i18n/navigation';
 import { formatDate } from '@/lib/dates';
 import { Plus } from 'lucide-react';
 import { bulkUpdateOrders } from '@/server/records/orders';
+import {
+  financeAccountWhereForScope,
+  orderWhereForScope,
+  resolveLocationObjectScope,
+} from '@/server/inventory-v2/object-scope';
 
 const ORDER_SORTS: Record<string, Prisma.OrderOrderByWithRelationInput> = {
   newest: { placedAt: 'desc' },
@@ -31,7 +36,7 @@ export default async function OrdersRecordsPage({
   params: Promise<{ locale: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { locale } = await getPageContext(params, searchParams, 'manage:orders');
+  const { locale, user } = await getPageContext(params, searchParams, 'manage:orders');
   const t = await getTranslations('records');
   const ti = await getTranslations('invoice');
   const tf = await getTranslations('filters');
@@ -48,8 +53,11 @@ export default async function OrdersRecordsPage({
   const amountMax = typeof sp.amountMax === 'string' && sp.amountMax ? Number(sp.amountMax) : null;
   const sort = typeof sp.sort === 'string' ? sp.sort : '';
 
+  const objectScope = await resolveLocationObjectScope(user);
+  const objectWhere = orderWhereForScope(objectScope);
   const where: Prisma.OrderWhereInput = {
     AND: [
+      objectWhere,
       q
         ? {
             OR: [
@@ -91,9 +99,9 @@ export default async function OrdersRecordsPage({
 
   // Summary covers all orders and follows the managed status-role contract.
   const [grouped, revenueAgg, total, orders] = await Promise.all([
-    prisma.order.groupBy({ by: ['status'], _count: { _all: true } }),
+    prisma.order.groupBy({ where: objectWhere, by: ['status'], _count: { _all: true } }),
     prisma.order.aggregate({
-      where: { status: { in: saleStatuses }, purpose: 'SALE' },
+      where: { ...objectWhere, status: { in: saleStatuses }, purpose: 'SALE' },
       _sum: {
         grossAmount: true,
         discountAmount: true,
@@ -102,8 +110,16 @@ export default async function OrdersRecordsPage({
         extraCharges: true,
       },
     }),
-    prisma.order.count(),
-    prisma.order.findMany({ where, orderBy: ORDER_SORTS[sort] ?? ORDER_SORTS.newest, include: { customer: true }, take: 500 }),
+    prisma.order.count({ where: objectWhere }),
+    prisma.order.findMany({
+      where,
+      orderBy: ORDER_SORTS[sort] ?? ORDER_SORTS.newest,
+      include: {
+        customer: true,
+        fulfillmentLocation: { select: { stockVersion: true } },
+      },
+      take: 500,
+    }),
   ]);
   const orderIds = orders.map((order) => order.id);
   const financeEntries = orderIds.length
@@ -155,10 +171,19 @@ export default async function OrdersRecordsPage({
   const [statusOpts, channels, branches, paymentMethods, accounts, providers] = await Promise.all([
     getListOptions('orderStatus', locale),
     getListOptions('channel', locale),
-    prisma.branch.findMany({ where: { isActive: true }, orderBy: { code: 'asc' }, select: { id: true, code: true, nameEn: true, nameAr: true } }),
+    prisma.branch.findMany({
+      where: { isActive: true, ...(objectScope.unrestricted ? {} : { id: { in: objectScope.branchIds } }) },
+      orderBy: { code: 'asc' },
+      select: { id: true, code: true, nameEn: true, nameAr: true },
+    }),
     getListOptions('paymentMethod', locale),
     prisma.financeAccount.findMany({
-      where: { isActive: true, currency: 'IQD', type: { not: 'PAYMENT_GATEWAY' } },
+      where: {
+        isActive: true,
+        currency: 'IQD',
+        type: { not: 'PAYMENT_GATEWAY' },
+        ...financeAccountWhereForScope(objectScope),
+      },
       orderBy: { name: 'asc' },
       select: { id: true, name: true },
     }),
@@ -184,7 +209,19 @@ export default async function OrdersRecordsPage({
     ) return [];
     if (amountMin != null && payment.total < amountMin) return [];
     if (amountMax != null && payment.total > amountMax) return [];
-    return [{ id: o.id, orderNumber: o.orderNumber, date: formatDate(o.placedAt, locale), customer: customerName(o.customer), channel: enumLabel(o.channel, locale), total: formatMoney(payment.total, o.currency, locale), totalValue: payment.total, paymentStatus: ti(`paymentStatus.${payment.status}`), status: enumLabel(o.status, locale) }];
+    return [{
+      id: o.id,
+      orderNumber: o.orderNumber,
+      date: formatDate(o.placedAt, locale),
+      customer: customerName(o.customer),
+      channel: enumLabel(o.channel, locale),
+      total: formatMoney(payment.total, o.currency, locale),
+      totalValue: payment.total,
+      paymentStatus: ti(`paymentStatus.${payment.status}`),
+      status: enumLabel(o.status, locale),
+      locationId: o.fulfillmentLocationId,
+      locationVersion: o.fulfillmentLocation?.stockVersion ?? null,
+    }];
   });
 
   return (

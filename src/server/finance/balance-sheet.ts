@@ -1,14 +1,19 @@
 import 'server-only';
 import type { Currency, Prisma } from '@prisma/client';
 import type { DashboardFilters } from '@/lib/filters';
-import { decimalNumber } from '@/lib/decimal';
 import { convertToIqd } from '@/lib/money';
 import { accountBalance, financeTotals, netCash, unassignedCash, type FinanceEntryLike } from '@/lib/metrics/finance';
 import { stockRow } from '@/lib/metrics/inventory';
 import { prisma } from '@/server/db/client';
 import { getUsdToIqd } from '@/server/settings';
+import { getInventoryItems } from '@/server/db/repositories/inventory.repo';
+import {
+  buildFinanceAccountScopeWhere,
+  buildFinanceEntryScopeWhere,
+  type DataScope,
+} from '@/server/filters/where-builder';
 
-type Scope = { branchId?: string };
+type Scope = DataScope;
 
 export interface BalanceSheetCurrencyRow {
   currency: Currency;
@@ -31,55 +36,43 @@ export interface BalanceSheetSnapshot {
   combinedIqd: Omit<BalanceSheetCurrencyRow, 'currency' | 'accounts' | 'unassignedCash'>;
 }
 
-function branchIds(filters: DashboardFilters | undefined, scope: Scope): string[] {
-  if (scope.branchId) return [scope.branchId];
-  return filters?.branchId ?? [];
-}
-
 export async function getBalanceSheetSnapshot(options: {
   scope: Scope;
   filters?: DashboardFilters;
   asOf?: Date;
 }): Promise<BalanceSheetSnapshot> {
   const asOf = options.asOf ?? new Date();
-  const ids = branchIds(options.filters, options.scope);
+  const ids = options.scope.branchId ? [options.scope.branchId] : options.filters?.branchId ?? [];
   const entityBranch = ids.length ? { branchId: ids.length === 1 ? ids[0] : { in: ids } } : {};
-  const entryBranch: Prisma.FinanceEntryWhereInput = entityBranch;
+  const accountScope = options.scope.locationIds !== undefined || options.scope.branchId
+    ? buildFinanceAccountScopeWhere(options.scope)
+    : entityBranch;
+  const entryScope: Prisma.FinanceEntryWhereInput = options.scope.locationIds !== undefined || options.scope.branchId
+    ? buildFinanceEntryScopeWhere(options.scope)
+    : entityBranch;
+  const inventoryFilters: DashboardFilters = options.filters ?? { range: 'all' };
 
   const [accounts, entriesRaw, inventoryItems, fixedAssets, rate] = await Promise.all([
-    prisma.financeAccount.findMany({ where: { isActive: true, ...entityBranch }, orderBy: { name: 'asc' } }),
+    prisma.financeAccount.findMany({ where: { isActive: true, ...accountScope }, orderBy: { name: 'asc' } }),
     prisma.financeEntry.findMany({
-      where: { date: { lte: asOf }, archivedAt: null, reversedAt: null, reversalOfId: null, ...entryBranch },
+      where: { date: { lte: asOf }, archivedAt: null, reversedAt: null, reversalOfId: null, ...entryScope },
       select: {
         id: true, type: true, amount: true, currency: true, obligation: true,
         obligationKind: true, accountId: true, toAccountId: true, settlesId: true,
-        archivedAt: true, reversedAt: true, reversalOfId: true,
+        archivedAt: true, reversedAt: true, reversalOfId: true, isOpeningBalance: true,
       },
     }),
-    prisma.inventoryItem.findMany({
-      where: entityBranch,
-      select: {
-        id: true, category: true, nameEn: true, nameAr: true, unit: true,
-        reorderPoint: true, avgDailyUsage: true, unitCost: true,
-        movements: {
-          where: {
-            occurredAt: { lte: asOf },
-            OR: [{ financeEntryId: null }, { financeEntry: { archivedAt: null, reversedAt: null, reversalOfId: null } }],
-          },
-          select: { occurredAt: true, reason: true, quantity: true, expiryDate: true },
-        },
-        costLayers: {
-          where: {
-            receivedAt: { lte: asOf },
-            OR: [{ financeEntryId: null }, { financeEntry: { archivedAt: null, reversedAt: null, reversalOfId: null } }],
-          },
-          select: { id: true, qtyReceived: true, unitCost: true, receivedAt: true },
-        },
-      },
-    }),
+    getInventoryItems(
+      inventoryFilters,
+      options.scope,
+      { start: new Date(0), end: asOf },
+    ),
     prisma.fixedAsset.findMany({
       where: {
-        isActive: true, archivedAt: null, purchaseDate: { lte: asOf }, ...entityBranch,
+        isActive: true,
+        archivedAt: null,
+        purchaseDate: { lte: asOf },
+        ...(options.scope.locationIds !== undefined ? { id: { in: [] } } : entityBranch),
         OR: [{ financeEntryId: null }, { financeEntry: { archivedAt: null, reversedAt: null, reversalOfId: null } }],
       },
       select: { totalCost: true },
@@ -88,13 +81,7 @@ export async function getBalanceSheetSnapshot(options: {
   ]);
 
   const entries = entriesRaw as FinanceEntryLike[];
-  const inventoryValue = inventoryItems.reduce((sum, item) => sum + stockRow({
-    ...item,
-    reorderPoint: item.reorderPoint == null ? null : decimalNumber(item.reorderPoint),
-    unitCost: item.unitCost == null ? null : decimalNumber(item.unitCost),
-    movements: item.movements.map((movement) => ({ ...movement, quantity: decimalNumber(movement.quantity) })),
-    costLayers: item.costLayers.map((layer) => ({ ...layer, qtyReceived: decimalNumber(layer.qtyReceived), unitCost: decimalNumber(layer.unitCost) })),
-  }).value, 0);
+  const inventoryValue = inventoryItems.reduce((sum, item) => sum + stockRow(item).value, 0);
   const fixedAssetValue = fixedAssets.reduce((sum, asset) => sum + asset.totalCost, 0);
   const currencyCodes = Array.from(new Set([...accounts.map((account) => account.currency), ...entries.map((entry) => entry.currency)]));
   if (!currencyCodes.length) currencyCodes.push('IQD');

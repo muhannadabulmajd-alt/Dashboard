@@ -125,7 +125,15 @@ enum MovementReason {
   PURCHASE
   PRODUCTION_OUT
   PRODUCTION_IN
+  TRANSFER_OUT
+  TRANSFER_IN
   SOLD
+  RETURN_IN
+  QUARANTINE
+  RESTOCK
+  REPACK
+  RETURN_TO_SUPPLIER
+  REVERSAL
   SAMPLED
   WASTED
   TEST
@@ -149,10 +157,98 @@ enum OrderPurpose {
 enum InventoryCategory {
   GREEN_COFFEE
   ROASTED
+  FINISHED_GOOD
   DRIP_BAGS
   PACKAGING
   PRODUCTION_SUPPLY
   ACCESSORY
+}
+
+enum StockLocationType {
+  RAW_WAREHOUSE
+  ROASTERY
+  PACKING
+  FINISHED_WAREHOUSE
+  SALES_POINT
+  IN_TRANSIT
+  QUARANTINE
+  GENERAL
+}
+
+enum StockDocumentType {
+  OPENING
+  PURCHASE_RECEIPT
+  ROAST
+  PACK
+  TRANSFER
+  SALE
+  RETURN
+  COUNT
+  ADJUSTMENT
+  WASTE
+  REVERSAL
+}
+
+enum StockDocumentStatus {
+  DRAFT
+  SUBMITTED
+  CONFIRMED
+  DISPATCHED
+  PARTIALLY_RECEIVED
+  RECEIVED
+  REJECTED
+  CANCELLED
+  REVERSED
+}
+
+enum StockReservationStatus {
+  ACTIVE
+  CONSUMED
+  RELEASED
+  EXPIRED
+}
+
+enum InventoryCountStatus {
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
+enum InventoryCountKind {
+  ROUTINE
+  OPENING
+}
+
+enum ReplenishmentStatus {
+  OPEN
+  IN_PROGRESS
+  FULFILLED
+  CANCELLED
+}
+
+enum StockDiscrepancyType {
+  SHORTAGE
+  DAMAGE
+  EXCESS
+}
+
+enum StockDiscrepancyStatus {
+  OPEN
+  RESOLVED
+  REJECTED
+}
+
+enum ReturnDisposition {
+  RESTOCK
+  REPACK
+  RETURN_TO_SUPPLIER
+  WASTE
+}
+
+enum LocalExpenseRequestStatus {
+  SUBMITTED
+  POSTED
+  REJECTED
 }
 
 enum ExpenseCategoryType {
@@ -242,6 +338,14 @@ enum AiPendingActionType {
   UPDATE_CUSTOMER
   UPDATE_PARTY
   ADJUST_INVENTORY
+  RECEIVE_STOCK
+  PACK_FINISHED_GOODS
+  DISPATCH_STOCK_TRANSFER
+  RECEIVE_STOCK_TRANSFER
+  RECORD_LOCAL_EXPENSE
+  RETURN_TO_QUARANTINE
+  DISPOSE_RETURNED_GOODS
+  REVERSE_STOCK_DOCUMENT
   CREATE_ROAST_BATCH
   RECORD_PAYMENT
   RECORD_REFUND
@@ -371,37 +475,57 @@ model User {
   role                    Role      @default(VIEWER)
   isActive                Boolean   @default(true)
   branchId                String?
+  defaultStockLocationId  String?
   defaultFinanceAccountId String?
   createdById             String?
   lastLoginAt             DateTime?
   createdAt               DateTime  @default(now())
   updatedAt               DateTime  @updatedAt
 
-  branch                Branch?                  @relation(fields: [branchId], references: [id])
-  defaultFinanceAccount FinanceAccount?          @relation("UserDefaultFinanceAccount", fields: [defaultFinanceAccountId], references: [id], onDelete: SetNull)
-  createdBy             User?                    @relation("UserCreatedBy", fields: [createdById], references: [id])
-  createdUsers          User[]                   @relation("UserCreatedBy")
-  operatedBatches       RoastBatch[]             @relation("BatchOperator")
-  createdOrders         Order[]                  @relation("OrderCreatedBy")
-  dashboards            Dashboard[]              @relation("DashboardOwner")
-  dashboardShares       DashboardShare[]
-  auditLogs             AuditLog[]
-  providerSettlements   ProviderSettlement[]
-  aiConversations       AiConversation[]
-  aiPendingActions      AiPendingAction[]
-  aiRequestLogs         AiRequestLog[]
-  aiRateLimitBuckets    AiRateLimitBucket[]
-  aiExecutionReceipts   AiExecutionReceipt[]
-  aiDocuments           AiDocument[]
-  aiAttachments         AiAttachment[]
-  aiReportSnapshots     AiReportSnapshot[]
-  aiAutomationPrefs     AiAutomationPreference[]
-  aiNotifications       AiNotificationLog[]
-  telegramIdentity      TelegramIdentity?        @relation("TelegramIdentityUser")
-  linkedTelegramUsers   TelegramIdentity[]       @relation("TelegramIdentityLinkedBy")
+  branch                        Branch?                     @relation(fields: [branchId], references: [id])
+  defaultStockLocation          StockLocation?              @relation("UserDefaultStockLocation", fields: [defaultStockLocationId], references: [id], onDelete: SetNull)
+  defaultFinanceAccount         FinanceAccount?             @relation("UserDefaultFinanceAccount", fields: [defaultFinanceAccountId], references: [id], onDelete: SetNull)
+  createdBy                     User?                       @relation("UserCreatedBy", fields: [createdById], references: [id])
+  createdUsers                  User[]                      @relation("UserCreatedBy")
+  operatedBatches               RoastBatch[]                @relation("BatchOperator")
+  createdOrders                 Order[]                     @relation("OrderCreatedBy")
+  dashboards                    Dashboard[]                 @relation("DashboardOwner")
+  dashboardShares               DashboardShare[]
+  auditLogs                     AuditLog[]
+  providerSettlements           ProviderSettlement[]
+  aiConversations               AiConversation[]
+  aiPendingActions              AiPendingAction[]
+  aiRequestLogs                 AiRequestLog[]
+  aiRateLimitBuckets            AiRateLimitBucket[]
+  aiExecutionReceipts           AiExecutionReceipt[]
+  aiDocuments                   AiDocument[]
+  aiAttachments                 AiAttachment[]
+  aiReportSnapshots             AiReportSnapshot[]
+  aiAutomationPrefs             AiAutomationPreference[]
+  aiNotifications               AiNotificationLog[]
+  telegramIdentity              TelegramIdentity?           @relation("TelegramIdentityUser")
+  linkedTelegramUsers           TelegramIdentity[]          @relation("TelegramIdentityLinkedBy")
+  stockLocationAccesses         UserLocationAccess[]
+  createdStockDocuments         StockDocument[]             @relation("StockDocumentCreatedBy")
+  confirmedStockDocuments       StockDocument[]             @relation("StockDocumentConfirmedBy")
+  operatedPackingBatches        PackingBatch[]              @relation("PackingBatchOperator")
+  createdRecipeVersions         ProductRecipeVersion[]      @relation("RecipeVersionCreatedBy")
+  submittedInventoryCounts      InventoryCount[]            @relation("InventoryCountSubmittedBy")
+  approvedInventoryCounts       InventoryCount[]            @relation("InventoryCountApprovedBy")
+  rejectedInventoryCounts       InventoryCount[]            @relation("InventoryCountRejectedBy")
+  createdReplenishmentRequests  StockReplenishmentRequest[] @relation("ReplenishmentCreatedBy")
+  reviewedReplenishmentRequests StockReplenishmentRequest[] @relation("ReplenishmentReviewedBy")
+  reportedStockDiscrepancies    StockDiscrepancy[]          @relation("StockDiscrepancyReportedBy")
+  resolvedStockDiscrepancies    StockDiscrepancy[]          @relation("StockDiscrepancyResolvedBy")
+  submittedLocalExpenses        LocalExpenseRequest[]       @relation("LocalExpenseSubmittedBy")
+  reviewedLocalExpenses         LocalExpenseRequest[]       @relation("LocalExpenseReviewedBy")
+  uploadedLocalExpenseFiles     LocalExpenseAttachment[]    @relation("LocalExpenseAttachmentUploadedBy")
+  createdStockReservations      StockReservation[]          @relation("StockReservationCreatedBy")
+  releasedStockReservations     StockReservation[]          @relation("StockReservationReleasedBy")
 
   @@index([role])
   @@index([branchId])
+  @@index([defaultStockLocationId])
   @@index([defaultFinanceAccountId])
 }
 
@@ -491,6 +615,7 @@ model Branch {
   batches        RoastBatch[]
   inventoryItems InventoryItem[]
   fixedAssets    FixedAsset[]
+  stockLocations StockLocation[]
 }
 
 // ---------------------------------------------------------------------------
@@ -532,8 +657,10 @@ model Product {
   batchLinks     BatchSkuLink[]
   inventoryItems InventoryItem[]
   components     ProductComponent[]
+  recipeVersions ProductRecipeVersion[]
+  packingBatches PackingBatch[]
   prices         ProductPrice[]
-  group          ProductGroup?      @relation(fields: [groupId], references: [id])
+  group          ProductGroup?          @relation(fields: [groupId], references: [id])
 
   @@index([productLine])
   @@index([grind])
@@ -577,6 +704,44 @@ model ProductComponent {
   inventoryItem InventoryItem? @relation(fields: [inventoryItemId], references: [id], onDelete: SetNull)
 
   @@index([productId])
+  @@index([inventoryItemId])
+}
+
+/// Immutable recipe versions are used by packing runs. ProductComponent remains
+/// the editable draft/current-cost surface; activating a version snapshots it.
+model ProductRecipeVersion {
+  id            String   @id @default(cuid())
+  productId     String
+  version       Int
+  effectiveFrom DateTime @default(now())
+  isActive      Boolean  @default(false)
+  notes         String?
+  createdById   String?
+  createdAt     DateTime @default(now())
+
+  product     Product                  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdBy   User?                    @relation("RecipeVersionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  components  ProductRecipeComponent[]
+  packingRuns PackingBatch[]
+
+  @@unique([productId, version])
+  @@index([productId, isActive])
+}
+
+model ProductRecipeComponent {
+  id              String   @id @default(cuid())
+  recipeVersionId String
+  inventoryItemId String?
+  name            String
+  quantity        Decimal  @db.Decimal(14, 3)
+  unitCost        Decimal  @db.Decimal(14, 3)
+  isRequired      Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  recipeVersion ProductRecipeVersion @relation(fields: [recipeVersionId], references: [id], onDelete: Cascade)
+  inventoryItem InventoryItem?       @relation(fields: [inventoryItemId], references: [id], onDelete: SetNull)
+
+  @@index([recipeVersionId])
   @@index([inventoryItemId])
 }
 
@@ -637,38 +802,42 @@ model Customer {
 // ---------------------------------------------------------------------------
 
 model Order {
-  id                String            @id @default(cuid())
-  orderNumber       String            @unique
-  placedAt          DateTime
-  customerId        String?
-  branchId          String?
-  createdById       String?
-  channel           String // list-managed (§9): code from the "channel" system list
-  governorate       String // list-managed code
-  fulfillmentMethod FulfillmentMethod
-  status            String            @default("COMPLETED") // list-managed code
-  currency          Currency          @default(IQD)
-  grossAmount       Int               @default(0)
-  discountAmount    Int               @default(0) // total: line discounts + orderDiscount
-  orderDiscount     Int               @default(0) // CR-2: order-level discount (part of discountAmount)
-  extraCharges      Int               @default(0) // CR-2: extra charges added to the invoice total
-  refundAmount      Int               @default(0)
-  deliveryFee       Int               @default(0)
-  deliveryCost      Int               @default(0)
-  notes             String? // CR-2: free-form order notes
-  offerId           String?
-  uploadBatchId     String?
-  inventorySyncMode InventorySyncMode @default(NORMAL)
-  purpose           OrderPurpose      @default(SALE)
-  createdAt         DateTime          @default(now())
+  id                    String            @id @default(cuid())
+  orderNumber           String            @unique
+  placedAt              DateTime
+  customerId            String?
+  branchId              String?
+  fulfillmentLocationId String?
+  createdById           String?
+  channel               String // list-managed (§9): code from the "channel" system list
+  governorate           String // list-managed code
+  fulfillmentMethod     FulfillmentMethod
+  status                String            @default("COMPLETED") // list-managed code
+  currency              Currency          @default(IQD)
+  grossAmount           Int               @default(0)
+  discountAmount        Int               @default(0) // total: line discounts + orderDiscount
+  orderDiscount         Int               @default(0) // CR-2: order-level discount (part of discountAmount)
+  extraCharges          Int               @default(0) // CR-2: extra charges added to the invoice total
+  refundAmount          Int               @default(0)
+  deliveryFee           Int               @default(0)
+  deliveryCost          Int               @default(0)
+  notes                 String? // CR-2: free-form order notes
+  offerId               String?
+  uploadBatchId         String?
+  inventorySyncMode     InventorySyncMode @default(NORMAL)
+  purpose               OrderPurpose      @default(SALE)
+  createdAt             DateTime          @default(now())
 
   lines                      OrderLine[]
   customer                   Customer?                   @relation(fields: [customerId], references: [id])
   branch                     Branch?                     @relation(fields: [branchId], references: [id])
+  fulfillmentLocation        StockLocation?              @relation(fields: [fulfillmentLocationId], references: [id], onDelete: SetNull)
   createdBy                  User?                       @relation("OrderCreatedBy", fields: [createdById], references: [id])
   offer                      Offer?                      @relation(fields: [offerId], references: [id])
   shipment                   Shipment?
   stockMovements             StockMovement[]
+  stockReservations          StockReservation[]
+  replenishmentRequests      StockReplenishmentRequest[]
   paymentReconciliationItems PaymentReconciliationItem[]
 
   @@index([placedAt])
@@ -677,24 +846,28 @@ model Order {
   @@index([status])
   @@index([purpose])
   @@index([customerId])
+  @@index([fulfillmentLocationId])
   @@index([offerId])
   @@index([createdById])
 }
 
 model OrderLine {
-  id               String @id @default(cuid())
-  orderId          String
-  productId        String
-  sku              String // denormalized snapshot
-  quantity         Int
-  unitLabel        String @default("unit")
-  unitGrossPrice   Int
-  lineDiscount     Int    @default(0)
-  lineNet          Int
-  unitCogsSnapshot Int
+  id                String @id @default(cuid())
+  orderId           String
+  productId         String
+  sku               String // denormalized snapshot
+  quantity          Int
+  unitLabel         String @default("unit")
+  unitGrossPrice    Int
+  lineDiscount      Int    @default(0)
+  lineNet           Int
+  unitCogsSnapshot  Int
+  cogsTotalSnapshot Int?
 
-  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  product Product @relation(fields: [productId], references: [id])
+  order             Order              @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product           Product            @relation(fields: [productId], references: [id])
+  stockMovements    StockMovement[]
+  stockReservations StockReservation[]
 
   @@index([orderId])
   @@index([productId])
@@ -714,10 +887,13 @@ model RoastBatch {
   profileNotes           String?
   greenInputGrams        Int
   roastedOutputGrams     Int?
+  abnormalLossGrams      Int       @default(0)
   qcScore                Float?
   qcNotes                String?
   operatorId             String?
   branchId               String?
+  locationId             String?
+  stockDocumentId        String?   @unique
   uploadBatchId          String?
   greenInventoryItemId   String?
   roastedInventoryItemId String?
@@ -726,6 +902,8 @@ model RoastBatch {
 
   operator             User?                @relation("BatchOperator", fields: [operatorId], references: [id])
   branch               Branch?              @relation(fields: [branchId], references: [id])
+  location             StockLocation?       @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  stockDocument        StockDocument?       @relation(fields: [stockDocumentId], references: [id], onDelete: SetNull)
   greenInventoryItem   InventoryItem?       @relation("BatchGreenInventory", fields: [greenInventoryItemId], references: [id])
   roastedInventoryItem InventoryItem?       @relation("BatchRoastedInventory", fields: [roastedInventoryItemId], references: [id])
   skuLinks             BatchSkuLink[]
@@ -736,6 +914,7 @@ model RoastBatch {
   @@index([roastLevel])
   @@index([greenInventoryItemId])
   @@index([roastedInventoryItemId])
+  @@index([locationId])
 }
 
 model BatchSkuLink {
@@ -753,6 +932,147 @@ model BatchSkuLink {
 // ---------------------------------------------------------------------------
 // Inventory (ledger model: current stock = signed sum of movements)
 // ---------------------------------------------------------------------------
+
+model StockLocation {
+  id                   String            @id @default(cuid())
+  branchId             String
+  code                 String            @unique
+  nameEn               String
+  nameAr               String
+  type                 StockLocationType
+  isActive             Boolean           @default(true)
+  isSystem             Boolean           @default(false)
+  isCentralFulfillment Boolean           @default(false)
+  stockVersion         Int               @default(1)
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+
+  branch                Branch                      @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  defaultForUsers       User[]                      @relation("UserDefaultStockLocation")
+  userAccesses          UserLocationAccess[]
+  policies              InventoryLocationPolicy[]
+  movements             StockMovement[]
+  sourceDocuments       StockDocument[]             @relation("StockDocumentSource")
+  destinationDocuments  StockDocument[]             @relation("StockDocumentDestination")
+  orders                Order[]
+  reservations          StockReservation[]
+  packingBatches        PackingBatch[]
+  inventoryCounts       InventoryCount[]
+  replenishmentRequests StockReplenishmentRequest[] @relation("ReplenishmentDestination")
+  replenishmentSources  StockReplenishmentRequest[] @relation("ReplenishmentSource")
+  financeAccounts       FinanceAccount[]
+  financeEntries        FinanceEntry[]
+  roastBatches          RoastBatch[]
+  expensePolicy         LocationExpensePolicy?
+  variancePolicy        InventoryVariancePolicy?
+  localExpenseRequests  LocalExpenseRequest[]
+
+  @@index([branchId, type, isActive])
+  @@index([isCentralFulfillment])
+}
+
+model UserLocationAccess {
+  id               String   @id @default(cuid())
+  userId           String
+  locationId       String
+  canView          Boolean  @default(true)
+  canSell          Boolean  @default(false)
+  canReceive       Boolean  @default(false)
+  canCount         Boolean  @default(false)
+  canRecordExpense Boolean  @default(false)
+  canProduce       Boolean  @default(false)
+  canDispatch      Boolean  @default(false)
+  canApprove       Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  location StockLocation @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, locationId])
+  @@index([locationId])
+}
+
+model InventoryLocationPolicy {
+  id              String   @id @default(cuid())
+  inventoryItemId String
+  locationId      String
+  reorderPoint    Decimal? @db.Decimal(14, 3)
+  targetLevel     Decimal? @db.Decimal(14, 3)
+  canSell         Boolean  @default(false)
+  canProduce      Boolean  @default(false)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  inventoryItem InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+  location      StockLocation @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@unique([inventoryItemId, locationId])
+  @@index([locationId, isActive])
+}
+
+model InventoryVariancePolicy {
+  id                        String   @id @default(cuid())
+  locationId                String   @unique
+  isActive                  Boolean  @default(false)
+  openingBalanceAccountCode String?
+  inventoryGainAccountCode  String?
+  inventoryLossAccountCode  String?
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+
+  location StockLocation @relation(fields: [locationId], references: [id], onDelete: Cascade)
+}
+
+model StockDocument {
+  id                    String              @id @default(cuid())
+  documentNumber        String              @unique
+  type                  StockDocumentType
+  status                StockDocumentStatus @default(DRAFT)
+  sourceLocationId      String?
+  destinationLocationId String?
+  occurredAt            DateTime
+  expectedAt            DateTime?
+  confirmedAt           DateTime?
+  reason                String?
+  notes                 String?
+  idempotencyKey        String?             @unique
+  inputHash             String?
+  version               Int                 @default(1)
+  createdById           String?
+  confirmedById         String?
+  partyId               String?
+  parentDocumentId      String?
+  reversalOfId          String?             @unique
+  returnDisposition     ReturnDisposition?
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+
+  sourceLocation         StockLocation?       @relation("StockDocumentSource", fields: [sourceLocationId], references: [id], onDelete: Restrict)
+  destinationLocation    StockLocation?       @relation("StockDocumentDestination", fields: [destinationLocationId], references: [id], onDelete: Restrict)
+  createdBy              User?                @relation("StockDocumentCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  confirmedBy            User?                @relation("StockDocumentConfirmedBy", fields: [confirmedById], references: [id], onDelete: SetNull)
+  party                  Party?               @relation(fields: [partyId], references: [id], onDelete: SetNull)
+  parentDocument         StockDocument?       @relation("StockDocumentParent", fields: [parentDocumentId], references: [id], onDelete: SetNull)
+  childDocuments         StockDocument[]      @relation("StockDocumentParent")
+  reversalOf             StockDocument?       @relation("StockDocumentReversal", fields: [reversalOfId], references: [id], onDelete: SetNull)
+  reversedByDocument     StockDocument?       @relation("StockDocumentReversal")
+  movements              StockMovement[]
+  costLayers             InventoryCostLayer[]
+  packingBatch           PackingBatch?
+  roastBatch             RoastBatch?
+  inventoryCount         InventoryCount?
+  discrepancies          StockDiscrepancy[]   @relation("StockDiscrepancyReportedDocument")
+  discrepancyResolutions StockDiscrepancy[]   @relation("StockDiscrepancyResolutionDocument")
+
+  @@index([type, status, occurredAt])
+  @@index([sourceLocationId])
+  @@index([destinationLocationId])
+  @@index([createdById])
+  @@index([partyId])
+  @@index([parentDocumentId])
+}
 
 model InventoryItem {
   id            String            @id @default(cuid())
@@ -778,6 +1098,14 @@ model InventoryItem {
   greenBatches          RoastBatch[]                    @relation("BatchGreenInventory")
   roastedBatches        RoastBatch[]                    @relation("BatchRoastedInventory")
   landedCostAllocations InventoryLandedCostAllocation[]
+  locationPolicies      InventoryLocationPolicy[]
+  reservations          StockReservation[]
+  inventoryCountLines   InventoryCountLine[]
+  packingInputs         PackingBatchComponent[]
+  packingOutputs        PackingBatch[]                  @relation("PackingOutputItem")
+  recipeVersionUses     ProductRecipeComponent[]
+  replenishmentRequests StockReplenishmentRequest[]
+  stockDiscrepancies    StockDiscrepancy[]
 
   @@index([category])
 }
@@ -787,23 +1115,35 @@ model InventoryItem {
 // adjust it automatically. The active (oldest non-empty) layer drives the
 // item's current cost.
 model InventoryCostLayer {
-  id              String   @id @default(cuid())
+  id              String    @id @default(cuid())
   inventoryItemId String
   financeEntryId  String?
   roastBatchId    String?
-  qtyReceived     Decimal  @db.Decimal(14, 3)
-  unitCost        Decimal  @db.Decimal(14, 3) // minor units IQD per unit
+  stockDocumentId String?
+  lotNumber       String?   @unique
+  supplierLot     String?
+  roastDate       DateTime?
+  packedAt        DateTime?
+  bestBefore      DateTime?
+  qtyReceived     Decimal   @db.Decimal(14, 3)
+  unitCost        Decimal   @db.Decimal(14, 3) // minor units IQD per unit
   receivedAt      DateTime
-  createdAt       DateTime @default(now())
+  createdAt       DateTime  @default(now())
 
   inventoryItem         InventoryItem                   @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
   financeEntry          FinanceEntry?                   @relation(fields: [financeEntryId], references: [id], onDelete: SetNull)
   roastBatch            RoastBatch?                     @relation(fields: [roastBatchId], references: [id], onDelete: Cascade)
+  stockDocument         StockDocument?                  @relation(fields: [stockDocumentId], references: [id], onDelete: SetNull)
   landedCostAllocations InventoryLandedCostAllocation[]
+  stockMovements        StockMovement[]
+  packingComponents     PackingBatchComponent[]
+  outputOfPackingBatch  PackingBatch?                   @relation("PackingOutputLot")
 
   @@index([inventoryItemId, receivedAt])
   @@index([financeEntryId])
   @@index([roastBatchId])
+  @@index([stockDocumentId])
+  @@index([bestBefore])
 }
 
 model StockMovement {
@@ -820,19 +1160,312 @@ model StockMovement {
   uploadBatchId   String?
   orderId         String? // sales deduction source (variations module §18)
   roastBatchId    String?
+  locationId      String?
+  stockDocumentId String?
+  costLayerId     String?
+  orderLineId     String?
   createdAt       DateTime       @default(now())
 
-  inventoryItem InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
-  financeEntry  FinanceEntry? @relation(fields: [financeEntryId], references: [id], onDelete: SetNull)
-  branch        Branch?       @relation(fields: [branchId], references: [id])
-  order         Order?        @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  roastBatch    RoastBatch?   @relation(fields: [roastBatchId], references: [id], onDelete: Cascade)
+  inventoryItem InventoryItem       @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+  financeEntry  FinanceEntry?       @relation(fields: [financeEntryId], references: [id], onDelete: SetNull)
+  branch        Branch?             @relation(fields: [branchId], references: [id])
+  order         Order?              @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  roastBatch    RoastBatch?         @relation(fields: [roastBatchId], references: [id], onDelete: Cascade)
+  location      StockLocation?      @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  stockDocument StockDocument?      @relation(fields: [stockDocumentId], references: [id], onDelete: SetNull)
+  costLayer     InventoryCostLayer? @relation(fields: [costLayerId], references: [id], onDelete: SetNull)
+  orderLine     OrderLine?          @relation(fields: [orderLineId], references: [id], onDelete: Cascade)
 
   @@index([inventoryItemId, occurredAt])
   @@index([financeEntryId])
   @@index([reason])
   @@index([orderId])
   @@index([roastBatchId])
+  @@index([locationId, inventoryItemId, occurredAt])
+  @@index([stockDocumentId])
+  @@index([costLayerId])
+  @@index([orderLineId])
+}
+
+model StockReservation {
+  id                    String                 @id @default(cuid())
+  inventoryItemId       String
+  locationId            String
+  orderId               String?
+  orderLineId           String?
+  quantity              Decimal                @db.Decimal(14, 3)
+  status                StockReservationStatus @default(ACTIVE)
+  expiresAt             DateTime?
+  committedAt           DateTime?
+  releasedAt            DateTime?
+  idempotencyKey        String?                @unique
+  inputHash             String?
+  createdById           String?
+  releaseIdempotencyKey String?                @unique
+  releaseInputHash      String?
+  releaseReason         String?
+  releasedById          String?
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+
+  inventoryItem InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+  location      StockLocation @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  order         Order?        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderLine     OrderLine?    @relation(fields: [orderLineId], references: [id], onDelete: Cascade)
+  createdBy     User?         @relation("StockReservationCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  releasedBy    User?         @relation("StockReservationReleasedBy", fields: [releasedById], references: [id], onDelete: SetNull)
+
+  @@index([locationId, inventoryItemId, status])
+  @@index([orderId])
+  @@index([expiresAt, status])
+  @@index([createdById])
+  @@index([releasedById])
+}
+
+model PackingBatch {
+  id                    String    @id @default(cuid())
+  batchNumber           String    @unique
+  locationId            String
+  productId             String
+  outputInventoryItemId String
+  recipeVersionId       String?
+  stockDocumentId       String    @unique
+  outputLotId           String?   @unique
+  outputQuantity        Decimal   @db.Decimal(14, 3)
+  rejectedQuantity      Decimal   @default(0) @db.Decimal(14, 3)
+  packedAt              DateTime
+  bestBefore            DateTime?
+  totalCost             Decimal   @db.Decimal(14, 3)
+  unitCost              Decimal   @db.Decimal(14, 3)
+  notes                 String?
+  operatorId            String?
+  idempotencyKey        String?   @unique
+  createdAt             DateTime  @default(now())
+
+  location            StockLocation           @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  product             Product                 @relation(fields: [productId], references: [id], onDelete: Restrict)
+  outputInventoryItem InventoryItem           @relation("PackingOutputItem", fields: [outputInventoryItemId], references: [id], onDelete: Restrict)
+  recipeVersion       ProductRecipeVersion?   @relation(fields: [recipeVersionId], references: [id], onDelete: SetNull)
+  stockDocument       StockDocument           @relation(fields: [stockDocumentId], references: [id], onDelete: Restrict)
+  outputLot           InventoryCostLayer?     @relation("PackingOutputLot", fields: [outputLotId], references: [id], onDelete: SetNull)
+  operator            User?                   @relation("PackingBatchOperator", fields: [operatorId], references: [id], onDelete: SetNull)
+  components          PackingBatchComponent[]
+
+  @@index([locationId, packedAt])
+  @@index([productId, packedAt])
+  @@index([operatorId])
+}
+
+model PackingBatchComponent {
+  id              String   @id @default(cuid())
+  packingBatchId  String
+  inventoryItemId String
+  costLayerId     String?
+  quantity        Decimal  @db.Decimal(14, 3)
+  unitCost        Decimal  @db.Decimal(14, 3)
+  createdAt       DateTime @default(now())
+
+  packingBatch  PackingBatch        @relation(fields: [packingBatchId], references: [id], onDelete: Cascade)
+  inventoryItem InventoryItem       @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
+  costLayer     InventoryCostLayer? @relation(fields: [costLayerId], references: [id], onDelete: SetNull)
+
+  @@index([packingBatchId])
+  @@index([inventoryItemId])
+  @@index([costLayerId])
+}
+
+model InventoryCount {
+  id                      String               @id @default(cuid())
+  countNumber             String               @unique
+  locationId              String
+  kind                    InventoryCountKind   @default(ROUTINE)
+  status                  InventoryCountStatus @default(SUBMITTED)
+  countedAt               DateTime
+  reason                  String?
+  locationVersionSnapshot Int
+  openingAttestation      String?
+  openingAttestedAt       DateTime?
+  submittedById           String
+  approvedById            String?
+  approvedAt              DateTime?
+  rejectedById            String?
+  rejectedAt              DateTime?
+  rejectionReason         String?
+  stockDocumentId         String?              @unique
+  idempotencyKey          String?              @unique
+  inputHash               String?
+  reviewIdempotencyKey    String?              @unique
+  reviewInputHash         String?
+  version                 Int                  @default(1)
+  createdAt               DateTime             @default(now())
+  updatedAt               DateTime             @updatedAt
+
+  location       StockLocation        @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  submittedBy    User                 @relation("InventoryCountSubmittedBy", fields: [submittedById], references: [id], onDelete: Restrict)
+  approvedBy     User?                @relation("InventoryCountApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  rejectedBy     User?                @relation("InventoryCountRejectedBy", fields: [rejectedById], references: [id], onDelete: SetNull)
+  stockDocument  StockDocument?       @relation(fields: [stockDocumentId], references: [id], onDelete: SetNull)
+  lines          InventoryCountLine[]
+  financeEntries FinanceEntry[]
+
+  @@index([locationId, kind, status, countedAt])
+  @@index([submittedById])
+  @@index([approvedById])
+  @@index([rejectedById])
+}
+
+model InventoryCountLine {
+  id               String  @id @default(cuid())
+  inventoryCountId String
+  inventoryItemId  String
+  expectedQuantity Decimal @db.Decimal(14, 3)
+  countedQuantity  Decimal @db.Decimal(14, 3)
+  difference       Decimal @db.Decimal(14, 3)
+  notes            String?
+
+  inventoryCount InventoryCount @relation(fields: [inventoryCountId], references: [id], onDelete: Cascade)
+  inventoryItem  InventoryItem  @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
+
+  @@unique([inventoryCountId, inventoryItemId])
+  @@index([inventoryItemId])
+}
+
+model StockReplenishmentRequest {
+  id                   String              @id @default(cuid())
+  requestNumber        String              @unique
+  inventoryItemId      String
+  locationId           String
+  sourceLocationId     String?
+  orderId              String?
+  quantity             Decimal             @db.Decimal(14, 3)
+  status               ReplenishmentStatus @default(OPEN)
+  createdById          String?
+  reviewedById         String?
+  reviewedAt           DateTime?
+  reviewReason         String?
+  notes                String?
+  idempotencyKey       String?             @unique
+  inputHash            String?
+  reviewIdempotencyKey String?             @unique
+  reviewInputHash      String?
+  version              Int                 @default(1)
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
+  inventoryItem  InventoryItem  @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
+  location       StockLocation  @relation("ReplenishmentDestination", fields: [locationId], references: [id], onDelete: Restrict)
+  sourceLocation StockLocation? @relation("ReplenishmentSource", fields: [sourceLocationId], references: [id], onDelete: SetNull)
+  order          Order?         @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  createdBy      User?          @relation("ReplenishmentCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  reviewedBy     User?          @relation("ReplenishmentReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([locationId, status])
+  @@index([sourceLocationId])
+  @@index([inventoryItemId])
+  @@index([orderId])
+  @@index([reviewedById])
+}
+
+model StockDiscrepancy {
+  id                   String                 @id @default(cuid())
+  stockDocumentId      String
+  inventoryItemId      String
+  type                 StockDiscrepancyType
+  status               StockDiscrepancyStatus @default(OPEN)
+  quantity             Decimal                @db.Decimal(14, 3)
+  reportedUnitCost     Decimal?               @db.Decimal(14, 3)
+  stockEffectPending   Boolean                @default(true)
+  notes                String?
+  reportedById         String
+  resolvedById         String?
+  resolution           String?
+  resolutionDocumentId String?                @unique
+  financeEntryId       String?                @unique
+  reviewIdempotencyKey String?                @unique
+  reviewInputHash      String?
+  version              Int                    @default(1)
+  resolvedAt           DateTime?
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+
+  stockDocument      StockDocument  @relation("StockDiscrepancyReportedDocument", fields: [stockDocumentId], references: [id], onDelete: Cascade)
+  resolutionDocument StockDocument? @relation("StockDiscrepancyResolutionDocument", fields: [resolutionDocumentId], references: [id], onDelete: SetNull)
+  financeEntry       FinanceEntry?  @relation(fields: [financeEntryId], references: [id], onDelete: SetNull)
+  inventoryItem      InventoryItem  @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
+  reportedBy         User           @relation("StockDiscrepancyReportedBy", fields: [reportedById], references: [id], onDelete: Restrict)
+  resolvedBy         User?          @relation("StockDiscrepancyResolvedBy", fields: [resolvedById], references: [id], onDelete: SetNull)
+
+  @@index([stockDocumentId, status])
+  @@index([inventoryItemId])
+  @@index([reportedById])
+  @@index([resolvedById])
+}
+
+model LocationExpensePolicy {
+  id                   String                @id @default(cuid())
+  locationId           String                @unique
+  isActive             Boolean               @default(false)
+  allowedCategories    ExpenseCategoryType[]
+  maxImmediateAmount   Int                   @default(0)
+  receiptRequiredAbove Int                   @default(0)
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+
+  location StockLocation @relation(fields: [locationId], references: [id], onDelete: Cascade)
+}
+
+model LocalExpenseRequest {
+  id                   String                    @id @default(cuid())
+  requestNumber        String                    @unique
+  locationId           String
+  accountId            String
+  amount               Int
+  categoryType         ExpenseCategoryType
+  date                 DateTime
+  description          String
+  noReceiptReason      String?
+  status               LocalExpenseRequestStatus @default(SUBMITTED)
+  idempotencyKey       String                    @unique
+  inputHash            String
+  reviewIdempotencyKey String?                   @unique
+  reviewInputHash      String?
+  version              Int                       @default(1)
+  submittedById        String
+  reviewedById         String?
+  reviewedAt           DateTime?
+  reviewReason         String?
+  financeEntryId       String?                   @unique
+  createdAt            DateTime                  @default(now())
+  updatedAt            DateTime                  @updatedAt
+
+  location     StockLocation           @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  account      FinanceAccount          @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  submittedBy  User                    @relation("LocalExpenseSubmittedBy", fields: [submittedById], references: [id], onDelete: Restrict)
+  reviewedBy   User?                   @relation("LocalExpenseReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+  financeEntry FinanceEntry?           @relation(fields: [financeEntryId], references: [id], onDelete: SetNull)
+  attachment   LocalExpenseAttachment?
+
+  @@index([locationId, status, date])
+  @@index([accountId])
+  @@index([submittedById])
+  @@index([reviewedById])
+}
+
+model LocalExpenseAttachment {
+  id           String   @id @default(cuid())
+  requestId    String   @unique
+  fileName     String
+  mimeType     String
+  byteSize     Int
+  checksum     String
+  content      Bytes
+  uploadedById String
+  createdAt    DateTime @default(now())
+
+  request    LocalExpenseRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  uploadedBy User                @relation("LocalExpenseAttachmentUploadedBy", fields: [uploadedById], references: [id], onDelete: Restrict)
+
+  @@index([uploadedById])
 }
 
 model LedgerEntryLine {
@@ -1531,6 +2164,8 @@ enum FinanceType {
   CAPITAL_IN
   DRAWING
   TRANSFER
+  INVENTORY_GAIN
+  INVENTORY_LOSS
 }
 
 enum LedgerRecordClass {
@@ -1545,25 +2180,29 @@ enum ObligationKind {
 }
 
 model FinanceAccount {
-  id             String      @id @default(cuid())
-  externalKey    String?     @unique
-  name           String
-  type           AccountType
-  bankName       String?
-  branchId       String? // for CASH accounts: which branch holds the cash
-  currency       Currency    @default(IQD)
-  openingBalance Int         @default(0) // minor units
-  notes          String?
-  isActive       Boolean     @default(true)
-  createdAt      DateTime    @default(now())
+  id              String      @id @default(cuid())
+  externalKey     String?     @unique
+  name            String
+  type            AccountType
+  bankName        String?
+  branchId        String? // for CASH accounts: which branch holds the cash
+  stockLocationId String?
+  currency        Currency    @default(IQD)
+  openingBalance  Int         @default(0) // minor units
+  notes           String?
+  isActive        Boolean     @default(true)
+  createdAt       DateTime    @default(now())
 
-  entries             FinanceEntry[]       @relation("AccountEntries")
-  transfers           FinanceEntry[]       @relation("TransferTo")
-  providerSettlements ProviderSettlement[]
-  settlementParties   Party[]              @relation("PartyDefaultSettlementAccount")
-  defaultForUsers     User[]               @relation("UserDefaultFinanceAccount")
+  entries              FinanceEntry[]        @relation("AccountEntries")
+  transfers            FinanceEntry[]        @relation("TransferTo")
+  providerSettlements  ProviderSettlement[]
+  settlementParties    Party[]               @relation("PartyDefaultSettlementAccount")
+  defaultForUsers      User[]                @relation("UserDefaultFinanceAccount")
+  stockLocation        StockLocation?        @relation(fields: [stockLocationId], references: [id], onDelete: SetNull)
+  localExpenseRequests LocalExpenseRequest[]
 
   @@index([type])
+  @@index([stockLocationId])
 }
 
 model Party {
@@ -1595,6 +2234,7 @@ model Party {
   defaultSettlementAccount   FinanceAccount?             @relation("PartyDefaultSettlementAccount", fields: [defaultSettlementAccountId], references: [id], onDelete: SetNull)
   providerSettlements        ProviderSettlement[]
   paymentReconciliationItems PaymentReconciliationItem[]
+  stockDocuments             StockDocument[]
 
   @@index([type])
   @@index([branchId])
@@ -1655,13 +2295,17 @@ model FinanceEntry {
   reference            String?
   attachmentUrl        String?
   branchId             String?
+  stockLocationId      String?
+  inventoryCountId     String?
+  accountingCode       String?
+  isOpeningBalance     Boolean              @default(false)
   orderId              String?
   createdById          String?
   providerSettlementId String?
   archivedAt           DateTime?
   archivedById         String?
   archiveReason        String?
-  reversalOfId         String?
+  reversalOfId         String?              @unique
   reversedAt           DateTime?
   reversedById         String?
   reversalReason       String?
@@ -1681,6 +2325,10 @@ model FinanceEntry {
   landedCostAllocations     InventoryLandedCostAllocation[]
   reconciliationReceipt     PaymentReconciliationItem?      @relation("PaymentReconciliationReceipt")
   reconciliationFee         PaymentReconciliationItem?      @relation("PaymentReconciliationFee")
+  stockLocation             StockLocation?                  @relation(fields: [stockLocationId], references: [id], onDelete: SetNull)
+  inventoryCount            InventoryCount?                 @relation(fields: [inventoryCountId], references: [id], onDelete: SetNull)
+  stockDiscrepancy          StockDiscrepancy?
+  localExpenseRequest       LocalExpenseRequest?
 
   @@index([date])
   @@index([type])
@@ -1692,11 +2340,14 @@ model FinanceEntry {
   @@index([paymentMethod])
   @@index([settlesId])
   @@index([branchId])
+  @@index([stockLocationId])
+  @@index([inventoryCountId])
+  @@index([accountingCode])
+  @@index([isOpeningBalance])
   @@index([orderId])
   @@index([createdById])
   @@index([providerSettlementId])
   @@index([archivedAt])
-  @@index([reversalOfId])
 }
 
 model FixedAssetCostAllocation {

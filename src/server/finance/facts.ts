@@ -19,8 +19,13 @@ import {
   getPromotionCosts,
 } from '@/server/db/repositories/sales.repo';
 import { getUsdToIqd } from '@/server/settings';
+import {
+  buildFinanceAccountScopeWhere,
+  buildFinanceEntryScopeWhere,
+  type DataScope,
+} from '@/server/filters/where-builder';
 
-type Scope = { branchId?: string };
+type Scope = DataScope;
 
 export interface ProfitFacts {
   orders: OrderLike[];
@@ -91,14 +96,19 @@ export async function getPaymentFacts(
   scope: Scope,
   range: ResolvedRange,
 ): Promise<PaymentFacts> {
-  const branchWhere = scope.branchId
-    ? { branchId: scope.branchId }
+  const accountWhere = scope.locationIds !== undefined || scope.branchId
+    ? buildFinanceAccountScopeWhere(scope)
+    : filters.branchId?.length
+      ? { branchId: { in: filters.branchId } }
+      : {};
+  const entryWhere = scope.locationIds !== undefined || scope.branchId
+    ? buildFinanceEntryScopeWhere(scope)
     : filters.branchId?.length
       ? { branchId: { in: filters.branchId } }
       : {};
   const [accounts, entriesRaw, rate] = await Promise.all([
     prisma.financeAccount.findMany({
-      where: { isActive: true, ...branchWhere },
+      where: { isActive: true, ...accountWhere },
       orderBy: { createdAt: 'asc' },
       select: {
         id: true,
@@ -112,7 +122,7 @@ export async function getPaymentFacts(
         reversedAt: null,
         reversalOfId: null,
         date: { lte: range.end },
-        ...branchWhere,
+        ...entryWhere,
       },
       select: {
         id: true,
@@ -127,6 +137,7 @@ export async function getPaymentFacts(
         archivedAt: true,
         reversedAt: true,
         reversalOfId: true,
+        isOpeningBalance: true,
         date: true,
         dueDate: true,
       },
