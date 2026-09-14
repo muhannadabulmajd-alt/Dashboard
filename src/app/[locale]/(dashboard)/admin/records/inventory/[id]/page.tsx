@@ -25,6 +25,7 @@ import {
   resolveLocationObjectScope,
 } from '@/server/inventory-v2/object-scope';
 import { getLocationAvailability } from '@/server/inventory-v2/availability';
+import { inventoryReadTransaction } from '@/server/inventory-v2/read-transaction';
 import { saveInventoryLocationPolicyAction } from '@/server/inventory-v2/setup-actions';
 import { receivePurchasedStockAction } from '@/server/inventory-v2/operations-actions';
 import { PurchaseReceiptForm } from '@/components/records/PurchaseReceiptForm';
@@ -92,7 +93,7 @@ export default async function InventoryDetailPage({
   ]);
   if (!item) notFound();
   const locationAvailability = inventoryV2Enabled
-    ? await prisma.$transaction(async (tx) => Promise.all(
+    ? await inventoryReadTransaction(async (tx) => Promise.all(
         item.locationPolicies
           .filter((policy) => policy.isActive)
           .map((policy) => getLocationAvailability(tx, item.id, policy.locationId)),

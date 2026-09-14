@@ -8,6 +8,7 @@ import { prisma } from '@/server/db/client';
 import { getOrderStatusRoleMap } from '@/server/lists/resolver';
 import { assertLocationPermission } from './access';
 import { getLocationAvailability } from './availability';
+import { inventoryReadTransaction } from './read-transaction';
 import { outstandingTransferLots } from './transfers';
 
 export type InventoryArea = 'overview' | 'green' | 'roasted' | 'packaging' | 'finished';
@@ -83,7 +84,7 @@ export async function getInventoryLocationOverview(
     .map(([status]) => status);
   const today = resolveRange({ range: 'today' });
 
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await inventoryReadTransaction(async (tx) => {
     const location = await assertLocationPermission(tx, actor, locationId, 'view');
     const categories = categoriesForInventoryArea(input.area ?? 'overview');
     const [

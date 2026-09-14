@@ -34,6 +34,7 @@ import {
   type LocationPermission,
 } from '@/server/inventory-v2/access';
 import { getInventoryLocationOverview } from '@/server/inventory-v2/overview';
+import { inventoryReadTransaction } from '@/server/inventory-v2/read-transaction';
 import { getReturnedLotBalances } from '@/server/inventory-v2/returns';
 import { stockDocumentReversalBlockCode } from '@/server/inventory-v2/reversals';
 import { outstandingTransferLots } from '@/server/inventory-v2/transfers';
@@ -3222,7 +3223,9 @@ async function prepareReceiveStockTransfer(raw: unknown, context: ToolContext): 
     select: { id: true, nameEn: true, nameAr: true, stockVersion: true },
   });
   if (!transit) return noMatch(context.locale, 'transferQuery', localized(context.locale, 'destination transit location', 'موقع النقل المؤقت للوجهة'));
-  const outstandingLots = await prisma.$transaction((tx) => outstandingTransferLots(tx, transfer.id, transit.id));
+  const outstandingLots = await inventoryReadTransaction(
+    (tx) => outstandingTransferLots(tx, transfer.id, transit.id),
+  );
   const outstandingIds = [...outstandingLots.keys()];
   if (!outstandingIds.length) {
     return clarificationResult({

@@ -8,6 +8,7 @@ import { formatQuantity } from '@/lib/money';
 import { formatDate } from '@/lib/dates';
 import { getInventoryV2Config } from '@/server/inventory-v2/config';
 import { getLocationAvailability } from '@/server/inventory-v2/availability';
+import { inventoryReadTransaction } from '@/server/inventory-v2/read-transaction';
 import {
   saveInventoryVariancePolicyAction,
   saveStockLocationAction,
@@ -65,7 +66,7 @@ export default async function StockLocationDetailPage({
     }),
   ]);
   if (!location) notFound();
-  const availability = await prisma.$transaction(async (tx) => Promise.all(
+  const availability = await inventoryReadTransaction(async (tx) => Promise.all(
     location.policies.map((policy) => getLocationAvailability(tx, policy.inventoryItemId, location.id)),
   ));
   const availabilityByItem = new Map(availability.map((row) => [row.inventoryItemId, row]));

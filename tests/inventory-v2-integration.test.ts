@@ -14,6 +14,7 @@ import { createTrustedCommandContext } from '@/server/commands/actor-context';
 import { prisma } from '@/server/db/client';
 import { formatProductBarcode, formatRetailBarcode } from '@/lib/barcode';
 import { getLocationAvailability } from '@/server/inventory-v2/availability';
+import { inventoryReadTransaction } from '@/server/inventory-v2/read-transaction';
 import { rejectInventoryCount, submitInventoryCount } from '@/server/inventory-v2/counts';
 import { resolveStockDiscrepancy } from '@/server/inventory-v2/discrepancies';
 import { recordLocalExpense, reviewLocalExpense } from '@/server/inventory-v2/local-expenses';
@@ -75,7 +76,7 @@ async function locationVersion(locationId: string): Promise<number> {
 }
 
 async function availability(inventoryItemId: string, locationId: string) {
-  return prisma.$transaction((tx) => getLocationAvailability(
+  return inventoryReadTransaction((tx) => getLocationAvailability(
     tx,
     inventoryItemId,
     locationId,

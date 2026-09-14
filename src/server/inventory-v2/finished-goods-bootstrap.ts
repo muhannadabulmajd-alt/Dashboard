@@ -13,6 +13,7 @@ import {
   finishedGoodsExternalKey,
 } from './finished-goods-contracts';
 import { auditStockCommand, bumpLocationVersion } from './internal';
+import { inventoryReadTransaction } from './read-transaction';
 
 const idempotencyKey = z.string().trim().min(8).max(191);
 
@@ -130,7 +131,7 @@ export async function getFinishedGoodsBootstrapReadiness() {
     };
   }
   const centralLocation = centralLocations[0];
-  const products = await prisma.$transaction((tx) => trackedProductDefinitions(tx, centralLocation.id));
+  const products = await inventoryReadTransaction((tx) => trackedProductDefinitions(tx, centralLocation.id));
   const missing = products.filter((product) => finishedGoodsDefinitionState(product.inventoryItems) === 'MISSING');
   const ready = products.filter((product) => finishedGoodsDefinitionState(product.inventoryItems) === 'READY');
   const conflicts = products

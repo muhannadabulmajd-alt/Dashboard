@@ -3,7 +3,6 @@ import 'server-only';
 import type { Prisma } from '@prisma/client';
 import type { CurrentUser } from '@/server/auth/session';
 import { decimalNumber } from '@/lib/decimal';
-import { prisma } from '@/server/db/client';
 import {
   hasGlobalLocationAccess,
   stockLocationWhereForPermission,
@@ -11,6 +10,7 @@ import {
 } from './access';
 import { getLocationAvailability, getLotBalances } from './availability';
 import { resolveLocationObjectScope, stockDocumentWhereForScope } from './object-scope';
+import { inventoryReadTransaction } from './read-transaction';
 import { stockDocumentReversalBlockCode } from './reversals';
 import { getReturnedLotBalances } from './returns';
 
@@ -57,7 +57,7 @@ async function operationLocations(
 }
 
 export async function getTransferIndexData(actor: CurrentUser) {
-  return prisma.$transaction(async (tx) => {
+  return inventoryReadTransaction(async (tx) => {
     const [sources, destinations, viewLocationIds, transitLocations] = await Promise.all([
       operationLocations(tx, actor, 'dispatch'),
       operationLocations(tx, actor, 'view'),
@@ -114,7 +114,7 @@ export async function getTransferIndexData(actor: CurrentUser) {
 }
 
 export async function getTransferDetailData(actor: CurrentUser, stockDocumentId: string) {
-  return prisma.$transaction(async (tx) => {
+  return inventoryReadTransaction(async (tx) => {
     const document = await tx.stockDocument.findUnique({
       where: { id: stockDocumentId },
       include: {
@@ -191,7 +191,7 @@ export async function getTransferDetailData(actor: CurrentUser, stockDocumentId:
 }
 
 export async function getStockDocumentDetailData(actor: CurrentUser, stockDocumentId: string) {
-  return prisma.$transaction(async (tx) => {
+  return inventoryReadTransaction(async (tx) => {
     const scope = await resolveLocationObjectScope(actor, tx);
     const document = await tx.stockDocument.findFirst({
       where: { id: stockDocumentId, ...stockDocumentWhereForScope(scope) },
@@ -259,7 +259,7 @@ export async function getStockDocumentDetailData(actor: CurrentUser, stockDocume
 }
 
 export async function getCountIndexData(actor: CurrentUser) {
-  return prisma.$transaction(async (tx) => {
+  return inventoryReadTransaction(async (tx) => {
     const [locations, viewLocationIds] = await Promise.all([
       operationLocations(tx, actor, 'count'),
       locationIdsForPermission(tx, actor, 'view'),
@@ -288,7 +288,7 @@ export async function getCountIndexData(actor: CurrentUser) {
 }
 
 export async function getCountDetailData(actor: CurrentUser, inventoryCountId: string) {
-  return prisma.$transaction(async (tx) => {
+  return inventoryReadTransaction(async (tx) => {
     const count = await tx.inventoryCount.findUnique({
       where: { id: inventoryCountId },
       include: {
@@ -322,7 +322,7 @@ export async function getCountDetailData(actor: CurrentUser, inventoryCountId: s
 }
 
 export async function getLotsViewData(actor: CurrentUser, requestedLocationId?: string) {
-  return prisma.$transaction(async (tx) => {
+  return inventoryReadTransaction(async (tx) => {
     const locations = await operationLocations(tx, actor, 'view');
     const location = locations.find((row) => row.id === requestedLocationId)
       ?? locations.find((row) => row.id === actor.defaultStockLocationId)
@@ -341,7 +341,7 @@ export async function getLotsViewData(actor: CurrentUser, requestedLocationId?: 
 }
 
 export async function getMovementHistoryData(actor: CurrentUser, requestedLocationId?: string) {
-  return prisma.$transaction(async (tx) => {
+  return inventoryReadTransaction(async (tx) => {
     const locations = await operationLocations(tx, actor, 'view');
     const location = locations.find((row) => row.id === requestedLocationId)
       ?? locations.find((row) => row.id === actor.defaultStockLocationId)
@@ -364,7 +364,7 @@ export async function getMovementHistoryData(actor: CurrentUser, requestedLocati
 }
 
 export async function getPackingIndexData(actor: CurrentUser) {
-  return prisma.$transaction(async (tx) => {
+  return inventoryReadTransaction(async (tx) => {
     const [locations, viewLocationIds, activeRecipes] = await Promise.all([
       operationLocations(tx, actor, 'produce'),
       locationIdsForPermission(tx, actor, 'view'),
@@ -409,7 +409,7 @@ export async function getPackingIndexData(actor: CurrentUser) {
 }
 
 export async function getPackingDetailData(actor: CurrentUser, packingBatchId: string) {
-  return prisma.$transaction(async (tx) => {
+  return inventoryReadTransaction(async (tx) => {
     const batch = await tx.packingBatch.findUnique({
       where: { id: packingBatchId },
       include: {
@@ -434,7 +434,7 @@ export async function getPackingDetailData(actor: CurrentUser, packingBatchId: s
 }
 
 export async function getRoastFormData(actor: CurrentUser) {
-  return prisma.$transaction(async (tx) => {
+  return inventoryReadTransaction(async (tx) => {
     const locations = await operationLocations(tx, actor, 'produce');
     return Promise.all(locations.map(async (location) => ({
       ...location,
@@ -452,7 +452,7 @@ export async function getRoastFormData(actor: CurrentUser) {
 }
 
 export async function getReturnIndexData(actor: CurrentUser) {
-  return prisma.$transaction(async (tx) => {
+  return inventoryReadTransaction(async (tx) => {
     const viewLocationIds = await locationIdsForPermission(tx, actor, 'view');
     const documents = await tx.stockDocument.findMany({
       where: {
@@ -495,7 +495,7 @@ export async function getReturnIndexData(actor: CurrentUser) {
 }
 
 export async function getReturnDetailData(actor: CurrentUser, returnDocumentId: string) {
-  return prisma.$transaction(async (tx) => {
+  return inventoryReadTransaction(async (tx) => {
     const document = await tx.stockDocument.findUnique({
       where: { id: returnDocumentId },
       include: {
@@ -572,7 +572,7 @@ export async function getReturnDetailData(actor: CurrentUser, returnDocumentId: 
 }
 
 export async function getOrderReturnOptions(actor: CurrentUser, orderId: string) {
-  return prisma.$transaction(async (tx) => {
+  return inventoryReadTransaction(async (tx) => {
     const order = await tx.order.findUnique({
       where: { id: orderId },
       select: {
