@@ -58,7 +58,11 @@ test.describe.serial('Atlas Inventory V2 isolated preview', () => {
       && response.url().includes(`/en/admin/records/inventory/${itemId}`)
     ));
     await submit.click();
-    expect((await actionResponse).ok()).toBe(true);
+    const response = await actionResponse;
+    expect(response.status()).toBe(303);
+    expect(response.headers()['x-action-redirect']).toBe(
+      `/en/admin/records/inventory/${itemId};push`,
+    );
     await expect(page.getByRole('alert')).toHaveCount(0);
     await expect(page.getByText('7.125').first()).toBeVisible({ timeout: 30_000 });
 
