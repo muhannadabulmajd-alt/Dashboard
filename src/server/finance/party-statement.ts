@@ -5,8 +5,9 @@ import { getUsdToIqd } from '@/server/settings';
 import type { AppLocale } from '@/lib/money';
 import type { ResolvedRange } from '@/lib/dates';
 import type { Currency } from '@prisma/client';
+import { buildFinanceEntryScopeWhere, type DataScope } from '@/server/filters/where-builder';
 
-type Scope = { branchId?: string };
+type Scope = DataScope;
 
 export interface PartyStatementEntry {
   id: string;
@@ -65,7 +66,7 @@ export async function getPartyStatementData(
   range: ResolvedRange,
   scope: Scope,
 ): Promise<PartyStatementData | null> {
-  const branchWhere = scope.branchId ? { branchId: scope.branchId } : {};
+  const branchWhere = buildFinanceEntryScopeWhere(scope);
   const [party, entries, rate] = await Promise.all([
     prisma.party.findUnique({
       where: { id },

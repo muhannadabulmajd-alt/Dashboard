@@ -8,6 +8,8 @@ import { PRODUCT_LINES } from '@/lib/enums';
 import { decimalNumber, roundMoney } from '@/lib/decimal';
 import { requireCap, audit, reqField, optField, type ActionState } from './shared';
 import { generateProductBarcode, generateRetailBarcode } from './numbering';
+import { getInventoryV2Config } from '@/server/inventory-v2/config';
+import { activateProductRecipeVersion } from '@/server/inventory-v2/recipe-versioning';
 
 const LIST = '/[locale]/(dashboard)/admin/records/products';
 const CAP = 'manage:products' as const;
@@ -186,6 +188,14 @@ export async function saveProductComponents(productId: string, _prev: ActionStat
     if (rows.length) {
       await tx.productComponent.createMany({ data: rows });
       await tx.product.update({ where: { id: productId }, data: { cogsPerUnit: cost } });
+      if (getInventoryV2Config().enabled) {
+        await activateProductRecipeVersion(tx, {
+          productId,
+          actorId: user.id,
+          components: rows,
+          notes: 'Activated from product cost recipe',
+        });
+      }
     }
   });
   if (rows.length) {

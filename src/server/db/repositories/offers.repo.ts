@@ -4,8 +4,9 @@ import { getOrders } from './sales.repo';
 import type { DashboardFilters } from '@/lib/filters';
 import type { ResolvedRange } from '@/lib/dates';
 import type { OfferOrderLike } from '@/lib/metrics/types';
+import type { DataScope } from '@/server/filters/where-builder';
 
-type Scope = { branchId?: string };
+type Scope = DataScope;
 
 export async function getOffers(): Promise<{ id: string; name: string; code: string | null; startsAt: Date | null; endsAt: Date | null }[]> {
   return prisma.offer.findMany({ select: { id: true, name: true, code: true, startsAt: true, endsAt: true } });

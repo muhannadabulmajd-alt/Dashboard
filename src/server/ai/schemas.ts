@@ -6,8 +6,10 @@ import {
   EXPENSE_CATEGORY_TYPES,
   FULFILLMENT_METHODS,
   INVENTORY_CATEGORIES,
+  LOCAL_OPEX_CATEGORY_TYPES,
   PARTY_TYPES,
   PAYMENT_METHODS,
+  RETURN_DISPOSITIONS,
 } from '@/lib/enums';
 import { MEASUREMENT_UNITS } from '@/lib/units';
 
@@ -35,6 +37,7 @@ export const ProductBuyersSchema = z.object({
 
 export const InventorySummarySchema = z.object({
   query: z.string().trim().nullable(),
+  locationQuery: z.string().trim().nullable().optional(),
   lowStockOnly: z.boolean(),
   limit: z.number().int().min(1).max(25),
 }).strict();
@@ -135,6 +138,7 @@ export const PrepareOrderSchema = z.object({
   channel: z.string().trim().nullable(),
   governorate: z.string().trim().nullable(),
   fulfillmentMethod: z.enum(FULFILLMENT_METHODS).nullable(),
+  locationQuery: z.string().trim().nullable().optional(),
   status: z.string().trim().nullable(),
   deliveryFee: z.number().int().nonnegative(),
   deliveryCost: z.number().int().nonnegative(),
@@ -250,7 +254,99 @@ export const PreparePartyUpdateSchema = z.object({
 
 export const PrepareInventoryAdjustmentSchema = z.object({
   inventoryItemQuery: z.string().trim().nullable(),
+  locationQuery: z.string().trim().nullable().optional(),
   targetQuantity: z.number().nonnegative().nullable(),
+  occurredAt: z.string().nullable(),
+  reason: z.string().trim().nullable(),
+}).strict();
+
+export const PrepareReceiveStockSchema = z.object({
+  inventoryItemQuery: z.string().trim().nullable(),
+  locationQuery: z.string().trim().nullable(),
+  quantity: z.number().positive().nullable(),
+  unitCost: z.number().nonnegative().nullable(),
+  occurredAt: z.string().nullable(),
+  bestBefore: z.string().nullable(),
+  supplierLot: z.string().trim().nullable(),
+  supplierQuery: z.string().trim().nullable(),
+  newSupplier: PreparePartyDetailsSchema.nullable(),
+  paymentMode: z.enum(['CREDIT', 'PAID']).nullable(),
+  accountQuery: z.string().trim().nullable(),
+  dueDate: z.string().nullable(),
+  reference: z.string().trim().nullable(),
+  notes: z.string().trim().nullable(),
+}).strict();
+
+export const PreparePackingSchema = z.object({
+  outputInventoryItemQuery: z.string().trim().nullable(),
+  locationQuery: z.string().trim().nullable(),
+  outputQuantity: z.number().positive().nullable(),
+  rejectedQuantity: z.number().nonnegative().nullable(),
+  packedAt: z.string().nullable(),
+  bestBefore: z.string().nullable(),
+  notes: z.string().trim().nullable(),
+}).strict();
+
+const PrepareStockTransferLineSchema = z.object({
+  inventoryItemQuery: z.string().trim().nullable(),
+  quantity: z.number().positive().nullable(),
+}).strict();
+
+export const PrepareDispatchStockTransferSchema = z.object({
+  sourceLocationQuery: z.string().trim().nullable(),
+  destinationLocationQuery: z.string().trim().nullable(),
+  lines: z.array(PrepareStockTransferLineSchema).min(1).max(100).nullable(),
+  occurredAt: z.string().nullable(),
+  expectedAt: z.string().nullable(),
+  notes: z.string().trim().nullable(),
+}).strict();
+
+const PrepareTransferDiscrepancySchema = z.object({
+  inventoryItemQuery: z.string().trim().nullable(),
+  type: z.enum(['SHORTAGE', 'DAMAGE', 'EXCESS']).nullable(),
+  quantity: z.number().positive().nullable(),
+  notes: z.string().trim().nullable(),
+}).strict();
+
+export const PrepareReceiveStockTransferSchema = z.object({
+  transferQuery: z.string().trim().nullable(),
+  receiveAll: z.boolean().nullable(),
+  lines: z.array(PrepareStockTransferLineSchema).max(100).nullable(),
+  discrepancies: z.array(PrepareTransferDiscrepancySchema).max(100).nullable(),
+  occurredAt: z.string().nullable(),
+  notes: z.string().trim().nullable(),
+}).strict();
+
+export const PrepareLocalExpenseSchema = z.object({
+  locationQuery: z.string().trim().nullable(),
+  amount: z.number().positive().nullable(),
+  categoryType: z.enum(LOCAL_OPEX_CATEGORY_TYPES).nullable(),
+  description: z.string().trim().nullable(),
+  occurredAt: z.string().nullable(),
+  noReceiptReason: z.string().trim().nullable(),
+}).strict();
+
+export const PrepareReturnToQuarantineSchema = z.object({
+  orderQuery: z.string().trim().nullable(),
+  productQuery: z.string().trim().nullable(),
+  quantity: z.number().positive().nullable(),
+  occurredAt: z.string().nullable(),
+  reason: z.string().trim().nullable(),
+}).strict();
+
+export const PrepareDisposeReturnedGoodsSchema = z.object({
+  returnQuery: z.string().trim().nullable(),
+  inventoryItemQuery: z.string().trim().nullable(),
+  quantity: z.number().positive().nullable(),
+  disposition: z.enum(RETURN_DISPOSITIONS).nullable(),
+  destinationLocationQuery: z.string().trim().nullable(),
+  supplierQuery: z.string().trim().nullable(),
+  occurredAt: z.string().nullable(),
+  reason: z.string().trim().nullable(),
+}).strict();
+
+export const PrepareReverseStockDocumentSchema = z.object({
+  documentQuery: z.string().trim().nullable(),
   occurredAt: z.string().nullable(),
   reason: z.string().trim().nullable(),
 }).strict();
@@ -262,10 +358,12 @@ export const PrepareRoastBatchSchema = z.object({
   roastLevel: z.string().trim().nullable(),
   greenInputGrams: z.number().positive().nullable(),
   roastedOutputGrams: z.number().positive().nullable(),
+  abnormalLossGrams: z.number().nonnegative().nullable().optional(),
   qcScore: z.number().nullable(),
   qcNotes: z.string().trim().nullable(),
   greenInventoryItemQuery: z.string().trim().nullable(),
   roastedInventoryItemQuery: z.string().trim().nullable(),
+  locationQuery: z.string().trim().nullable().optional(),
   branchQuery: z.string().trim().nullable(),
 }).strict();
 

@@ -36,6 +36,19 @@ import {
   type OrderCreateTransactionCheckpoint,
 } from '@/server/commands/transaction-checkpoints';
 import {
+  assertFinanceAccountObjectAccess,
+  assertOrderObjectAccess,
+  assertOrdersObjectAccess,
+} from '@/server/inventory-v2/object-scope';
+import { getInventoryV2Config } from '@/server/inventory-v2/config';
+import {
+  applyOrderStockTargetInTransaction,
+  orderLineSetsMatch,
+  resolveOrderLocation,
+  stockTargetForOrderStatusRole,
+  type OrderStockTarget,
+} from '@/server/inventory-v2/order-stock';
+import {
   requireCap,
   resolveCommandActor,
   audit,
@@ -62,6 +75,7 @@ const bulkOrderSchema = z.object({
   providerKey: z.string().min(1).optional(),
   paymentMethod: z.string().optional(),
   date: z.coerce.date().optional(),
+  locationVersions: z.record(z.string(), z.coerce.number().int().positive()).optional(),
 });
 
 type LineData = {
@@ -96,6 +110,8 @@ const headerSchema = z.object({
   channel: z.string().min(1),
   governorate: z.string().min(1),
   fulfillmentMethod: z.enum(FULFILLMENT_METHODS),
+  fulfillmentLocationId: z.string().optional(),
+  expectedLocationVersion: z.coerce.number().int().positive().optional(),
   status: z.string().min(1),
   deliveryFee: z.coerce.number().int().nonnegative().default(0),
   deliveryCost: z.coerce.number().int().nonnegative().default(0),
@@ -176,6 +192,8 @@ export async function createOrderFromInput(
   setCommandField(fd, 'channel', input.channel);
   setCommandField(fd, 'governorate', input.governorate);
   setCommandField(fd, 'fulfillmentMethod', input.fulfillmentMethod);
+  setCommandField(fd, 'fulfillmentLocationId', input.fulfillmentLocationId);
+  setCommandField(fd, 'expectedLocationVersion', input.expectedLocationVersion);
   setCommandField(fd, 'status', input.status);
   setCommandField(fd, 'deliveryFee', input.deliveryFee);
   setCommandField(fd, 'deliveryCost', input.deliveryCost);
@@ -220,6 +238,7 @@ export async function bulkUpdateOrdersFromInput(
   setCommandField(fd, 'providerKey', input.providerKey);
   setCommandField(fd, 'paymentMethod', input.paymentMethod);
   setCommandField(fd, 'date', input.date);
+  if (input.locationVersions) setCommandField(fd, 'locationVersions', JSON.stringify(input.locationVersions));
   return bulkUpdateOrders(undefined, fd, options);
 }
 
@@ -231,6 +250,8 @@ function parseHeader(fd: FormData) {
     channel: reqField(fd, 'channel'),
     governorate: reqField(fd, 'governorate'),
     fulfillmentMethod: reqField(fd, 'fulfillmentMethod'),
+    fulfillmentLocationId: optField(fd, 'fulfillmentLocationId'),
+    expectedLocationVersion: optField(fd, 'expectedLocationVersion'),
     status: reqField(fd, 'status'),
     deliveryFee: optField(fd, 'deliveryFee'),
     deliveryCost: optField(fd, 'deliveryCost'),
@@ -469,6 +490,15 @@ export async function createOrderCommand(
   const statusRoles = await getOrderStatusRoleMap();
   const statusRole = statusRoles.get(h.data.status) ?? 'UNKNOWN';
   const saleStatuses = [...statusRoles].filter(([, role]) => role === 'SALE').map(([code]) => code);
+  const openStatus = [...statusRoles].find(([, role]) => role === 'OPEN')?.[0] ?? null;
+  const inventoryV2Enabled = getInventoryV2Config().enabled;
+  const fulfillmentLocationId = h.data.fulfillmentLocationId || user.defaultStockLocationId;
+  if (inventoryV2Enabled && !fulfillmentLocationId) {
+    return { error: 'fulfillment_location_required', fieldErrors: { fulfillmentLocationId: 'fulfillment_location_required' } };
+  }
+  if (inventoryV2Enabled && !h.data.expectedLocationVersion) {
+    return { error: 'location_stale', fieldErrors: { fulfillmentLocationId: 'location_stale' } };
+  }
   let automaticFinance: Awaited<ReturnType<typeof resolveAutomaticOrderFinance>> | null = null;
   if (h.data.financeMode === 'AUTO') {
     try {
@@ -493,6 +523,14 @@ export async function createOrderCommand(
   if (financeMode === 'PAID' || financeMode === 'PARTIAL') {
     try {
       financeAccountId = await resolveDirectPaymentAccount(financeAccountId);
+      await assertFinanceAccountObjectAccess(user, financeAccountId);
+    } catch {
+      return { error: 'account', fieldErrors: { financeAccountId: 'account' } };
+    }
+  }
+  if (financeAccountId && financeMode === 'PROVIDER') {
+    try {
+      await assertFinanceAccountObjectAccess(user, financeAccountId);
     } catch {
       return { error: 'account', fieldErrors: { financeAccountId: 'account' } };
     }
@@ -533,7 +571,6 @@ export async function createOrderCommand(
       unitCogsSnapshot: product.cogsPerUnit,
     });
   }
-
   const existingCustomer = h.data.customerExternalId
     ? await prisma.customer.findUnique({
         where: { externalId: h.data.customerExternalId },
@@ -541,10 +578,12 @@ export async function createOrderCommand(
     })
     : null;
   if (h.data.customerExternalId && !existingCustomer) return { error: 'customer', fieldErrors: { customerExternalId: 'customer' } };
-  const branch = user.branchId
-    ? await prisma.branch.findFirst({ where: { id: user.branchId, isActive: true }, select: { id: true } })
-    : await prisma.branch.findFirst({ where: { isActive: true }, orderBy: { createdAt: 'asc' }, select: { id: true } });
-  if (user.branchId && !branch) return { error: 'branch', fieldErrors: { branchId: 'branch' } };
+  const legacyBranch = inventoryV2Enabled
+    ? null
+    : user.branchId
+      ? await prisma.branch.findFirst({ where: { id: user.branchId, isActive: true }, select: { id: true } })
+      : await prisma.branch.findFirst({ where: { isActive: true }, orderBy: { createdAt: 'asc' }, select: { id: true } });
+  if (!inventoryV2Enabled && user.branchId && !legacyBranch) return { error: 'branch', fieldErrors: { branchId: 'branch' } };
   const gross = lineData.reduce((s, l) => s + l.unitGrossPrice * l.quantity, 0);
   const discount = lineData.reduce((s, l) => s + l.lineDiscount, 0) + h.data.orderDiscount;
   const total = Math.max(0, gross - discount + h.data.deliveryFee + h.data.extraCharges);
@@ -574,6 +613,9 @@ export async function createOrderCommand(
       stage = 'order_number';
       const orderNumber = await generateOrderNumber(tx, h.data.placedAt, h.data.channel);
       await options.afterStage?.(tx, 'order_number');
+      const location = inventoryV2Enabled
+        ? await resolveOrderLocation(tx, user, fulfillmentLocationId)
+        : null;
       stage = 'customer_lookup';
       const customer = newCustomer
         ? await resolveOrCreateCustomerInTransaction(tx, newCustomer, {
@@ -590,10 +632,12 @@ export async function createOrderCommand(
       }
       await options.afterStage?.(tx, 'customer');
       stage = 'stock_sync';
-      const stockReadiness = await resolveOrderInventoryReadiness(
-        tx,
-        lineData.map((line) => line.productId),
-      );
+      const stockReadiness = inventoryV2Enabled
+        ? { mode: 'NORMAL' as const, unconfiguredSkus: [] as string[] }
+        : await resolveOrderInventoryReadiness(
+            tx,
+            lineData.map((line) => line.productId),
+          );
       await options.afterStage?.(tx, 'inventory_readiness');
       stage = 'order_insert';
       const o = await tx.order.create({
@@ -601,7 +645,8 @@ export async function createOrderCommand(
           orderNumber,
           placedAt: h.data.placedAt,
           customerId: customer?.id ?? null,
-          branchId: branch?.id ?? null,
+          branchId: location?.branchId ?? legacyBranch?.id ?? null,
+          fulfillmentLocationId: location?.id ?? null,
           createdById: user.id,
           channel: h.data.channel,
           governorate: h.data.governorate,
@@ -618,12 +663,37 @@ export async function createOrderCommand(
           inventorySyncMode: stockReadiness.mode,
           lines: { create: lineData },
         },
+        include: {
+          lines: { select: { id: true, productId: true, sku: true, quantity: true } },
+        },
       });
       await options.afterStage?.(tx, 'order_insert');
       // Only statuses mapped as completed sales consume stock. Changing the role
       // on a later edit reverses or reapplies the linked movements atomically.
       stage = 'stock_sync';
-      if (statusRole === 'SALE' && stockReadiness.mode === 'NORMAL') {
+      let effectiveStatusRole = statusRole;
+      if (inventoryV2Enabled && location) {
+        const target: OrderStockTarget = statusRole === 'SALE'
+          ? 'CONSUMED'
+          : statusRole === 'OPEN'
+            ? 'RESERVED'
+            : 'NONE';
+        const stockResult = await applyOrderStockTargetInTransaction(tx, user, {
+          orderId: o.id,
+          orderNumber: o.orderNumber,
+          locationId: location.id,
+          lines: o.lines,
+          target,
+          occurredAt: h.data.placedAt,
+          idempotencyKey: `order-create:${o.id}`,
+          expectedLocationVersion: h.data.expectedLocationVersion!,
+        });
+        if (target === 'CONSUMED' && !stockResult.completed) {
+          if (!openStatus) throw new Error('open_status_not_configured');
+          await tx.order.update({ where: { id: o.id }, data: { status: openStatus } });
+          effectiveStatusRole = 'OPEN';
+        }
+      } else if (statusRole === 'SALE' && stockReadiness.mode === 'NORMAL') {
         await applySoldMovements(tx, o.id, h.data.placedAt, lineData);
         await syncActiveCostForProducts(lineData.map((line) => line.productId), tx);
       }
@@ -653,7 +723,7 @@ export async function createOrderCommand(
         paymentDate: automaticFinance ? h.data.placedAt : h.data.financePaymentDate ?? h.data.placedAt,
         createdById: user.id,
         partyId: provider?.id ?? null,
-        statusRole,
+        statusRole: effectiveStatusRole,
       });
       await options.afterStage?.(tx, 'finance_sync');
       stage = 'customer_stats';
@@ -711,6 +781,12 @@ export async function createOrder(_prev: ActionState, fd: FormData): Promise<Act
 export async function updateOrder(id: string, _prev: ActionState, fd: FormData): Promise<ActionState> {
   const user = await requireCap(CAP);
   if (!user) return { error: 'forbidden' };
+  const inventoryV2Enabled = getInventoryV2Config().enabled;
+  try {
+    await assertOrderObjectAccess(user, id);
+  } catch {
+    return { error: 'forbidden' };
+  }
   const h = parseHeader(fd);
   if (!h.success) return headerActionError(h);
   const locale = reqField(fd, 'locale') || 'ar';
@@ -720,6 +796,7 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
   const statusRoles = await getOrderStatusRoleMap();
   const statusRole = statusRoles.get(h.data.status) ?? 'UNKNOWN';
   const saleStatuses = [...statusRoles].filter(([, role]) => role === 'SALE').map(([code]) => code);
+  const openStatus = [...statusRoles].find(([, role]) => role === 'OPEN')?.[0] ?? null;
 
   // Full edit (CR-2): the submitted line items replace the existing ones and
   // every total is recomputed, so reports/invoice stay in sync automatically.
@@ -739,16 +816,38 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
       id: true,
       status: true,
       customerId: true,
+      branchId: true,
+      fulfillmentLocationId: true,
       inventorySyncMode: true,
       grossAmount: true,
       discountAmount: true,
       refundAmount: true,
       deliveryFee: true,
       extraCharges: true,
-      lines: { select: { productId: true } },
+      lines: {
+        select: {
+          id: true,
+          productId: true,
+          sku: true,
+          quantity: true,
+          unitGrossPrice: true,
+          lineDiscount: true,
+        },
+      },
     },
   });
   if (!existing) return { error: 'notfound' };
+  const oldStatusRole = statusRoles.get(existing.status) ?? 'UNKNOWN';
+  const fulfillmentLocationId = h.data.fulfillmentLocationId || existing.fulfillmentLocationId || user.defaultStockLocationId;
+  if (inventoryV2Enabled && !fulfillmentLocationId) {
+    return { error: 'fulfillment_location_required', fieldErrors: { fulfillmentLocationId: 'fulfillment_location_required' } };
+  }
+  if (inventoryV2Enabled && fulfillmentLocationId !== existing.fulfillmentLocationId) {
+    return { error: 'inventory_v2_location_change_requires_transfer', fieldErrors: { fulfillmentLocationId: 'inventory_v2_location_change_requires_transfer' } };
+  }
+  if (inventoryV2Enabled && !h.data.expectedLocationVersion) {
+    return { error: 'location_stale', fieldErrors: { fulfillmentLocationId: 'location_stale' } };
+  }
   const existingSoldMovementCount = await prisma.stockMovement.count({
     where: { orderId: id, reason: 'SOLD' },
   });
@@ -800,6 +899,17 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
       lineNet: l.unitGrossPrice * l.quantity - l.lineDiscount,
       unitCogsSnapshot: product.cogsPerUnit,
     });
+  }
+  const v2LinesChanged = inventoryV2Enabled && !orderLineSetsMatch(existing.lines, lineData);
+  if (v2LinesChanged) {
+    const reservationHistoryCount = await prisma.stockReservation.count({ where: { orderId: id } });
+    if (existingSoldMovementCount > 0 || reservationHistoryCount > 0) {
+      return {
+        error: 'inventory_v2_use_order_revision',
+        formError: 'inventory_v2_use_order_revision',
+        fieldErrors: { lines: 'inventory_v2_use_order_revision' },
+      };
+    }
   }
   const customer = h.data.customerExternalId
     ? await prisma.customer.findUnique({ where: { externalId: h.data.customerExternalId }, select: { id: true } })
@@ -870,6 +980,14 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
   if (needsCompletionPayment && (financeMode === 'PAID' || financeMode === 'PARTIAL')) {
     try {
       financeAccountId = await resolveDirectPaymentAccount(financeAccountId);
+      await assertFinanceAccountObjectAccess(user, financeAccountId);
+    } catch {
+      return { error: 'account', fieldErrors: { financeAccountId: 'account' } };
+    }
+  }
+  if (needsCompletionPayment && financeAccountId && financeMode === 'PROVIDER') {
+    try {
+      await assertFinanceAccountObjectAccess(user, financeAccountId);
     } catch {
       return { error: 'account', fieldErrors: { financeAccountId: 'account' } };
     }
@@ -892,10 +1010,202 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
   }
   const previousTotal = invoiceTotal(existing);
 
+  if (inventoryV2Enabled) {
+    const target = stockTargetForOrderStatusRole(statusRole);
+    if (oldStatusRole === 'SALE' && target === 'NONE' && paymentBefore.paid > 0) {
+      return {
+        error: 'refund_required',
+        formError: 'refund_required',
+        fieldErrors: { status: 'refund_required' },
+      };
+    }
+    try {
+      const result = await prisma.$transaction(async (tx) => {
+        await assertOrderObjectAccess(user, id, tx);
+        const location = await resolveOrderLocation(tx, user, fulfillmentLocationId);
+        if (location.id !== existing.fulfillmentLocationId) throw new Error('fulfillment_location_changed');
+        if (financeAccountId && needsCompletionPayment) {
+          await assertFinanceAccountObjectAccess(user, financeAccountId, tx);
+        }
+
+        let stockLines = existing.lines.map((line) => ({
+          id: line.id,
+          productId: line.productId,
+          sku: line.sku,
+          quantity: line.quantity,
+        }));
+        if (v2LinesChanged) {
+          await tx.orderLine.deleteMany({ where: { orderId: id } });
+          await tx.orderLine.createMany({
+            data: lineData.map((line) => ({ ...line, orderId: id })),
+          });
+          stockLines = await tx.orderLine.findMany({
+            where: { orderId: id },
+            select: { id: true, productId: true, sku: true, quantity: true },
+            orderBy: { id: 'asc' },
+          });
+        }
+
+        const stockResult = await applyOrderStockTargetInTransaction(tx, user, {
+          orderId: id,
+          orderNumber: h.data.orderNumber || '',
+          locationId: location.id,
+          lines: stockLines,
+          target,
+          occurredAt: h.data.placedAt,
+          idempotencyKey: `order-update:${id}:${h.data.status}:${h.data.placedAt.toISOString()}`,
+          expectedLocationVersion: h.data.expectedLocationVersion!,
+        });
+        let effectiveStatus = h.data.status;
+        let effectiveStatusRole = statusRole;
+        if (target === 'CONSUMED' && !stockResult.completed) {
+          effectiveStatus = oldStatusRole === 'OPEN' ? existing.status : openStatus ?? '';
+          if (!effectiveStatus) throw new Error('open_status_not_configured');
+          effectiveStatusRole = 'OPEN';
+        }
+
+        await tx.order.update({
+          where: { id },
+          data: {
+            placedAt: h.data.placedAt,
+            customerId: customer?.id ?? null,
+            branchId: location.branchId,
+            fulfillmentLocationId: location.id,
+            channel: h.data.channel,
+            governorate: h.data.governorate,
+            fulfillmentMethod: h.data.fulfillmentMethod,
+            status: effectiveStatus,
+            grossAmount: gross,
+            discountAmount: discount,
+            orderDiscount: h.data.orderDiscount,
+            extraCharges: h.data.extraCharges,
+            notes: h.data.notes ?? null,
+            refundAmount: refundFor(
+              effectiveStatusRole === 'RETURN',
+              gross,
+              discount,
+              h.data.deliveryFee,
+              h.data.extraCharges,
+            ),
+            deliveryFee: h.data.deliveryFee,
+            deliveryCost: h.data.deliveryCost,
+            inventorySyncMode: 'NORMAL',
+          },
+        });
+
+        if (needsCompletionPayment) {
+          await syncOrderFinance(tx, id, {
+            mode: financeMode as FinanceSyncMode,
+            accountId: financeAccountId,
+            dueDate: h.data.financeDueDate,
+            paymentMethod: financePaymentMethod,
+            paymentDate: automaticFinance
+              ? h.data.placedAt
+              : h.data.financePaymentDate ?? h.data.placedAt,
+            createdById: user.id,
+            partyId: provider?.id ?? null,
+            statusRole: effectiveStatusRole,
+          });
+        } else if (managedProviderId && (effectiveStatusRole === 'OPEN' || effectiveStatusRole === 'SALE')) {
+          await syncOrderFinance(tx, id, {
+            mode: 'PROVIDER',
+            partyId: managedProviderId,
+            dueDate: h.data.financeDueDate,
+            paymentMethod: paymentBefore.paymentMethod,
+            createdById: user.id,
+            statusRole: effectiveStatusRole,
+          });
+        } else if (total !== previousTotal && (effectiveStatusRole === 'OPEN' || effectiveStatusRole === 'SALE')) {
+          if (paymentBefore.route === 'PROVIDER' && paymentBefore.providerPartyId) {
+            await syncOrderFinance(tx, id, {
+              mode: 'PROVIDER',
+              partyId: paymentBefore.providerPartyId,
+              dueDate: h.data.financeDueDate,
+              paymentMethod: paymentBefore.paymentMethod,
+              createdById: user.id,
+              statusRole: effectiveStatusRole,
+            });
+          } else if (paymentBefore.receivableIds.length > 0 || paymentBefore.route === 'DIRECT') {
+            await syncOrderCustomerBalance(tx, id, {
+              dueDate: h.data.financeDueDate,
+              createdById: user.id,
+            });
+          }
+        }
+        if (stockResult.changed) {
+          await syncActiveCostForProducts(
+            [...oldProductIds, ...lineData.map((line) => line.productId)],
+            tx,
+          );
+        }
+        await syncCustomerStats(tx, existing.customerId, saleStatuses);
+        if (customer?.id !== existing.customerId) {
+          await syncCustomerStats(tx, customer?.id, saleStatuses);
+        }
+        await tx.auditLog.create({
+          data: {
+            userId: user.id,
+            action: 'UPDATE_ORDER_INVENTORY_V2',
+            entity: 'Order',
+            entityId: id,
+            metadata: {
+              requestedStatus: h.data.status,
+              effectiveStatus,
+              fulfillmentLocationId: location.id,
+              stockTarget: target,
+              stockCompleted: stockResult.completed,
+              shortageCount: stockResult.shortages.length,
+              stockDocumentId: stockResult.stockDocumentId,
+            },
+          },
+        });
+        return { effectiveStatus, stockResult };
+      }, COMMAND_TRANSACTION_OPTIONS);
+      await audit(user.id, 'UPDATE', 'Order', {
+        id,
+        lines: lineData.length,
+        gross,
+        discount,
+        paymentBefore,
+        totalAfter: total,
+        paymentCapture: needsCompletionPayment ? financeMode : 'KEEP',
+        inventoryV2: true,
+        effectiveStatus: result.effectiveStatus,
+        shortages: result.stockResult.shortages,
+      });
+    } catch (error) {
+      const debugId = `order-edit-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      orderActionError(error, { stage: 'order_update_v2', debugId, orderId: id, total, previousTotal });
+      await persistOrderFailure({
+        userId: user.id,
+        action: 'UPDATE',
+        debugId,
+        error,
+        metadata: { orderId: id, total, previousTotal, requestedStatus: h.data.status, inventoryV2: true },
+      });
+      const code = error instanceof Error ? error.message.split(':')[0] : 'order_update_failed';
+      return {
+        error: code,
+        formError: code === 'location_stale' ? 'location_stale' : 'order_update_failed',
+        fieldErrors: code === 'location_stale' ? { fulfillmentLocationId: 'location_stale' } : undefined,
+        debugId,
+      };
+    }
+    revalidatePath(LIST, 'page');
+    revalidatePath(FINANCE, 'page');
+    revalidatePath(LEDGER, 'page');
+    revalidatePath(DUES, 'page');
+    redirect(`/${locale}/admin/records/orders/${id}`);
+  }
+
   // Replace lines + update header + recompute totals atomically, and reverse +
   // reapply the order's stock deductions. orderNumber is immutable (CR-5).
   try {
     await prisma.$transaction(async (tx) => {
+      await assertOrderObjectAccess(user, id, tx);
+      if (financeAccountId && needsCompletionPayment) {
+        await assertFinanceAccountObjectAccess(user, financeAccountId, tx);
+      }
       const stockReadiness = await resolveOrderInventoryReadiness(
         tx,
         lineData.map((line) => line.productId),
@@ -1043,9 +1353,14 @@ export async function updateOrder(id: string, _prev: ActionState, fd: FormData):
 export async function deleteOrder(id: string, locale: string): Promise<void> {
   const user = await requireCap(CAP);
   if (!user) return;
+  if (getInventoryV2Config().enabled) {
+    await assertOrderObjectAccess(user, id);
+    redirect(`/${locale}/admin/records/orders/${id}`);
+  }
   const statusRoles = await getOrderStatusRoleMap();
   const saleStatuses = [...statusRoles].filter(([, role]) => role === 'SALE').map(([code]) => code);
   await prisma.$transaction(async (tx) => {
+    await assertOrderObjectAccess(user, id, tx);
     const order = await tx.order.findUnique({ where: { id }, select: { customerId: true } });
     await closeOrderFinance(tx, id);
     await tx.order.delete({ where: { id } }); // lines cascade
@@ -1071,8 +1386,10 @@ export async function bulkUpdateOrders(
   const user = await resolveCommandActor(CAP, options.actorContext);
   if (!user) return { error: 'forbidden' };
   let ids: unknown;
+  let locationVersions: unknown;
   try {
     ids = JSON.parse(reqField(fd, 'orderIds') || '[]');
+    locationVersions = JSON.parse(optField(fd, 'locationVersions') || '{}');
   } catch {
     return { error: 'invalid' };
   }
@@ -1085,6 +1402,7 @@ export async function bulkUpdateOrders(
     providerKey: optField(fd, 'providerKey'),
     paymentMethod: optField(fd, 'paymentMethod'),
     date: optField(fd, 'date'),
+    locationVersions,
   });
   if (!parsed.success) return { error: 'invalid' };
   const input = parsed.data;
@@ -1094,17 +1412,23 @@ export async function bulkUpdateOrders(
 
   const statusRoles = await getOrderStatusRoleMap();
   const saleStatuses = [...statusRoles].filter(([, role]) => role === 'SALE').map(([code]) => code);
+  const openStatus = [...statusRoles].find(([, role]) => role === 'OPEN')?.[0] ?? null;
+  const inventoryV2Enabled = getInventoryV2Config().enabled;
   try {
     const summary = await prisma.$transaction(async (tx) => {
       await options.beforeExecute?.(tx);
+      await assertOrdersObjectAccess(user, input.orderIds, tx);
       const orders = await tx.order.findMany({
         where: { id: { in: input.orderIds } },
-        include: { lines: { select: { productId: true, quantity: true } } },
+        include: {
+          lines: { select: { id: true, productId: true, sku: true, quantity: true } },
+        },
         orderBy: [{ placedAt: 'asc' }, { createdAt: 'asc' }],
       });
       if (orders.length !== input.orderIds.length) throw new Error('notfound');
       const changedCustomers = new Set<string>();
       const changedProducts = new Set<string>();
+      const locationVersionOffsets = new Map<string, number>();
       let amountApplied = 0;
       const account = input.accountId
         ? await tx.financeAccount.findUnique({
@@ -1118,6 +1442,7 @@ export async function bulkUpdateOrders(
       ) {
         throw new Error('account');
       }
+      if (account) await assertFinanceAccountObjectAccess(user, account.id, tx);
       const provider = input.providerKey
         ? await tx.party.findUnique({
             where: { externalKey: input.providerKey },
@@ -1167,6 +1492,9 @@ export async function bulkUpdateOrders(
                   tx,
                 )
               : null;
+          if (automatic?.accountId) {
+            await assertFinanceAccountObjectAccess(user, automatic.accountId, tx);
+          }
           if (nextRole === 'SALE' && payment.remaining > 0) {
             if (automatic) {
               // Automatic routing already proved its account/provider configuration.
@@ -1179,59 +1507,96 @@ export async function bulkUpdateOrders(
             }
           }
           const oldRole = statusRoles.get(order.status) ?? 'UNKNOWN';
-          const existingSoldMovementCount = nextRole === 'SALE'
-            ? await tx.stockMovement.count({
-                where: { orderId: order.id, reason: 'SOLD' },
-              })
-            : 0;
-          const stockReadiness = nextRole === 'SALE'
-            ? await resolveOrderInventoryReadiness(
-                tx,
-                order.lines.map((line) => line.productId),
-              )
-            : null;
-          if (
-            order.inventorySyncMode === 'NORMAL' &&
-            stockReadiness?.mode === 'SKIP_HISTORICAL' &&
-            existingSoldMovementCount > 0
-          ) {
-            throw new Error(`stock_not_configured:${stockReadiness.unconfiguredSkus.join(',')}`);
-          }
-          const nextInventorySyncMode = order.inventorySyncMode === 'SKIP_HISTORICAL'
-            ? 'SKIP_HISTORICAL'
-            : stockReadiness?.mode ?? order.inventorySyncMode;
-          if (oldRole !== nextRole) {
-            await tx.stockMovement.deleteMany({ where: { orderId: order.id, reason: 'SOLD' } });
-            if (nextRole === 'SALE' && nextInventorySyncMode === 'NORMAL') {
-              await applySoldMovements(tx, order.id, order.placedAt, order.lines);
+          let effectiveNextRole = nextRole;
+          let effectiveStatus = input.status as string;
+          let nextInventorySyncMode = order.inventorySyncMode;
+          if (inventoryV2Enabled) {
+            if (!order.fulfillmentLocationId) throw new Error('fulfillment_location_required');
+            const baseVersion = input.locationVersions?.[order.fulfillmentLocationId];
+            if (!baseVersion) throw new Error('location_stale');
+            const expectedLocationVersion = baseVersion + (locationVersionOffsets.get(order.fulfillmentLocationId) ?? 0);
+            const target = stockTargetForOrderStatusRole(nextRole);
+            if (oldRole === 'SALE' && target === 'NONE' && payment.paid > 0) {
+              throw new Error('refund_required');
             }
-            for (const line of order.lines) changedProducts.add(line.productId);
+            const stockResult = await applyOrderStockTargetInTransaction(tx, user, {
+              orderId: order.id,
+              orderNumber: order.orderNumber,
+              locationId: order.fulfillmentLocationId,
+              lines: order.lines,
+              target,
+              occurredAt: input.date ?? new Date(),
+              idempotencyKey: `bulk-order-status:${order.id}:${input.status}`,
+              expectedLocationVersion,
+            });
+            if (stockResult.changed) {
+              locationVersionOffsets.set(
+                order.fulfillmentLocationId,
+                (locationVersionOffsets.get(order.fulfillmentLocationId) ?? 0) + 1,
+              );
+              for (const line of order.lines) changedProducts.add(line.productId);
+            }
+            if (target === 'CONSUMED' && !stockResult.completed) {
+              effectiveStatus = oldRole === 'OPEN' ? order.status : openStatus ?? '';
+              if (!effectiveStatus) throw new Error('open_status_not_configured');
+              effectiveNextRole = 'OPEN';
+            }
+            nextInventorySyncMode = 'NORMAL';
+          } else {
+            const existingSoldMovementCount = nextRole === 'SALE'
+              ? await tx.stockMovement.count({
+                  where: { orderId: order.id, reason: 'SOLD' },
+                })
+              : 0;
+            const stockReadiness = nextRole === 'SALE'
+              ? await resolveOrderInventoryReadiness(
+                  tx,
+                  order.lines.map((line) => line.productId),
+                )
+              : null;
+            if (
+              order.inventorySyncMode === 'NORMAL' &&
+              stockReadiness?.mode === 'SKIP_HISTORICAL' &&
+              existingSoldMovementCount > 0
+            ) {
+              throw new Error(`stock_not_configured:${stockReadiness.unconfiguredSkus.join(',')}`);
+            }
+            nextInventorySyncMode = order.inventorySyncMode === 'SKIP_HISTORICAL'
+              ? 'SKIP_HISTORICAL'
+              : stockReadiness?.mode ?? order.inventorySyncMode;
+            if (oldRole !== nextRole) {
+              await tx.stockMovement.deleteMany({ where: { orderId: order.id, reason: 'SOLD' } });
+              if (nextRole === 'SALE' && nextInventorySyncMode === 'NORMAL') {
+                await applySoldMovements(tx, order.id, order.placedAt, order.lines);
+              }
+              for (const line of order.lines) changedProducts.add(line.productId);
+            }
+            if (
+              nextInventorySyncMode === 'SKIP_HISTORICAL' &&
+              order.inventorySyncMode === 'NORMAL'
+            ) {
+              await tx.auditLog.create({
+                data: {
+                  userId: user.id,
+                  action: 'ORDER_STOCK_SYNC_SKIPPED',
+                  entity: 'Order',
+                  entityId: order.id,
+                  metadata: {
+                    reason: 'products_not_connected_to_inventory',
+                    skus: stockReadiness?.unconfiguredSkus ?? [],
+                    source: 'bulk-order-status',
+                  },
+                },
+              });
+            }
           }
           await tx.order.update({
             where: { id: order.id },
             data: {
-              status: input.status,
+              status: effectiveStatus,
               inventorySyncMode: nextInventorySyncMode,
             },
           });
-          if (
-            nextInventorySyncMode === 'SKIP_HISTORICAL' &&
-            order.inventorySyncMode === 'NORMAL'
-          ) {
-            await tx.auditLog.create({
-              data: {
-                userId: user.id,
-                action: 'ORDER_STOCK_SYNC_SKIPPED',
-                entity: 'Order',
-                entityId: order.id,
-                metadata: {
-                  reason: 'products_not_connected_to_inventory',
-                  skus: stockReadiness?.unconfiguredSkus ?? [],
-                  source: 'bulk-order-status',
-                },
-              },
-            });
-          }
           if (nextRole === 'SALE' && payment.remaining > 0) {
             await syncOrderFinance(tx, order.id, {
               mode:
@@ -1242,7 +1607,7 @@ export async function bulkUpdateOrders(
               paymentMethod: automatic?.paymentMethod ?? input.paymentMethod ?? null,
               paymentDate: automatic ? order.placedAt : input.date ?? null,
               createdById: user.id,
-              statusRole: nextRole,
+              statusRole: effectiveNextRole,
             });
             amountApplied += payment.remaining;
           }
@@ -1371,6 +1736,8 @@ export async function recordInvoicePaymentFromInput(
 
   return prisma.$transaction(async (tx) => {
     await options.beforeExecute?.(tx);
+    await assertOrderObjectAccess(user, input.orderId, tx);
+    await assertFinanceAccountObjectAccess(user, input.accountId, tx);
     const order = await tx.order.findUnique({
       where: { id: input.orderId },
       select: {
@@ -1536,6 +1903,8 @@ export async function recordOrderRefundFromInput(
 
   return prisma.$transaction(async (tx) => {
     await options.beforeExecute?.(tx);
+    await assertOrderObjectAccess(user, input.orderId, tx);
+    await assertFinanceAccountObjectAccess(user, input.accountId, tx);
     await tx.$queryRaw`SELECT "id" FROM "Order" WHERE "id" = ${input.orderId} FOR UPDATE`;
     const order = await tx.order.findUnique({
       where: { id: input.orderId },

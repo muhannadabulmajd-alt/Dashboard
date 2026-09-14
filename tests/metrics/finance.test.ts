@@ -78,6 +78,20 @@ describe('finance metrics', () => {
     expect(unassignedCash(entries)).toBe(-3_000_000); // only the real account-less purchase
   });
 
+  it('records routine inventory losses as expense without changing cash and excludes openings', () => {
+    const entries = [
+      e({ id: 'loss', type: 'INVENTORY_LOSS', amount: 12_500, accountId: null }),
+      e({ id: 'gain', type: 'INVENTORY_GAIN', amount: 4_000, accountId: null }),
+      e({ id: 'opening', type: 'INVENTORY_LOSS', amount: 90_000, accountId: null, isOpeningBalance: true }),
+    ];
+    const totals = financeTotals(entries);
+    expect(totals.expenses).toBe(12_500);
+    expect(totals.cashIn).toBe(0);
+    expect(totals.cashOut).toBe(0);
+    expect(unassignedCash(entries)).toBe(0);
+    expect(accountBalance({ id: 'cash', openingBalance: 50_000 }, entries)).toBe(50_000);
+  });
+
   it('ignores archived entries in balances and totals', () => {
     const entries = [
       e({ id: 'live', type: 'INCOME', amount: 500_000, accountId: 'cash' }),

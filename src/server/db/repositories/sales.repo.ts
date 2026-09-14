@@ -1,6 +1,14 @@
 import 'server-only';
 import { prisma } from '../client';
-import { buildOrderWhere, buildOrderLineWhere } from '@/server/filters/where-builder';
+import {
+  buildBatchScopeWhere,
+  buildFinanceEntryScopeWhere,
+  buildMovementScopeWhere,
+  buildOrderLineWhere,
+  buildOrderScopeWhere,
+  buildOrderWhere,
+  type DataScope,
+} from '@/server/filters/where-builder';
 import type { DashboardFilters } from '@/lib/filters';
 import type { ResolvedRange } from '@/lib/dates';
 import type { OrderLike, OrderLineWithProduct } from '@/lib/metrics/types';
@@ -8,7 +16,7 @@ import { allocateInteger } from '@/lib/metrics/sales';
 import type { Prisma } from '@prisma/client';
 import { getOrderStatusRoleMap } from '@/server/lists/resolver';
 
-type Scope = { branchId?: string };
+type Scope = DataScope;
 
 const orderSelect = {
   id: true,
@@ -211,7 +219,7 @@ export async function getCatalogForAlerts(): Promise<
 /** Latest order timestamp — drives the data-freshness banner. */
 export async function getLatestOrderDate(scope: Scope): Promise<Date | null> {
   const row = await prisma.order.findFirst({
-    where: scope.branchId ? { branchId: scope.branchId } : {},
+    where: buildOrderScopeWhere(scope),
     orderBy: { placedAt: 'desc' },
     select: { placedAt: true },
   });
@@ -220,16 +228,32 @@ export async function getLatestOrderDate(scope: Scope): Promise<Date | null> {
 
 /** Latest meaningful operational activity, not merely the latest sales import. */
 export async function getLatestActivityDate(scope: Scope): Promise<Date | null> {
-  const branch = scope.branchId ? { branchId: scope.branchId } : {};
   const [order, finance, movement, batch] = await Promise.all([
-    prisma.order.findFirst({ where: branch, orderBy: { placedAt: 'desc' }, select: { placedAt: true } }),
+    prisma.order.findFirst({
+      where: buildOrderScopeWhere(scope),
+      orderBy: { placedAt: 'desc' },
+      select: { placedAt: true },
+    }),
     prisma.financeEntry.findFirst({
-      where: { ...branch, archivedAt: null, reversedAt: null, reversalOfId: null },
+      where: {
+        ...buildFinanceEntryScopeWhere(scope),
+        archivedAt: null,
+        reversedAt: null,
+        reversalOfId: null,
+      },
       orderBy: { date: 'desc' },
       select: { date: true },
     }),
-    prisma.stockMovement.findFirst({ where: branch, orderBy: { occurredAt: 'desc' }, select: { occurredAt: true } }),
-    prisma.roastBatch.findFirst({ where: branch, orderBy: { createdAt: 'desc' }, select: { createdAt: true } }),
+    prisma.stockMovement.findFirst({
+      where: buildMovementScopeWhere(scope),
+      orderBy: { occurredAt: 'desc' },
+      select: { occurredAt: true },
+    }),
+    prisma.roastBatch.findFirst({
+      where: buildBatchScopeWhere(scope),
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true },
+    }),
   ]);
   const dates = [order?.placedAt, finance?.date, movement?.occurredAt, batch?.createdAt].filter((value): value is Date => Boolean(value));
   return dates.length ? new Date(Math.max(...dates.map((date) => date.getTime()))) : null;

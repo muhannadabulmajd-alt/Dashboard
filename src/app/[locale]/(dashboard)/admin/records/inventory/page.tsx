@@ -12,6 +12,8 @@ import { Plus } from 'lucide-react';
 import { BackLink } from '@/components/records/parts';
 import { SectionGuide } from '@/components/records/SectionGuide';
 import { Link } from '@/i18n/navigation';
+import { getInventoryV2Config } from '@/server/inventory-v2/config';
+import { InventoryLocationOverview } from '@/components/records/InventoryLocationOverview';
 
 export default async function InventoryRecordsPage({
   params,
@@ -20,7 +22,16 @@ export default async function InventoryRecordsPage({
   params: Promise<{ locale: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { locale, filters, scope, range } = await getPageContext(params, searchParams, 'manage:inventory');
+  const { locale, user, filters, scope, range } = await getPageContext(params, searchParams, 'manage:inventory');
+  if (getInventoryV2Config().enabled) {
+    return (
+      <InventoryLocationOverview
+        locale={locale}
+        user={user}
+        searchParams={await searchParams}
+      />
+    );
+  }
   const t = await getTranslations('records');
   const items = await getInventoryItems(filters, scope, range);
 

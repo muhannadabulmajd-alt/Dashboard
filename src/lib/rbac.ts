@@ -16,6 +16,7 @@ export type Capability =
   | 'view:financial' // P&L, COGS, margins, expenses, cash burn
   | 'view:finance' // finance/accounting section
   | 'manage:finance' // record finance entries, accounts, parties
+  | 'record:local-expense' // tightly scoped sales-point operating expense
   | 'view:records' // back-office: browse/manage raw records
   | 'manage:products'
   | 'manage:customers'
@@ -46,6 +47,7 @@ const ALL: Capability[] = [
   'view:financial',
   'view:finance',
   'manage:finance',
+  'record:local-expense',
   'view:records',
   'manage:products',
   'manage:customers',
@@ -131,7 +133,9 @@ export const ROLE_CAPABILITIES: Record<Role, Capability[]> = {
     'manage:customers',
     'manage:orders',
     'manage:inventory',
+    'record:local-expense',
     'export:data',
+    'use:ai-assistant',
   ],
   FRANCHISEE_VIEWER: ['view:dashboard', 'view:dashboard-builder', 'view:sales', 'view:franchise'],
   VIEWER: [
@@ -185,6 +189,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: '/finance', key: 'finance', icon: 'Wallet', capability: 'view:finance', group: 'finance' },
   { href: '/finance/ledger', key: 'financeLedger', icon: 'FileBarChart2', capability: 'view:finance', group: 'finance' },
   { href: '/finance/ledger/new', key: 'financeNewRecord', icon: 'Upload', capability: 'manage:finance', group: 'finance' },
+  { href: '/finance/local-expenses', key: 'localExpenses', icon: 'ReceiptText', capability: 'record:local-expense', group: 'finance' },
   { href: '/finance/dues', key: 'financeDues', icon: 'TrendingUp', capability: 'view:finance', group: 'finance' },
   { href: '/finance/accounts', key: 'financeAccounts', icon: 'Wallet', capability: 'view:finance', group: 'finance' },
   { href: '/finance/parties', key: 'financeParties', icon: 'UsersRound', capability: 'view:finance', group: 'finance' },

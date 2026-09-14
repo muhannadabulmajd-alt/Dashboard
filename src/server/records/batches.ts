@@ -9,6 +9,8 @@ import { decimalNumber } from '@/lib/decimal';
 import { syncActiveCost } from '@/server/inventory/fifo';
 import type { TrustedCommandContext } from '@/server/commands/actor-context';
 import { COMMAND_TRANSACTION_OPTIONS } from '@/server/commands/transaction-checkpoints';
+import { getInventoryV2Config } from '@/server/inventory-v2/config';
+import { assertRoastBatchObjectAccess } from '@/server/inventory-v2/object-scope';
 import {
   requireCap,
   audit,
@@ -86,6 +88,7 @@ export async function createRoastBatchFromInput(
 ) {
   const user = await resolveCommandActor(CAP, options.actorContext);
   if (!user) throw new Error('forbidden');
+  if (getInventoryV2Config().enabled) throw new Error('inventory_v2_location_required');
   const input = RoastBatchCommandSchema.parse(rawInput);
 
   return prisma.$transaction(async (tx) => {
@@ -227,6 +230,7 @@ function parse(fd: FormData) {
 }
 
 export async function createBatch(_prev: ActionState, fd: FormData): Promise<ActionState> {
+  if (getInventoryV2Config().enabled) return { error: 'governed' };
   const r = parse(fd);
   if (!r.success) return { error: 'invalid' };
   const locale = reqField(fd, 'locale') || 'ar';
@@ -248,6 +252,12 @@ export async function updateBatch(
 ): Promise<ActionState> {
   const user = await requireCap(CAP);
   if (!user) return { error: 'forbidden' };
+  try {
+    await assertRoastBatchObjectAccess(user, id);
+  } catch {
+    return { error: 'forbidden' };
+  }
+  if (getInventoryV2Config().enabled) return { error: 'governed' };
   const r = parse(fd);
   if (!r.success) return { error: 'invalid' };
   const locale = reqField(fd, 'locale') || 'ar';
@@ -263,6 +273,12 @@ export async function updateBatch(
 export async function archiveBatch(id: string, locale: string, active: boolean): Promise<void> {
   const user = await requireCap(CAP);
   if (!user) return;
+  try {
+    await assertRoastBatchObjectAccess(user, id);
+  } catch {
+    return;
+  }
+  if (getInventoryV2Config().enabled) return;
   await prisma.roastBatch.update({ where: { id }, data: { isActive: active } });
   await audit(user.id, active ? 'RESTORE' : 'ARCHIVE', 'RoastBatch', { id });
   revalidatePath(LIST, 'page');
@@ -272,6 +288,12 @@ export async function archiveBatch(id: string, locale: string, active: boolean):
 export async function deleteBatch(id: string, locale: string): Promise<void> {
   const user = await requireCap(CAP);
   if (!user) return;
+  try {
+    await assertRoastBatchObjectAccess(user, id);
+  } catch {
+    return;
+  }
+  if (getInventoryV2Config().enabled) return;
   try {
     await prisma.roastBatch.delete({ where: { id } });
     await audit(user.id, 'DELETE', 'RoastBatch', { id });

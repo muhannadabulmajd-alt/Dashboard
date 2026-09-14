@@ -7,6 +7,9 @@ import { Badge, PageHeader } from '@/components/ui/primitives';
 import { RecordForm, type FieldDef } from '@/components/records/form';
 import { BackLink } from '@/components/records/parts';
 import { updateUser, setUserActive } from '@/server/records/users';
+import { getInventoryV2Config } from '@/server/inventory-v2/config';
+import { replaceUserLocationAccessAction } from '@/server/inventory-v2/setup-actions';
+import { UserLocationAccessEditor } from '@/components/admin/UserLocationAccessEditor';
 
 export default async function EditUserPage({
   params,
@@ -18,15 +21,26 @@ export default async function EditUserPage({
   const { locale, user: actor } = await getPageContext(params, searchParams, 'manage:users');
   const { id } = await params;
   const t = await getTranslations('admin');
+  const inventoryV2Enabled = getInventoryV2Config().enabled;
 
-  const [u, branches, financeAccounts] = await Promise.all([
-    prisma.user.findUnique({ where: { id } }),
+  const [u, branches, financeAccounts, stockLocations] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id },
+      include: { stockLocationAccesses: true },
+    }),
     prisma.branch.findMany({ select: { id: true, nameEn: true, nameAr: true } }),
     prisma.financeAccount.findMany({
       where: { isActive: true, currency: 'IQD', type: { not: 'PAYMENT_GATEWAY' } },
       select: { id: true, name: true },
       orderBy: { name: 'asc' },
     }),
+    inventoryV2Enabled
+      ? prisma.stockLocation.findMany({
+          where: { isActive: true },
+          include: { branch: { select: { nameEn: true, nameAr: true } } },
+          orderBy: [{ branch: { nameEn: 'asc' } }, { nameEn: 'asc' }],
+        })
+      : Promise.resolve([]),
   ]);
   if (!u) notFound();
 
@@ -81,6 +95,44 @@ export default async function EditUserPage({
         cancelLabel={t('cancel')}
         errors={errors}
       />
+
+      {inventoryV2Enabled ? (
+        <UserLocationAccessEditor
+          action={replaceUserLocationAccessAction.bind(null, u.id)}
+          locale={locale}
+          initialDefaultLocationId={u.defaultStockLocationId ?? ''}
+          locations={stockLocations.map((location) => ({
+            id: location.id,
+            type: location.type,
+            label: locale === 'ar'
+              ? `${location.nameAr} · ${location.branch.nameAr}`
+              : `${location.nameEn} · ${location.branch.nameEn}`,
+            access: u.stockLocationAccesses.find((access) => access.locationId === location.id),
+          }))}
+          labels={{
+            title: t('locationAccess.title'),
+            hint: t('locationAccess.hint'),
+            defaultLocation: t('locationAccess.defaultLocation'),
+            location: t('locationAccess.location'),
+            canView: t('locationAccess.canView'),
+            canSell: t('locationAccess.canSell'),
+            canReceive: t('locationAccess.canReceive'),
+            canCount: t('locationAccess.canCount'),
+            canRecordExpense: t('locationAccess.canRecordExpense'),
+            canProduce: t('locationAccess.canProduce'),
+            canDispatch: t('locationAccess.canDispatch'),
+            canApprove: t('locationAccess.canApprove'),
+            save: t('save'),
+          }}
+          errors={{
+            invalid: t('invalid'),
+            forbidden: t('forbidden'),
+            user_not_found: t('notfound'),
+            location_not_found: t('locationAccess.locationNotFound'),
+            default_location_not_allowed: t('locationAccess.defaultNotAllowed'),
+          }}
+        />
+      ) : null}
 
       {!isSelf ? (
         <section className="mt-4 flex items-center justify-between gap-3 rounded-[var(--radius)] border bg-card p-4">

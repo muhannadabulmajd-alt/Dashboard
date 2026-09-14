@@ -19,9 +19,10 @@ import OpenAI from 'openai';
 import { isOpenAiCreditUnavailable, safeOpenAiError } from '@/server/ai/provider-error';
 
 describe('Atlas AI assistant contracts', () => {
-  it('restricts the assistant capability to Owner and Admin', () => {
+  it('allows the assistant only for centrally authorized and sales-point roles', () => {
     expect(can('OWNER', 'use:ai-assistant')).toBe(true);
     expect(can('ADMIN', 'use:ai-assistant')).toBe(true);
+    expect(can('BRANCH_MANAGER', 'use:ai-assistant')).toBe(true);
     expect(can('FINANCE', 'use:ai-assistant')).toBe(false);
     expect(can('SALES_CRM', 'use:ai-assistant')).toBe(false);
     expect(can('VIEWER', 'use:ai-assistant')).toBe(false);

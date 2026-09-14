@@ -14,6 +14,8 @@ import { formatMoney, formatNumber } from '@/lib/money';
 import { invoiceTotal } from '@/lib/invoice';
 import { Link } from '@/i18n/navigation';
 import { getOrderStatusRoleMap } from '@/server/lists/resolver';
+import { buildOrderScopeWhere } from '@/server/filters/where-builder';
+import { canManageExistingCustomer } from '@/server/records/customer-policy';
 
 export default async function CustomerDetailPage({
   params,
@@ -22,17 +24,18 @@ export default async function CustomerDetailPage({
   params: Promise<{ locale: string; id: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { locale } = await getPageContext(params, searchParams, 'manage:customers');
+  const { locale, user, scope } = await getPageContext(params, searchParams, 'manage:customers');
   const { id } = await params;
   const t = await getTranslations('records');
   const statusRoles = await getOrderStatusRoleMap();
   const saleStatuses = [...statusRoles].filter(([, role]) => role === 'SALE').map(([code]) => code);
+  const orderScope = buildOrderScopeWhere(scope);
   const [c, spendOrders] = await Promise.all([
     prisma.customer.findUnique({
       where: { id },
       include: {
         orders: {
-          where: { status: { in: saleStatuses }, purpose: 'SALE' },
+          where: { status: { in: saleStatuses }, purpose: 'SALE', ...orderScope },
           orderBy: { placedAt: 'desc' },
           take: 12,
           include: { lines: { include: { product: { select: { nameEn: true, nameAr: true } } } } },
@@ -40,8 +43,10 @@ export default async function CustomerDetailPage({
       },
     }),
     prisma.order.findMany({
-      where: { customerId: id, status: { in: saleStatuses }, purpose: 'SALE' },
+      where: { customerId: id, status: { in: saleStatuses }, purpose: 'SALE', ...orderScope },
+      orderBy: { placedAt: 'desc' },
       select: {
+        placedAt: true,
         grossAmount: true,
         discountAmount: true,
         refundAmount: true,
@@ -51,6 +56,10 @@ export default async function CustomerDetailPage({
     }),
   ]);
   if (!c) notFound();
+
+  const ordersCount = spendOrders.length;
+  const lastOrderAt = spendOrders[0]?.placedAt ?? null;
+  const firstOrderAt = spendOrders[spendOrders.length - 1]?.placedAt ?? null;
 
   const name = (locale === 'ar' ? c.nameAr : c.nameEn) || c.nameEn || c.nameAr || c.externalId || '—';
   const items: DetailField[] = [
@@ -63,9 +72,9 @@ export default async function CustomerDetailPage({
     { label: t('f.street'), value: c.street },
     { label: t('f.segment'), value: enumLabel(c.segment, locale) },
     { label: t('f.source'), value: c.campaignSource },
-    { label: t('f.ordersCount'), value: c.ordersCount },
-    { label: t('f.firstOrder'), value: c.firstOrderAt ? formatDate(c.firstOrderAt, locale) : '—' },
-    { label: t('f.lastOrder'), value: c.lastOrderAt ? formatDate(c.lastOrderAt, locale) : '—' },
+    { label: t('f.ordersCount'), value: ordersCount },
+    { label: t('f.firstOrder'), value: firstOrderAt ? formatDate(firstOrderAt, locale) : '—' },
+    { label: t('f.lastOrder'), value: lastOrderAt ? formatDate(lastOrderAt, locale) : '—' },
     { label: t('f.notes'), value: c.notes },
   ];
   const totalSpend = spendOrders.reduce((sum, order) => sum + invoiceTotal(order), 0);
@@ -81,9 +90,9 @@ export default async function CustomerDetailPage({
     .slice(0, 4)
     .map(([label, qty]) => `${label} (${formatNumber(qty, locale)})`);
   const stats: SummaryStat[] = [
-    { label: t('f.ordersCount'), value: formatNumber(c.ordersCount, locale) },
+    { label: t('f.ordersCount'), value: formatNumber(ordersCount, locale) },
     { label: t('f.totalSpend'), value: formatMoney(totalSpend, 'IQD', locale) },
-    { label: t('f.lastOrder'), value: c.lastOrderAt ? formatDate(c.lastOrderAt, locale) : '—' },
+    { label: t('f.lastOrder'), value: lastOrderAt ? formatDate(lastOrderAt, locale) : '—' },
   ];
   const orderCols: Column[] = [
     { label: t('f.orderNumber') },
@@ -106,19 +115,21 @@ export default async function CustomerDetailPage({
     <>
       <BackLink href="/admin/records/customers" label={t('back')} />
       <PageHeader title={name} subtitle={c.externalId || c.phone || ''} />
-      <RecordActions
-        editHref={`/admin/records/customers/${c.id}/edit`}
-        isActive={c.isActive}
-        archiveAction={archiveCustomer.bind(null, c.id, locale, !c.isActive)}
-        deleteAction={deleteCustomer.bind(null, c.id, locale)}
-        labels={{
-          edit: t('edit'),
-          archive: t('archive'),
-          restore: t('restore'),
-          delete: t('delete'),
-          confirm: t('confirmDelete'),
-        }}
-      />
+      {canManageExistingCustomer(user.role) ? (
+        <RecordActions
+          editHref={`/admin/records/customers/${c.id}/edit`}
+          isActive={c.isActive}
+          archiveAction={archiveCustomer.bind(null, c.id, locale, !c.isActive)}
+          deleteAction={deleteCustomer.bind(null, c.id, locale)}
+          labels={{
+            edit: t('edit'),
+            archive: t('archive'),
+            restore: t('restore'),
+            delete: t('delete'),
+            confirm: t('confirmDelete'),
+          }}
+        />
+      ) : null}
       <RecordsSummary stats={stats} />
       {topProducts.length ? (
         <div className="rounded-[var(--radius)] border bg-card p-4 shadow-sm">

@@ -11,6 +11,7 @@ import { getProfitFacts } from '@/server/finance/facts';
 import { getShipments } from '@/server/db/repositories/fulfillment.repo';
 import { getCustomers } from '@/server/db/repositories/customers.repo';
 import * as M from '@/lib/metrics';
+import type { DataScope } from '@/server/filters/where-builder';
 
 export interface DeckKpi {
   label: string;
@@ -44,7 +45,7 @@ export interface DeckData {
 export async function buildDeckData(
   user: CurrentUser,
   filters: DashboardFilters,
-  scope: { branchId?: string },
+  scope: DataScope,
   range: ResolvedRange,
   periodLabel: string,
 ): Promise<DeckData> {

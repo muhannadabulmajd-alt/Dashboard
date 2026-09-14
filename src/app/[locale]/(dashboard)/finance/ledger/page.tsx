@@ -71,7 +71,7 @@ export default async function LedgerPage({
       ],
     });
   }
-  if (FINANCE_TYPES.includes(type as FinanceType)) and.push({ type: type as FinanceType });
+  if ((FINANCE_TYPES as readonly string[]).includes(type)) and.push({ type: type as FinanceType });
   if (['PURCHASE', 'EXPENSE', 'MIXED'].includes(recordClass)) and.push({ recordClass: recordClass as LedgerRecordClass });
   if (accountId) and.push({ OR: [{ accountId }, { toAccountId: accountId }] });
   if (partyId) and.push({ partyId });

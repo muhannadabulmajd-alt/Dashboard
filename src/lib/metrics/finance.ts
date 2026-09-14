@@ -14,6 +14,7 @@ export interface FinanceEntryLike {
   archivedAt?: Date | null;
   reversedAt?: Date | null;
   reversalOfId?: string | null;
+  isOpeningBalance?: boolean;
 }
 
 const IN_TYPES: FinanceType[] = ['INCOME', 'PAYMENT_IN', 'CAPITAL_IN'];
@@ -59,7 +60,7 @@ export function accountBalance(account: AccountLike, entries: FinanceEntryLike[]
 
 export interface FinanceTotals {
   capitalIn: number; // shareholder contributions received
-  expenses: number; // EXPENSE + PURCHASE incurred (paid or still due)
+  expenses: number; // EXPENSE + PURCHASE + non-opening inventory losses
   received: number; // money received from parties (payments + other income)
   cashIn: number; // all money in (incl. capital)
   cashOut: number; // all money out
@@ -90,7 +91,13 @@ export function financeTotals(entries: FinanceEntryLike[]): FinanceTotals {
 
   for (const e of entries) {
     if (!isActiveEntry(e)) continue;
-    if (e.type === 'EXPENSE' || e.type === 'PURCHASE') t.expenses += e.amount;
+    if (
+      e.type === 'EXPENSE' ||
+      e.type === 'PURCHASE' ||
+      (e.type === 'INVENTORY_LOSS' && !e.isOpeningBalance)
+    ) {
+      t.expenses += e.amount;
+    }
     if (e.type === 'CAPITAL_IN') t.capitalIn += e.amount; // capital counts even if the cash account is unknown (e.g. imports)
     if ((e.type === 'PAYMENT_IN' || e.type === 'INCOME') && isCashMovement(e)) t.received += e.amount;
 

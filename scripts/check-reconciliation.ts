@@ -430,6 +430,7 @@ async function main(): Promise<void> {
         SELECT l.id
         FROM "LedgerEntryLine" l
         WHERE l."itemType" = 'INVENTORY'
+          AND l."spendTreatment" = 'INVENTORY'
           AND NOT EXISTS (
             SELECT 1
             FROM "InventoryLandedCostAllocation" allocation

@@ -344,12 +344,699 @@ async function inventorySnapshot(recordId: string, locale: AppLocale): Promise<D
   };
 }
 
+async function stockReceiptSnapshot(recordId: string, locale: AppLocale): Promise<DocumentSnapshot | null> {
+  const document = await prisma.stockDocument.findUnique({
+    where: { id: recordId },
+    include: {
+      destinationLocation: { include: { branch: { select: { nameEn: true, nameAr: true } } } },
+      party: { select: { name: true, phone: true, email: true, address: true } },
+      createdBy: { select: { name: true } },
+      movements: {
+        include: {
+          inventoryItem: { select: { externalKey: true, nameEn: true, nameAr: true, unit: true } },
+          costLayer: { select: { lotNumber: true, supplierLot: true, unitCost: true, bestBefore: true } },
+          financeEntry: {
+            select: {
+              recordKey: true,
+              amount: true,
+              obligation: true,
+              dueDate: true,
+              account: { select: { name: true } },
+            },
+          },
+        },
+        orderBy: { id: 'asc' },
+      },
+    },
+  });
+  if (!document || document.type !== 'PURCHASE_RECEIPT') return null;
+  const movement = document.movements[0];
+  if (!movement) return null;
+  const itemName = locale === 'ar'
+    ? movement.inventoryItem.nameAr || movement.inventoryItem.nameEn
+    : movement.inventoryItem.nameEn || movement.inventoryItem.nameAr;
+  const locationName = document.destinationLocation
+    ? locale === 'ar'
+      ? document.destinationLocation.nameAr || document.destinationLocation.nameEn
+      : document.destinationLocation.nameEn || document.destinationLocation.nameAr
+    : '-';
+  const branchName = document.destinationLocation?.branch
+    ? locale === 'ar'
+      ? document.destinationLocation.branch.nameAr || document.destinationLocation.branch.nameEn
+      : document.destinationLocation.branch.nameEn || document.destinationLocation.branch.nameAr
+    : '-';
+  const finance = movement.financeEntry;
+  return {
+    title: localized(locale, 'Stock receipt', 'إيصال استلام مخزون'),
+    subtitle: document.documentNumber,
+    summary: `${itemName} · ${locationName}`,
+    sections: [
+      {
+        title: localized(locale, 'Receipt details', 'تفاصيل الاستلام'),
+        fields: [
+          { label: localized(locale, 'Document number', 'رقم المستند'), value: document.documentNumber },
+          { label: localized(locale, 'Status', 'الحالة'), value: document.status },
+          { label: localized(locale, 'Received at', 'تاريخ الاستلام'), value: dateLabel(document.occurredAt, locale) },
+          { label: localized(locale, 'Location', 'الموقع'), value: locationName },
+          { label: localized(locale, 'Branch', 'الفرع'), value: branchName },
+          { label: localized(locale, 'Recorded by', 'سجله'), value: clean(document.createdBy?.name) },
+          { label: localized(locale, 'Reference', 'المرجع'), value: clean(document.reason || movement.reference) },
+          { label: localized(locale, 'Notes', 'الملاحظات'), value: clean(document.notes) },
+        ],
+      },
+      {
+        title: localized(locale, 'Supplier', 'المورد'),
+        fields: [
+          { label: localized(locale, 'Name', 'الاسم'), value: clean(document.party?.name) },
+          { label: localized(locale, 'Phone', 'الهاتف'), value: clean(document.party?.phone) },
+          { label: localized(locale, 'Email', 'البريد الإلكتروني'), value: clean(document.party?.email) },
+          { label: localized(locale, 'Address', 'العنوان'), value: clean(document.party?.address) },
+        ],
+      },
+      {
+        title: localized(locale, 'Stock and lot', 'المخزون والدفعة'),
+        fields: [
+          { label: localized(locale, 'Item', 'المادة'), value: `${itemName}${movement.inventoryItem.externalKey ? ` · ${movement.inventoryItem.externalKey}` : ''}` },
+          { label: localized(locale, 'Quantity', 'الكمية'), value: `${formatNumber(Number(movement.quantity), locale, 3)} ${movement.inventoryItem.unit}` },
+          { label: localized(locale, 'Unit cost', 'تكلفة الوحدة'), value: movement.costLayer ? formatMoney(Number(movement.costLayer.unitCost), 'IQD', locale) : '-' },
+          { label: localized(locale, 'Total cost', 'التكلفة الإجمالية'), value: finance ? formatMoney(finance.amount, 'IQD', locale) : formatMoney(Number(movement.quantity) * Number(movement.costLayer?.unitCost ?? 0), 'IQD', locale) },
+          { label: localized(locale, 'Atlas lot', 'دفعة أطلس'), value: clean(movement.costLayer?.lotNumber) },
+          { label: localized(locale, 'Supplier lot', 'دفعة المورد'), value: clean(movement.costLayer?.supplierLot) },
+          { label: localized(locale, 'Best before', 'الصلاحية'), value: dateLabel(movement.costLayer?.bestBefore ?? null, locale) },
+        ],
+      },
+      {
+        title: localized(locale, 'Finance', 'المالية'),
+        fields: [
+          { label: localized(locale, 'Finance record', 'السجل المالي'), value: clean(finance?.recordKey) },
+          { label: localized(locale, 'Payment handling', 'معالجة الدفع'), value: finance ? (finance.obligation ? 'CREDIT' : 'PAID') : '-' },
+          { label: localized(locale, 'Payment account', 'حساب الدفع'), value: clean(finance?.account?.name) },
+          { label: localized(locale, 'Due date', 'تاريخ الاستحقاق'), value: dateLabel(finance?.dueDate ?? null, locale) },
+        ],
+      },
+    ],
+  };
+}
+
+async function stockTransferSnapshot(recordId: string, locale: AppLocale): Promise<DocumentSnapshot | null> {
+  const document = await prisma.stockDocument.findUnique({
+    where: { id: recordId },
+    include: {
+      sourceLocation: { include: { branch: { select: { nameEn: true, nameAr: true } } } },
+      destinationLocation: { include: { branch: { select: { nameEn: true, nameAr: true } } } },
+      parentDocument: {
+        include: {
+          sourceLocation: {
+            select: {
+              nameEn: true,
+              nameAr: true,
+              branch: { select: { nameEn: true, nameAr: true } },
+            },
+          },
+          destinationLocation: {
+            select: {
+              nameEn: true,
+              nameAr: true,
+              branch: { select: { nameEn: true, nameAr: true } },
+            },
+          },
+        },
+      },
+      createdBy: { select: { name: true } },
+      movements: {
+        include: {
+          inventoryItem: { select: { externalKey: true, nameEn: true, nameAr: true, unit: true } },
+          costLayer: { select: { lotNumber: true, unitCost: true } },
+        },
+        orderBy: { id: 'asc' },
+      },
+      discrepancies: {
+        include: { inventoryItem: { select: { externalKey: true, nameEn: true, nameAr: true, unit: true } } },
+        orderBy: { id: 'asc' },
+      },
+    },
+  });
+  if (!document || document.type !== 'TRANSFER') return null;
+  const isReceipt = Boolean(document.parentDocumentId);
+  const source = isReceipt ? document.parentDocument?.sourceLocation : document.sourceLocation;
+  const destination = isReceipt ? document.parentDocument?.destinationLocation : document.destinationLocation;
+  const locationName = (location: { nameEn: string; nameAr: string } | null | undefined) => (
+    location
+      ? locale === 'ar' ? location.nameAr || location.nameEn : location.nameEn || location.nameAr
+      : '-'
+  );
+  const relevantReason = isReceipt ? 'TRANSFER_IN' : 'TRANSFER_OUT';
+  const grouped = new Map<string, {
+    name: string;
+    externalKey: string | null;
+    unit: string;
+    quantity: number;
+    cost: number;
+    lots: Set<string>;
+  }>();
+  for (const movement of document.movements.filter((row) => row.reason === relevantReason)) {
+    const itemName = locale === 'ar'
+      ? movement.inventoryItem.nameAr || movement.inventoryItem.nameEn
+      : movement.inventoryItem.nameEn || movement.inventoryItem.nameAr;
+    const current = grouped.get(movement.inventoryItemId) ?? {
+      name: itemName,
+      externalKey: movement.inventoryItem.externalKey,
+      unit: movement.inventoryItem.unit,
+      quantity: 0,
+      cost: 0,
+      lots: new Set<string>(),
+    };
+    const quantity = Math.abs(Number(movement.quantity));
+    current.quantity += quantity;
+    current.cost += quantity * Number(movement.costLayer?.unitCost ?? 0);
+    if (movement.costLayer?.lotNumber) current.lots.add(movement.costLayer.lotNumber);
+    grouped.set(movement.inventoryItemId, current);
+  }
+  const sourceBranch = isReceipt ? document.parentDocument?.sourceLocation : document.sourceLocation;
+  const destinationBranch = isReceipt ? document.parentDocument?.destinationLocation : document.destinationLocation;
+  return {
+    title: isReceipt
+      ? localized(locale, 'Stock transfer receipt', 'إيصال استلام تحويل مخزون')
+      : localized(locale, 'Stock transfer note', 'مذكرة تحويل مخزون'),
+    subtitle: document.documentNumber,
+    summary: `${locationName(source)} → ${locationName(destination)}`,
+    sections: [
+      {
+        title: localized(locale, 'Transfer details', 'تفاصيل التحويل'),
+        fields: [
+          { label: localized(locale, 'Document number', 'رقم المستند'), value: document.documentNumber },
+          ...(document.parentDocument ? [{ label: localized(locale, 'Dispatch document', 'مستند الإرسال'), value: document.parentDocument.documentNumber }] : []),
+          { label: localized(locale, 'Status', 'الحالة'), value: document.status },
+          { label: localized(locale, 'Source', 'المصدر'), value: locationName(source) },
+          { label: localized(locale, 'Source branch', 'فرع المصدر'), value: locationName(sourceBranch?.branch) },
+          { label: localized(locale, 'Destination', 'الوجهة'), value: locationName(destination) },
+          { label: localized(locale, 'Destination branch', 'فرع الوجهة'), value: locationName(destinationBranch?.branch) },
+          { label: localized(locale, isReceipt ? 'Received at' : 'Dispatched at', isReceipt ? 'تاريخ الاستلام' : 'تاريخ الإرسال'), value: dateLabel(document.occurredAt, locale) },
+          { label: localized(locale, 'Expected arrival', 'الوصول المتوقع'), value: dateLabel(document.parentDocument?.expectedAt ?? document.expectedAt, locale) },
+          { label: localized(locale, 'Recorded by', 'سجله'), value: clean(document.createdBy?.name) },
+          { label: localized(locale, 'Notes', 'الملاحظات'), value: clean(document.notes) },
+        ],
+      },
+      {
+        title: localized(locale, isReceipt ? 'Received stock' : 'Dispatched stock', isReceipt ? 'المخزون المستلم' : 'المخزون المرسل'),
+        fields: [...grouped.values()].map((item) => ({
+          label: `${item.name}${item.externalKey ? ` · ${item.externalKey}` : ''}`,
+          value: `${formatNumber(item.quantity, locale, 3)} ${item.unit} · ${formatMoney(item.cost, 'IQD', locale)} · ${localized(locale, 'Lots', 'الدفعات')}: ${[...item.lots].join(', ') || '-'}`,
+        })),
+      },
+      ...(document.discrepancies.length ? [{
+        title: localized(locale, 'Reported discrepancies', 'فروقات الاستلام المبلغ عنها'),
+        fields: document.discrepancies.map((row) => {
+          const itemName = locale === 'ar'
+            ? row.inventoryItem.nameAr || row.inventoryItem.nameEn
+            : row.inventoryItem.nameEn || row.inventoryItem.nameAr;
+          return {
+            label: `${itemName}${row.inventoryItem.externalKey ? ` · ${row.inventoryItem.externalKey}` : ''}`,
+            value: `${row.type} · ${formatNumber(Number(row.quantity), locale, 3)} ${row.inventoryItem.unit} · ${clean(row.notes)} · ${row.status}`,
+          };
+        }),
+      }] : []),
+    ],
+  };
+}
+
+async function stockChangeSnapshot(recordId: string, locale: AppLocale): Promise<DocumentSnapshot | null> {
+  const document = await prisma.stockDocument.findUnique({
+    where: { id: recordId },
+    include: {
+      sourceLocation: { include: { branch: { select: { nameEn: true, nameAr: true } } } },
+      destinationLocation: { include: { branch: { select: { nameEn: true, nameAr: true } } } },
+      createdBy: { select: { name: true } },
+      confirmedBy: { select: { name: true } },
+      party: { select: { name: true, type: true, phone: true, email: true, address: true, notes: true } },
+      parentDocument: { select: { id: true, documentNumber: true, type: true, status: true } },
+      reversalOf: {
+        select: {
+          id: true,
+          documentNumber: true,
+          type: true,
+          status: true,
+          movements: { select: { financeEntryId: true } },
+          costLayers: { select: { financeEntryId: true } },
+        },
+      },
+      movements: {
+        include: {
+          inventoryItem: { select: { externalKey: true, nameEn: true, nameAr: true, unit: true } },
+          location: {
+            select: {
+              nameEn: true,
+              nameAr: true,
+              branch: { select: { nameEn: true, nameAr: true } },
+            },
+          },
+          costLayer: {
+            select: {
+              lotNumber: true,
+              supplierLot: true,
+              unitCost: true,
+              receivedAt: true,
+              roastDate: true,
+              packedAt: true,
+              bestBefore: true,
+            },
+          },
+          financeEntry: {
+            select: {
+              id: true,
+              recordKey: true,
+              importKey: true,
+              type: true,
+              amount: true,
+              accountingCode: true,
+              reference: true,
+              description: true,
+              reversalOfId: true,
+              account: { select: { name: true } },
+            },
+          },
+          order: {
+            select: {
+              id: true,
+              orderNumber: true,
+              customer: {
+                select: {
+                  nameEn: true,
+                  nameAr: true,
+                  phone: true,
+                  email: true,
+                  governorate: true,
+                  address1: true,
+                  street: true,
+                  notes: true,
+                },
+              },
+            },
+          },
+          orderLine: { select: { sku: true, product: { select: { nameEn: true, nameAr: true } } } },
+        },
+        orderBy: { createdAt: 'asc' },
+      },
+      costLayers: { select: { financeEntryId: true } },
+    },
+  });
+  if (!document) return null;
+
+  const locationName = (location: {
+    nameEn: string;
+    nameAr: string;
+    branch: { nameEn: string; nameAr: string };
+  } | null) => {
+    if (!location) return '-';
+    const name = locale === 'ar' ? location.nameAr || location.nameEn : location.nameEn || location.nameAr;
+    const branch = locale === 'ar'
+      ? location.branch.nameAr || location.branch.nameEn
+      : location.branch.nameEn || location.branch.nameAr;
+    return `${name} · ${branch}`;
+  };
+  const dispositionLabel = document.returnDisposition ?? document.type;
+  const title = document.type === 'RETURN'
+    ? localized(locale, 'Returned goods receipt', 'إيصال بضاعة مرتجعة')
+    : document.type === 'REVERSAL'
+      ? localized(locale, 'Stock reversal confirmation', 'تأكيد عكس حركة مخزون')
+      : document.returnDisposition
+        ? localized(locale, 'Returned goods disposition', 'معالجة بضاعة مرتجعة')
+        : localized(locale, 'Inventory movement', 'حركة مخزون');
+
+  const movementFields = document.movements.map((movement, index) => {
+    const itemName = locale === 'ar'
+      ? movement.inventoryItem.nameAr || movement.inventoryItem.nameEn
+      : movement.inventoryItem.nameEn || movement.inventoryItem.nameAr;
+    const movementLocation = movement.location
+      ? locale === 'ar'
+        ? movement.location.nameAr || movement.location.nameEn
+        : movement.location.nameEn || movement.location.nameAr
+      : '-';
+    const quantity = Number(movement.quantity);
+    const unitCost = Number(movement.costLayer?.unitCost ?? 0);
+    const totalCost = Math.abs(quantity) * unitCost;
+    return {
+      label: `${index + 1}. ${itemName}${movement.inventoryItem.externalKey ? ` · ${movement.inventoryItem.externalKey}` : ''}`,
+      value: [
+        movement.reason,
+        `${formatNumber(quantity, locale, 3)} ${movement.inventoryItem.unit}`,
+        movementLocation,
+        movement.costLayer?.lotNumber ? `${localized(locale, 'Lot', 'الدفعة')} ${movement.costLayer.lotNumber}` : null,
+        unitCost ? formatMoney(totalCost, 'IQD', locale) : null,
+      ].filter(Boolean).join(' · '),
+    };
+  });
+
+  const sourceFinanceIds = document.reversalOf
+    ? [...new Set([
+        ...document.reversalOf.movements.flatMap((movement) => movement.financeEntryId ? [movement.financeEntryId] : []),
+        ...document.reversalOf.costLayers.flatMap((layer) => layer.financeEntryId ? [layer.financeEntryId] : []),
+      ])]
+    : [];
+  const directFinance = [...new Map(document.movements.flatMap((movement) => (
+    movement.financeEntry ? [[movement.financeEntry.id, movement.financeEntry] as const] : []
+  ))).values()];
+  const indirectFinance = sourceFinanceIds.length
+    ? await prisma.financeEntry.findMany({
+        where: { reversalOfId: { in: sourceFinanceIds } },
+        select: {
+          id: true,
+          recordKey: true,
+          importKey: true,
+          type: true,
+          amount: true,
+          accountingCode: true,
+          reference: true,
+          description: true,
+          reversalOfId: true,
+          account: { select: { name: true } },
+        },
+        orderBy: { createdAt: 'asc' },
+      })
+    : [];
+  const financeEntries = [...new Map([...directFinance, ...indirectFinance].map((entry) => [entry.id, entry])).values()];
+
+  const orders = [...new Map(document.movements.flatMap((movement) => (
+    movement.order ? [[movement.order.id, movement.order] as const] : []
+  ))).values()];
+  const customerSections: PdfSection[] = orders.flatMap((order) => {
+    if (!order.customer) {
+      return [{
+        title: localized(locale, 'Order', 'الطلب'),
+        fields: [{ label: localized(locale, 'Order number', 'رقم الطلب'), value: order.orderNumber }],
+      }];
+    }
+    const customer = order.customer;
+    return [{
+      title: localized(locale, 'Order and customer', 'الطلب والعميل'),
+      fields: [
+        { label: localized(locale, 'Order number', 'رقم الطلب'), value: order.orderNumber },
+        { label: localized(locale, 'Customer', 'العميل'), value: clean(locale === 'ar' ? customer.nameAr || customer.nameEn : customer.nameEn || customer.nameAr) },
+        { label: localized(locale, 'Phone', 'الهاتف'), value: clean(customer.phone) },
+        { label: localized(locale, 'Email', 'البريد الإلكتروني'), value: clean(customer.email) },
+        { label: localized(locale, 'Governorate', 'المحافظة'), value: clean(customer.governorate) },
+        { label: localized(locale, 'Address', 'العنوان'), value: clean(customer.address1) },
+        { label: localized(locale, 'Street / landmark', 'الشارع أو أقرب نقطة'), value: clean(customer.street) },
+        { label: localized(locale, 'Customer notes', 'ملاحظات العميل'), value: clean(customer.notes) },
+      ],
+    }];
+  });
+
+  return {
+    title,
+    subtitle: document.documentNumber,
+    summary: `${dispositionLabel} · ${locationName(document.sourceLocation)} → ${locationName(document.destinationLocation)}`,
+    sections: [
+      {
+        title: localized(locale, 'Document details', 'تفاصيل المستند'),
+        fields: [
+          { label: localized(locale, 'Document number', 'رقم المستند'), value: document.documentNumber },
+          { label: localized(locale, 'Type', 'النوع'), value: document.type },
+          { label: localized(locale, 'Disposition', 'المعالجة'), value: clean(document.returnDisposition) },
+          { label: localized(locale, 'Status', 'الحالة'), value: document.status },
+          { label: localized(locale, 'Date', 'التاريخ'), value: dateLabel(document.occurredAt, locale) },
+          { label: localized(locale, 'Source', 'المصدر'), value: locationName(document.sourceLocation) },
+          { label: localized(locale, 'Destination', 'الوجهة'), value: locationName(document.destinationLocation) },
+          { label: localized(locale, 'Recorded by', 'سجله'), value: clean(document.createdBy?.name) },
+          { label: localized(locale, 'Confirmed by', 'أكده'), value: clean(document.confirmedBy?.name) },
+          { label: localized(locale, 'Reason', 'السبب'), value: clean(document.reason) },
+          { label: localized(locale, 'Notes', 'الملاحظات'), value: clean(document.notes) },
+        ],
+      },
+      ...(document.parentDocument || document.reversalOf ? [{
+        title: localized(locale, 'Linked documents and change', 'المستندات المرتبطة والتغيير'),
+        fields: [
+          ...(document.parentDocument ? [
+            { label: localized(locale, 'Parent document', 'المستند الأصل'), value: `${document.parentDocument.documentNumber} · ${document.parentDocument.type} · ${document.parentDocument.status}` },
+          ] : []),
+          ...(document.reversalOf ? [
+            { label: localized(locale, 'Before', 'قبل'), value: `${document.reversalOf.documentNumber} · ${document.reversalOf.type}` },
+            { label: localized(locale, 'After', 'بعد'), value: `${document.reversalOf.documentNumber} · ${document.reversalOf.status}; ${document.documentNumber} · ${document.status}` },
+          ] : []),
+        ],
+      }] : []),
+      ...(document.party ? [{
+        title: localized(locale, 'Counterparty', 'الطرف المقابل'),
+        fields: [
+          { label: localized(locale, 'Name', 'الاسم'), value: document.party.name },
+          { label: localized(locale, 'Type', 'النوع'), value: document.party.type },
+          { label: localized(locale, 'Phone', 'الهاتف'), value: clean(document.party.phone) },
+          { label: localized(locale, 'Email', 'البريد الإلكتروني'), value: clean(document.party.email) },
+          { label: localized(locale, 'Address', 'العنوان'), value: clean(document.party.address) },
+          { label: localized(locale, 'Notes', 'الملاحظات'), value: clean(document.party.notes) },
+        ],
+      }] : []),
+      ...customerSections,
+      {
+        title: localized(locale, 'Stock movements and lots', 'حركات المخزون والدفعات'),
+        fields: movementFields.length ? movementFields : [{ label: localized(locale, 'Movements', 'الحركات'), value: '-' }],
+      },
+      ...(financeEntries.length ? [{
+        title: localized(locale, 'Linked finance entries', 'القيود المالية المرتبطة'),
+        fields: financeEntries.map((entry) => ({
+          label: clean(entry.recordKey || entry.importKey || entry.id),
+          value: [
+            entry.type,
+            formatMoney(entry.amount, 'IQD', locale),
+            entry.account?.name || null,
+            entry.accountingCode || null,
+            entry.reversalOfId ? `${localized(locale, 'Reversal of', 'عكس القيد')} ${entry.reversalOfId}` : null,
+            entry.reference || null,
+            entry.description || null,
+          ].filter(Boolean).join(' · '),
+        })),
+      }] : []),
+    ],
+  };
+}
+
+async function stockDocumentSnapshot(recordId: string, locale: AppLocale): Promise<DocumentSnapshot | null> {
+  const document = await prisma.stockDocument.findUnique({ where: { id: recordId }, select: { type: true } });
+  if (document?.type === 'PURCHASE_RECEIPT') return stockReceiptSnapshot(recordId, locale);
+  if (document?.type === 'TRANSFER') return stockTransferSnapshot(recordId, locale);
+  return stockChangeSnapshot(recordId, locale);
+}
+
+async function localExpenseSnapshot(recordId: string, locale: AppLocale): Promise<DocumentSnapshot | null> {
+  const request = await prisma.localExpenseRequest.findUnique({
+    where: { id: recordId },
+    include: {
+      location: { include: { branch: { select: { nameEn: true, nameAr: true } } } },
+      account: { select: { name: true, type: true, currency: true } },
+      submittedBy: { select: { name: true } },
+      reviewedBy: { select: { name: true } },
+      financeEntry: { select: { recordKey: true, importKey: true, date: true } },
+      attachment: { select: { fileName: true, mimeType: true, byteSize: true, checksum: true } },
+    },
+  });
+  if (!request) return null;
+  const locationName = locale === 'ar'
+    ? request.location.nameAr || request.location.nameEn
+    : request.location.nameEn || request.location.nameAr;
+  const branchName = locale === 'ar'
+    ? request.location.branch.nameAr || request.location.branch.nameEn
+    : request.location.branch.nameEn || request.location.branch.nameAr;
+  return {
+    title: request.status === 'POSTED'
+      ? localized(locale, 'Local expense voucher', 'سند مصروف محلي')
+      : localized(locale, 'Local expense request', 'طلب مصروف محلي'),
+    subtitle: request.requestNumber,
+    summary: `${request.description} · ${formatMoney(request.amount, 'IQD', locale)}`,
+    sections: [
+      {
+        title: localized(locale, 'Expense details', 'تفاصيل المصروف'),
+        fields: [
+          { label: localized(locale, 'Request number', 'رقم الطلب'), value: request.requestNumber },
+          { label: localized(locale, 'Status', 'الحالة'), value: request.status },
+          { label: localized(locale, 'Amount', 'المبلغ'), value: formatMoney(request.amount, 'IQD', locale) },
+          { label: localized(locale, 'Classification', 'التصنيف'), value: `OPEX · ${request.categoryType}` },
+          { label: localized(locale, 'Description', 'الوصف'), value: request.description },
+          { label: localized(locale, 'Expense date', 'تاريخ المصروف'), value: dateLabel(request.date, locale) },
+          { label: localized(locale, 'Location', 'الموقع'), value: locationName },
+          { label: localized(locale, 'Branch', 'الفرع'), value: branchName },
+          { label: localized(locale, 'Payment account', 'حساب الدفع'), value: `${request.account.name} · ${request.account.type} · ${request.account.currency}` },
+          { label: localized(locale, 'Submitted by', 'مقدم الطلب'), value: clean(request.submittedBy.name) },
+        ],
+      },
+      {
+        title: localized(locale, 'Evidence', 'المستندات'),
+        fields: [
+          { label: localized(locale, 'Receipt file', 'ملف الإيصال'), value: clean(request.attachment?.fileName) },
+          { label: localized(locale, 'Receipt type', 'نوع الإيصال'), value: clean(request.attachment?.mimeType) },
+          { label: localized(locale, 'Receipt bytes', 'حجم الإيصال'), value: clean(request.attachment?.byteSize) },
+          { label: localized(locale, 'Receipt checksum', 'بصمة الإيصال'), value: clean(request.attachment?.checksum) },
+          { label: localized(locale, 'No-receipt reason', 'سبب عدم وجود الإيصال'), value: clean(request.noReceiptReason) },
+        ],
+      },
+      {
+        title: localized(locale, 'Posting and review', 'الترحيل والمراجعة'),
+        fields: [
+          { label: localized(locale, 'Finance record', 'السجل المالي'), value: clean(request.financeEntry?.recordKey || request.financeEntry?.importKey) },
+          { label: localized(locale, 'Finance date', 'تاريخ القيد'), value: dateLabel(request.financeEntry?.date ?? null, locale) },
+          { label: localized(locale, 'Reviewed by', 'راجعه'), value: clean(request.reviewedBy?.name) },
+          { label: localized(locale, 'Reviewed at', 'تاريخ المراجعة'), value: dateLabel(request.reviewedAt, locale) },
+          { label: localized(locale, 'Review reason', 'سبب المراجعة'), value: clean(request.reviewReason) },
+        ],
+      },
+    ],
+  };
+}
+
+async function packingBatchSnapshot(recordId: string, locale: AppLocale): Promise<DocumentSnapshot | null> {
+  const batch = await prisma.packingBatch.findUnique({
+    where: { id: recordId },
+    include: {
+      location: { include: { branch: { select: { nameEn: true, nameAr: true } } } },
+      product: { select: { sku: true, nameEn: true, nameAr: true } },
+      outputInventoryItem: { select: { externalKey: true, nameEn: true, nameAr: true, unit: true } },
+      recipeVersion: { select: { version: true } },
+      stockDocument: { select: { documentNumber: true, status: true } },
+      outputLot: { select: { lotNumber: true, bestBefore: true } },
+      operator: { select: { name: true } },
+      components: {
+        include: { inventoryItem: { select: { externalKey: true, nameEn: true, nameAr: true, unit: true } } },
+        orderBy: { id: 'asc' },
+      },
+    },
+  });
+  if (!batch) return null;
+  const productName = locale === 'ar'
+    ? batch.product.nameAr || batch.product.nameEn
+    : batch.product.nameEn || batch.product.nameAr;
+  const outputName = locale === 'ar'
+    ? batch.outputInventoryItem.nameAr || batch.outputInventoryItem.nameEn
+    : batch.outputInventoryItem.nameEn || batch.outputInventoryItem.nameAr;
+  const locationName = locale === 'ar'
+    ? batch.location.nameAr || batch.location.nameEn
+    : batch.location.nameEn || batch.location.nameAr;
+  const branchName = locale === 'ar'
+    ? batch.location.branch.nameAr || batch.location.branch.nameEn
+    : batch.location.branch.nameEn || batch.location.branch.nameAr;
+  return {
+    title: localized(locale, 'Packing report', 'تقرير التعبئة'),
+    subtitle: batch.batchNumber,
+    summary: `${productName} · ${formatNumber(Number(batch.outputQuantity), locale, 3)} ${batch.outputInventoryItem.unit}`,
+    sections: [
+      {
+        title: localized(locale, 'Packing batch', 'دفعة التعبئة'),
+        fields: [
+          { label: localized(locale, 'Batch number', 'رقم الدفعة'), value: batch.batchNumber },
+          { label: localized(locale, 'Stock document', 'مستند المخزون'), value: batch.stockDocument.documentNumber },
+          { label: localized(locale, 'Status', 'الحالة'), value: batch.stockDocument.status },
+          { label: localized(locale, 'Product', 'المنتج'), value: `${productName} · ${batch.product.sku}` },
+          { label: localized(locale, 'Finished item', 'المادة النهائية'), value: `${outputName}${batch.outputInventoryItem.externalKey ? ` · ${batch.outputInventoryItem.externalKey}` : ''}` },
+          { label: localized(locale, 'Location', 'الموقع'), value: locationName },
+          { label: localized(locale, 'Branch', 'الفرع'), value: branchName },
+          { label: localized(locale, 'Recipe version', 'إصدار الوصفة'), value: clean(batch.recipeVersion?.version) },
+          { label: localized(locale, 'Operator', 'المشغل'), value: clean(batch.operator?.name) },
+          { label: localized(locale, 'Packed at', 'تاريخ التعبئة'), value: dateLabel(batch.packedAt, locale) },
+          { label: localized(locale, 'Best before', 'الصلاحية'), value: dateLabel(batch.bestBefore, locale) },
+          { label: localized(locale, 'Notes', 'الملاحظات'), value: clean(batch.notes) },
+        ],
+      },
+      {
+        title: localized(locale, 'Output and cost', 'الناتج والتكلفة'),
+        fields: [
+          { label: localized(locale, 'Accepted output', 'الناتج المقبول'), value: `${formatNumber(Number(batch.outputQuantity), locale, 3)} ${batch.outputInventoryItem.unit}` },
+          { label: localized(locale, 'Rejected output', 'الناتج المرفوض'), value: `${formatNumber(Number(batch.rejectedQuantity), locale, 3)} ${batch.outputInventoryItem.unit}` },
+          { label: localized(locale, 'Output lot', 'دفعة الناتج'), value: clean(batch.outputLot?.lotNumber) },
+          { label: localized(locale, 'Total cost', 'التكلفة الإجمالية'), value: formatMoney(Number(batch.totalCost), 'IQD', locale) },
+          { label: localized(locale, 'Unit cost', 'تكلفة الوحدة'), value: formatMoney(Number(batch.unitCost), 'IQD', locale) },
+        ],
+      },
+      {
+        title: localized(locale, 'Consumed materials', 'المواد المستهلكة'),
+        fields: batch.components.map((component) => {
+          const componentName = locale === 'ar'
+            ? component.inventoryItem.nameAr || component.inventoryItem.nameEn
+            : component.inventoryItem.nameEn || component.inventoryItem.nameAr;
+          return {
+            label: `${componentName}${component.inventoryItem.externalKey ? ` · ${component.inventoryItem.externalKey}` : ''}`,
+            value: `${formatNumber(Number(component.quantity), locale, 3)} ${component.inventoryItem.unit} · ${formatMoney(Number(component.unitCost), 'IQD', locale)}`,
+          };
+        }),
+      },
+    ],
+  };
+}
+
+async function inventoryCountSnapshot(recordId: string, locale: AppLocale): Promise<DocumentSnapshot | null> {
+  const count = await prisma.inventoryCount.findUnique({
+    where: { id: recordId },
+    include: {
+      location: { include: { branch: { select: { nameEn: true, nameAr: true } } } },
+      submittedBy: { select: { name: true } },
+      approvedBy: { select: { name: true } },
+      rejectedBy: { select: { name: true } },
+      stockDocument: { select: { documentNumber: true } },
+      lines: {
+        include: { inventoryItem: { select: { externalKey: true, nameEn: true, nameAr: true, unit: true } } },
+        orderBy: { inventoryItem: { nameEn: 'asc' } },
+      },
+    },
+  });
+  if (!count) return null;
+  const locationName = locale === 'ar'
+    ? count.location.nameAr || count.location.nameEn
+    : count.location.nameEn || count.location.nameAr;
+  const branchName = locale === 'ar'
+    ? count.location.branch.nameAr || count.location.branch.nameEn
+    : count.location.branch.nameEn || count.location.branch.nameAr;
+  return {
+    title: localized(locale, 'Inventory count', 'جرد المخزون'),
+    subtitle: count.countNumber,
+    summary: localized(
+      locale,
+      `${locationName} · ${count.status}`,
+      `${locationName} · ${count.status}`,
+    ),
+    sections: [
+      {
+        title: localized(locale, 'Count details', 'تفاصيل الجرد'),
+        fields: [
+          { label: localized(locale, 'Count number', 'رقم الجرد'), value: count.countNumber },
+          { label: localized(locale, 'Stock document', 'مستند المخزون'), value: clean(count.stockDocument?.documentNumber) },
+          { label: localized(locale, 'Location', 'الموقع'), value: locationName },
+          { label: localized(locale, 'Branch', 'الفرع'), value: branchName },
+          { label: localized(locale, 'Kind', 'النوع'), value: count.kind },
+          { label: localized(locale, 'Status', 'الحالة'), value: count.status },
+          { label: localized(locale, 'Counted at', 'تاريخ الجرد'), value: dateLabel(count.countedAt, locale) },
+          { label: localized(locale, 'Submitted by', 'أرسله'), value: count.submittedBy.name },
+          { label: localized(locale, 'Approved by', 'وافق عليه'), value: clean(count.approvedBy?.name) },
+          { label: localized(locale, 'Rejected by', 'رفضه'), value: clean(count.rejectedBy?.name) },
+          { label: localized(locale, 'Reason', 'السبب'), value: clean(count.reason) },
+          { label: localized(locale, 'Rejection reason', 'سبب الرفض'), value: clean(count.rejectionReason) },
+        ],
+      },
+      {
+        title: localized(locale, 'Counted items', 'المواد المعدودة'),
+        fields: count.lines.map((line) => {
+          const itemName = locale === 'ar'
+            ? line.inventoryItem.nameAr || line.inventoryItem.nameEn
+            : line.inventoryItem.nameEn || line.inventoryItem.nameAr;
+          return {
+            label: `${itemName}${line.inventoryItem.externalKey ? ` · ${line.inventoryItem.externalKey}` : ''}`,
+            value: [
+              `${localized(locale, 'expected', 'المتوقع')} ${formatNumber(Number(line.expectedQuantity), locale, 3)}`,
+              `${localized(locale, 'counted', 'المعدود')} ${formatNumber(Number(line.countedQuantity), locale, 3)}`,
+              `${localized(locale, 'difference', 'الفرق')} ${formatNumber(Number(line.difference), locale, 3)}`,
+              line.inventoryItem.unit,
+              line.notes || null,
+            ].filter(Boolean).join(' · '),
+          };
+        }),
+      },
+    ],
+  };
+}
+
 async function roastBatchSnapshot(recordId: string, locale: AppLocale): Promise<DocumentSnapshot | null> {
   const batch = await prisma.roastBatch.findUnique({
     where: { id: recordId },
     include: {
       operator: { select: { name: true } },
       branch: { select: { nameEn: true, nameAr: true } },
+      location: { select: { code: true, nameEn: true, nameAr: true } },
       greenInventoryItem: { select: { nameEn: true, nameAr: true, unit: true } },
       roastedInventoryItem: { select: { nameEn: true, nameAr: true, unit: true } },
       stockMovements: { orderBy: { occurredAt: 'asc' } },
@@ -373,10 +1060,12 @@ async function roastBatchSnapshot(recordId: string, locale: AppLocale): Promise<
           { label: localized(locale, 'Roast level', 'درجة التحميص'), value: clean(batch.roastLevel) },
           { label: localized(locale, 'Green input', 'مدخل البن الأخضر'), value: `${formatNumber(batch.greenInputGrams, locale)} g` },
           { label: localized(locale, 'Roasted output', 'الناتج المحمص'), value: batch.roastedOutputGrams ? `${formatNumber(batch.roastedOutputGrams, locale)} g` : '-' },
+          { label: localized(locale, 'Abnormal loss', 'الفاقد غير الطبيعي'), value: `${formatNumber(batch.abnormalLossGrams, locale)} g` },
           { label: localized(locale, 'Green inventory', 'مخزون البن الأخضر'), value: inventoryName(batch.greenInventoryItem) },
           { label: localized(locale, 'Roasted inventory', 'مخزون البن المحمص'), value: inventoryName(batch.roastedInventoryItem) },
           { label: localized(locale, 'Operator', 'المشغل'), value: clean(batch.operator?.name) },
           { label: localized(locale, 'Branch', 'الفرع'), value: batch.branch ? locale === 'ar' ? batch.branch.nameAr : batch.branch.nameEn : '-' },
+          { label: localized(locale, 'Location', 'الموقع'), value: batch.location ? `${locale === 'ar' ? batch.location.nameAr : batch.location.nameEn} · ${batch.location.code}` : '-' },
           { label: localized(locale, 'QC score', 'درجة الجودة'), value: clean(batch.qcScore) },
           { label: localized(locale, 'QC notes', 'ملاحظات الجودة'), value: clean(batch.qcNotes) },
         ],
@@ -432,6 +1121,10 @@ async function loadDocumentSnapshot(recordType: string, recordId: string, locale
   if (recordType === 'FinanceEntry') return financeSnapshot(recordId, locale);
   if (recordType === 'Order') return orderChangeSnapshot(recordId, locale);
   if (recordType === 'InventoryItem') return inventorySnapshot(recordId, locale);
+  if (recordType === 'StockDocument') return stockDocumentSnapshot(recordId, locale);
+  if (recordType === 'LocalExpenseRequest') return localExpenseSnapshot(recordId, locale);
+  if (recordType === 'PackingBatch') return packingBatchSnapshot(recordId, locale);
+  if (recordType === 'InventoryCount') return inventoryCountSnapshot(recordId, locale);
   if (recordType === 'RoastBatch') return roastBatchSnapshot(recordId, locale);
   if (recordType === 'Dashboard') return dashboardSnapshot(recordId, locale);
   return null;
@@ -473,7 +1166,12 @@ export function documentKindForAction(actionType: string): AiDocumentKind {
   if (actionType === 'RECORD_REFUND') return 'REFUND_RECEIPT';
   if (actionType === 'CREATE_EXPENSE' || actionType === 'CREATE_PURCHASE' || actionType === 'CREATE_TRANSFER' || actionType === 'RECLASSIFY_SPEND') return 'FINANCE_VOUCHER';
   if (actionType === 'ADJUST_INVENTORY') return 'INVENTORY_MOVEMENT';
-  if (actionType === 'CREATE_ROAST_BATCH') return 'PRODUCTION_MOVEMENT';
+  if (actionType === 'RECEIVE_STOCK') return 'INVENTORY_MOVEMENT';
+  if (actionType === 'DISPATCH_STOCK_TRANSFER' || actionType === 'RECEIVE_STOCK_TRANSFER') return 'INVENTORY_MOVEMENT';
+  if (actionType === 'RETURN_TO_QUARANTINE' || actionType === 'DISPOSE_RETURNED_GOODS') return 'INVENTORY_MOVEMENT';
+  if (actionType === 'REVERSE_STOCK_DOCUMENT') return 'CHANGE_CONFIRMATION';
+  if (actionType === 'RECORD_LOCAL_EXPENSE') return 'FINANCE_VOUCHER';
+  if (actionType === 'CREATE_ROAST_BATCH' || actionType === 'PACK_FINISHED_GOODS') return 'PRODUCTION_MOVEMENT';
   if (actionType === 'UPDATE_ORDER_STATUS' || actionType === 'REVERSE_RECORD') return 'CHANGE_CONFIRMATION';
   if (actionType === 'CREATE_DASHBOARD_DRAFT') return 'REPORT';
   return 'RECORD_SUMMARY';

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { notFound } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { getPageContext } from '@/server/page-context';
@@ -17,6 +18,18 @@ import { DataTable, type Column } from '@/components/data-table/DataTable';
 import { RecordActions } from '@/components/records/RecordActions';
 import { RecordForm, type FieldDef } from '@/components/records/form';
 import { archiveInventory, deleteInventory, receiveStock, setInventoryQuantity } from '@/server/records/inventory';
+import { getInventoryV2Config } from '@/server/inventory-v2/config';
+import {
+  financeAccountWhereForScope,
+  inventoryItemWhereForScope,
+  resolveLocationObjectScope,
+} from '@/server/inventory-v2/object-scope';
+import { getLocationAvailability } from '@/server/inventory-v2/availability';
+import { inventoryReadTransaction } from '@/server/inventory-v2/read-transaction';
+import { saveInventoryLocationPolicyAction } from '@/server/inventory-v2/setup-actions';
+import { receivePurchasedStockAction } from '@/server/inventory-v2/operations-actions';
+import { PurchaseReceiptForm } from '@/components/records/PurchaseReceiptForm';
+import { InventoryLocationPolicyForm } from '@/components/records/InventoryLocationPolicyForm';
 
 export default async function InventoryDetailPage({
   params,
@@ -28,22 +41,65 @@ export default async function InventoryDetailPage({
   const { locale, user } = await getPageContext(params, searchParams, 'manage:inventory');
   const { id } = await params;
   const t = await getTranslations('records');
-  const [item, accounts, parties] = await Promise.all([
-    prisma.inventoryItem.findUnique({
-      where: { id },
+  const inventoryV2Enabled = getInventoryV2Config().enabled;
+  const ownerAdmin = user.role === 'OWNER' || user.role === 'ADMIN';
+  const objectScope = await resolveLocationObjectScope(user);
+  const [item, accounts, parties, policyLocations] = await Promise.all([
+    prisma.inventoryItem.findFirst({
+      where: { id, ...inventoryItemWhereForScope(objectScope) },
       include: {
-        movements: { orderBy: { occurredAt: 'desc' } },
-        costLayers: { orderBy: { receivedAt: 'asc' } },
+        movements: {
+          where: inventoryV2Enabled && !objectScope.unrestricted
+            ? { locationId: { in: objectScope.locationIds } }
+            : {},
+          include: { location: { select: { nameEn: true, nameAr: true } } },
+          orderBy: { occurredAt: 'desc' },
+        },
+        costLayers: {
+          where: ownerAdmin ? {} : { id: '__restricted__' },
+          orderBy: { receivedAt: 'asc' },
+        },
+        locationPolicies: {
+          where: inventoryV2Enabled && !objectScope.unrestricted
+            ? { locationId: { in: objectScope.locationIds }, isActive: true }
+            : {},
+          include: { location: { include: { branch: true } } },
+          orderBy: { location: { nameEn: 'asc' } },
+        },
       },
     }),
-    prisma.financeAccount.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true, currency: true } }),
+    prisma.financeAccount.findMany({
+      where: {
+        isActive: true,
+        currency: 'IQD',
+        type: { not: 'PAYMENT_GATEWAY' },
+        ...financeAccountWhereForScope(objectScope),
+      },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true, currency: true },
+    }),
     prisma.party.findMany({
       where: { isActive: true, type: { in: ['SUPPLIER', 'OTHER'] } },
       orderBy: { name: 'asc' },
       select: { id: true, name: true, type: true },
     }),
+    inventoryV2Enabled && ownerAdmin
+      ? prisma.stockLocation.findMany({
+          where: { isActive: true },
+          include: { branch: true },
+          orderBy: [{ branch: { nameEn: 'asc' } }, { nameEn: 'asc' }],
+        })
+      : Promise.resolve([]),
   ]);
   if (!item) notFound();
+  const locationAvailability = inventoryV2Enabled
+    ? await inventoryReadTransaction(async (tx) => Promise.all(
+        item.locationPolicies
+          .filter((policy) => policy.isActive)
+          .map((policy) => getLocationAvailability(tx, item.id, policy.locationId)),
+      ))
+    : [];
+  const availabilityByLocation = new Map(locationAvailability.map((row) => [row.locationId, row]));
 
   const name = locale === 'ar' ? item.nameAr : item.nameEn;
   const current = item.movements.reduce((s, m) => s + decimalNumber(m.quantity), 0);
@@ -95,20 +151,22 @@ export default async function InventoryDetailPage({
       label: t('f.avgDailyUsage'),
       value: item.avgDailyUsage != null ? formatNumber(item.avgDailyUsage, locale) : '—',
     },
-    {
+    ...(ownerAdmin ? [{
       label: t('f.unitCost'),
       value: item.unitCost != null ? formatMoney(item.unitCost, 'IQD', locale) : '—',
-    },
+    }] : []),
   ];
 
   const mCols: Column[] = [
     { label: t('f.occurredAt') },
+    ...(inventoryV2Enabled ? [{ label: t('inventoryV2.location') }] : []),
     { label: t('f.reason') },
     { label: t('f.quantity'), align: 'end' },
   ];
 
   const mRows = item.movements.map((m) => [
     formatDate(m.occurredAt, locale),
+    ...(inventoryV2Enabled ? [m.location ? (locale === 'ar' ? m.location.nameAr : m.location.nameEn) : '—'] : []),
     enumLabel(m.reason, locale),
     formatQuantity(m.quantity, locale),
   ]);
@@ -150,22 +208,20 @@ export default async function InventoryDetailPage({
     },
   ];
   const receiveErrors = { invalid: t('err.invalid'), forbidden: t('err.forbidden') };
-  const ownerAdmin = user.role === 'OWNER' || user.role === 'ADMIN';
   const adjustmentFields: FieldDef[] = [
     { name: 'targetQuantity', label: t('f.targetQuantity'), type: 'number', required: true, step: '0.001', hint: t('h.targetQuantity') },
     { name: 'occurredAt', label: t('f.adjustmentDate'), type: 'date', required: true },
     { name: 'adjustmentReason', label: t('f.adjustmentReason'), type: 'text', required: true, hint: t('h.adjustmentReason') },
   ];
-
   return (
     <>
       <BackLink href="/admin/records/inventory" label={t('back')} />
       <PageHeader title={name} subtitle={enumLabel(item.category, locale)} />
       <RecordActions
-        editHref={`/admin/records/inventory/${item.id}/edit`}
+        editHref={!inventoryV2Enabled || ownerAdmin ? `/admin/records/inventory/${item.id}/edit` : undefined}
         isActive={item.isActive}
-        archiveAction={archiveInventory.bind(null, item.id, locale, !item.isActive)}
-        deleteAction={deleteInventory.bind(null, item.id, locale)}
+        archiveAction={!inventoryV2Enabled || ownerAdmin ? archiveInventory.bind(null, item.id, locale, !item.isActive) : undefined}
+        deleteAction={inventoryV2Enabled ? undefined : deleteInventory.bind(null, item.id, locale)}
         labels={{
           edit: t('edit'),
           archive: t('archive'),
@@ -176,7 +232,86 @@ export default async function InventoryDetailPage({
       />
       <DetailGrid items={items} />
 
-      {ownerAdmin ? (
+      {inventoryV2Enabled ? (
+        <div className="mt-5 space-y-2">
+          <h3 className="text-sm font-semibold">{t('inventoryV2.locationStock')}</h3>
+          <DataTable
+            columns={[
+              { label: t('inventoryV2.location') },
+              { label: t('inventoryV2.onHand'), align: 'end' },
+              { label: t('inventoryV2.reserved'), align: 'end' },
+              { label: t('inventoryV2.available'), align: 'end' },
+              { label: t('inventoryV2.inTransit'), align: 'end' },
+              { label: t('inventoryV2.quarantine'), align: 'end' },
+              { label: t('inventoryV2.producible'), align: 'end' },
+              { label: t('inventoryV2.nextExpiry') },
+            ]}
+            rows={item.locationPolicies.filter((policy) => policy.isActive).map((policy) => {
+              const availability = availabilityByLocation.get(policy.locationId);
+              return [
+                locale === 'ar' ? policy.location.nameAr : policy.location.nameEn,
+                formatQuantity(availability?.onHand ?? 0, locale),
+                formatQuantity(availability?.reserved ?? 0, locale),
+                formatQuantity(availability?.available ?? 0, locale),
+                formatQuantity(availability?.inTransit ?? 0, locale),
+                formatQuantity(availability?.quarantine ?? 0, locale),
+                formatQuantity(availability?.producible ?? 0, locale),
+                availability?.nextExpiry ? formatDate(availability.nextExpiry, locale) : '—',
+              ];
+            })}
+            emptyLabel={t('none')}
+          />
+        </div>
+      ) : null}
+
+      {inventoryV2Enabled && ownerAdmin ? (
+        <div className="mt-6 space-y-2">
+          <h3 className="text-sm font-semibold">{t('inventoryV2.configureItemLocation')}</h3>
+          <p className="text-xs text-muted-foreground">{t('inventoryV2.configureItemLocationHint')}</p>
+          <InventoryLocationPolicyForm
+            action={saveInventoryLocationPolicyAction.bind(null, item.id)}
+            locale={locale}
+            defaultCanSell={item.category === 'FINISHED_GOOD' || item.category === 'ACCESSORY'}
+            locations={policyLocations.map((location) => {
+              const policy = item.locationPolicies.find((row) => row.locationId === location.id);
+              return {
+                id: location.id,
+                label: locale === 'ar'
+                  ? `${location.nameAr} · ${location.branch.nameAr}`
+                  : `${location.nameEn} · ${location.branch.nameEn}`,
+                stockVersion: location.stockVersion,
+                policy: policy ? {
+                  reorderPoint: policy.reorderPoint?.toString() ?? '',
+                  targetLevel: policy.targetLevel?.toString() ?? '',
+                  canSell: policy.canSell,
+                  canProduce: policy.canProduce,
+                  isActive: policy.isActive,
+                } : null,
+              };
+            })}
+            labels={{
+              location: t('inventoryV2.location'),
+              reorderPoint: t('f.reorderPoint'),
+              targetLevel: t('inventoryV2.targetLevel'),
+              canSell: t('inventoryV2.canSell'),
+              canProduce: t('inventoryV2.canProduce'),
+              isActive: t('inventoryV2.activePolicy'),
+              save: t('save'),
+            }}
+            errors={{
+              invalid: t('err.invalid'),
+              invalid_input: t('err.invalid'),
+              forbidden: t('err.forbidden'),
+              inventory_item_not_found: t('err.notfound'),
+              location_not_found: t('inventoryV2.locationNotFound'),
+              location_stale: t('inventoryV2.operations.stale'),
+              only_finished_goods_can_be_sold: t('inventoryV2.sellPolicyError'),
+            }}
+          />
+        </div>
+      ) : null}
+
+      {ownerAdmin && !inventoryV2Enabled ? (
         <div className="mt-6 space-y-2">
           <h3 className="text-sm font-semibold">{t('setStockQuantity')}</h3>
           <p className="text-xs text-muted-foreground">{t('setStockQuantityHint')}</p>
@@ -193,7 +328,7 @@ export default async function InventoryDetailPage({
         </div>
       ) : null}
 
-      {roast ? (
+      {roast && ownerAdmin ? (
         <div className="mt-4 space-y-2">
           <h3 className="text-sm font-semibold">{t('roastedCost')}</h3>
           <p className="text-xs text-muted-foreground">{t('roastedCostHint')}</p>
@@ -215,7 +350,7 @@ export default async function InventoryDetailPage({
         </div>
       ) : null}
 
-      <div className="mt-6 space-y-2">
+      {ownerAdmin ? <div className="mt-6 space-y-2">
         <h3 className="text-sm font-semibold">{t('costLayers')}</h3>
         <p className="text-xs text-muted-foreground">{t('costLayersHint')}</p>
         {fifo ? (
@@ -248,9 +383,9 @@ export default async function InventoryDetailPage({
             />
           </>
         ) : null}
-      </div>
+      </div> : null}
 
-      <div className="mt-4 space-y-2">
+      {!inventoryV2Enabled ? <div className="mt-4 space-y-2">
         <h3 className="text-sm font-semibold">{t('receiveStock')}</h3>
         <p className="text-xs text-muted-foreground">{t('receiveStockHint')}</p>
         <RecordForm
@@ -263,7 +398,58 @@ export default async function InventoryDetailPage({
           cancelLabel={t('cancel')}
           errors={receiveErrors}
         />
-      </div>
+      </div> : null}
+
+      {inventoryV2Enabled && ownerAdmin ? (
+        <div className="mt-6 space-y-2">
+          <h3 className="text-sm font-semibold">{t('inventoryV2.operations.purchaseReceiptTitle')}</h3>
+          <p className="text-xs text-muted-foreground">{t('inventoryV2.operations.purchaseReceiptHint')}</p>
+          <PurchaseReceiptForm
+            action={receivePurchasedStockAction.bind(null, item.id)}
+            locale={locale}
+            idempotencyKey={`purchase-receipt:${randomUUID()}`}
+            receivedAt={dateInputValue()}
+            locations={item.locationPolicies
+              .filter((policy) => policy.isActive && policy.location.isActive && !policy.location.isSystem)
+              .map((policy) => ({
+                id: policy.location.id,
+                label: locale === 'ar'
+                  ? `${policy.location.nameAr} · ${policy.location.branch.nameAr}`
+                  : `${policy.location.nameEn} · ${policy.location.branch.nameEn}`,
+                stockVersion: policy.location.stockVersion,
+              }))}
+            accounts={accounts.map((account) => ({ id: account.id, label: `${account.name} (${account.currency})` }))}
+            suppliers={parties.map((party) => ({ id: party.id, label: party.name }))}
+            labels={{
+              location: t('inventoryV2.location'),
+              quantity: t('f.qtyReceived'),
+              unitCost: t('f.unitCost'),
+              receivedAt: t('f.receivedAt'),
+              bestBefore: t('inventoryV2.operations.bestBefore'),
+              supplier: t('f.supplier'),
+              supplierLot: t('inventoryV2.operations.supplierLot'),
+              paymentMode: t('f.paymentMode'),
+              credit: t('f.purchaseCredit'),
+              paid: t('f.purchasePaid'),
+              account: t('f.paymentAccount'),
+              dueDate: t('f.dueDate'),
+              reference: t('f.reference'),
+              notes: t('inventoryV2.operations.notes'),
+              submit: t('inventoryV2.operations.receivePurchase'),
+            }}
+            errors={{
+              invalid_input: t('inventoryV2.operations.invalid'),
+              invalid_date: t('inventoryV2.operations.invalid'),
+              forbidden: t('inventoryV2.operations.forbidden'),
+              purchase_receipt_forbidden: t('inventoryV2.operations.forbidden'),
+              location_receive_forbidden: t('inventoryV2.operations.forbidden'),
+              location_stale: t('inventoryV2.operations.stale'),
+              inventory_location_not_configured: t('inventoryV2.operations.notConfigured'),
+              payment_account_required: t('inventoryV2.operations.accountRequired'),
+            }}
+          />
+        </div>
+      ) : null}
 
       <div className="mt-4 space-y-2">
         <h3 className="text-sm font-semibold">{t('f.movements')}</h3>

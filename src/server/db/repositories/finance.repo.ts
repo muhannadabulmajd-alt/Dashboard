@@ -1,13 +1,25 @@
 import 'server-only';
 import { prisma } from '../client';
-import { buildBatchWhere } from '@/server/filters/where-builder';
+import {
+  buildBatchWhere,
+  buildFinanceEntryScopeWhere,
+  type DataScope,
+} from '@/server/filters/where-builder';
 import type { DashboardFilters } from '@/lib/filters';
 import type { ResolvedRange } from '@/lib/dates';
 import type { ExpenseLike, BatchLike } from '@/lib/metrics/types';
 import { getUsdToIqd } from '@/server/settings';
 import { convertToIqd } from '@/lib/money';
+import { inventoryVarianceOperatingAmount } from '@/server/inventory-v2/inventory-variance';
 
-type Scope = { branchId?: string };
+type Scope = DataScope;
+
+function financeScopeWhere(filters: DashboardFilters, scope: Scope) {
+  if (scope.locationIds !== undefined || scope.branchId) {
+    return buildFinanceEntryScopeWhere(scope);
+  }
+  return filters.branchId?.length ? { branchId: { in: filters.branchId } } : {};
+}
 
 export interface OperatingExpenseFact extends ExpenseLike {
   partyName: string | null;
@@ -23,16 +35,12 @@ export async function getOperatingExpenseFacts(
     // the operating allocation feeds P&L; cash flow still sees the full parent.
     prisma.financeEntry.findMany({
       where: {
-        type: { in: ['EXPENSE', 'PURCHASE'] },
+        type: { in: ['EXPENSE', 'PURCHASE', 'INVENTORY_GAIN', 'INVENTORY_LOSS'] },
         date: { gte: range.start, lte: range.end },
         archivedAt: null,
         reversedAt: null,
         reversalOfId: null,
-        ...(scope.branchId
-          ? { branchId: scope.branchId }
-          : filters.branchId?.length
-            ? { branchId: { in: filters.branchId } }
-            : {}),
+        ...financeScopeWhere(filters, scope),
       },
       select: {
         amount: true,
@@ -42,6 +50,7 @@ export async function getOperatingExpenseFacts(
         costRole: true,
         party: { select: { name: true } },
         type: true,
+        isOpeningBalance: true,
         categoryType: true,
         ledgerLines: {
           select: {
@@ -58,6 +67,25 @@ export async function getOperatingExpenseFacts(
     getUsdToIqd(),
   ]);
   return financeRows.flatMap((r) => {
+    if (r.isOpeningBalance) return [];
+    if (r.type === 'INVENTORY_GAIN' || r.type === 'INVENTORY_LOSS') {
+      const varianceType = r.type;
+      const lines = r.ledgerLines.length
+        ? r.ledgerLines.map((line) => ({
+            amount: line.lineTotal,
+            categoryType: line.categoryType ?? r.categoryType ?? 'OVERHEAD',
+            branchId: line.branchId ?? r.branchId,
+          }))
+        : [{ amount: r.amount, categoryType: r.categoryType ?? 'OVERHEAD', branchId: r.branchId }];
+      return lines.map((line) => ({
+        amount: inventoryVarianceOperatingAmount(varianceType, line.amount, false),
+        currency: 'IQD' as const,
+        incurredAt: r.date,
+        categoryType: line.categoryType,
+        branchId: line.branchId,
+        partyName: null,
+      }));
+    }
     if (r.costRole === 'DIRECT_DELIVERY' || r.costRole === 'PAYMENT_PROCESSING') return [];
     if (r.ledgerLines.length) {
       return r.ledgerLines
@@ -100,11 +128,7 @@ async function getDirectCostsByRole(
         archivedAt: null,
         reversedAt: null,
         reversalOfId: null,
-        ...(scope.branchId
-          ? { branchId: scope.branchId }
-          : filters.branchId?.length
-            ? { branchId: { in: filters.branchId } }
-            : {}),
+        ...financeScopeWhere(filters, scope),
       },
       select: { amount: true, currency: true },
     }),

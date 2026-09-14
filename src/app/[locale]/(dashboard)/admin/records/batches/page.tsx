@@ -11,6 +11,11 @@ import { SectionGuide } from '@/components/records/SectionGuide';
 import { Link } from '@/i18n/navigation';
 import { formatNumber, formatPercent } from '@/lib/money';
 import { formatDate } from '@/lib/dates';
+import { getInventoryV2Config } from '@/server/inventory-v2/config';
+import {
+  resolveLocationObjectScope,
+  roastBatchWhereForScope,
+} from '@/server/inventory-v2/object-scope';
 
 export default async function BatchesRecordsPage({
   params,
@@ -19,10 +24,16 @@ export default async function BatchesRecordsPage({
   params: Promise<{ locale: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { locale } = await getPageContext(params, searchParams, 'manage:batches');
+  const { locale, user } = await getPageContext(params, searchParams, 'manage:batches');
   const t = await getTranslations('records');
   const sp = await searchParams;
-  const batches = await prisma.roastBatch.findMany({ orderBy: { batchNumber: 'asc' } });
+  const inventoryV2Enabled = getInventoryV2Config().enabled;
+  const scope = await resolveLocationObjectScope(user);
+  const batches = await prisma.roastBatch.findMany({
+    where: roastBatchWhereForScope(scope),
+    include: { location: { select: { nameEn: true, nameAr: true } } },
+    orderBy: { batchNumber: 'asc' },
+  });
   const q = (typeof sp.q === 'string' ? sp.q.trim() : '').toLowerCase();
   const status = typeof sp.status === 'string' ? sp.status : '';
   const sort = typeof sp.sort === 'string' ? sp.sort : '';
@@ -40,6 +51,7 @@ export default async function BatchesRecordsPage({
   const cols: Column[] = [
     { label: t('f.batchNumber') },
     { label: t('f.origin') },
+    ...(inventoryV2Enabled ? [{ label: t('inventoryV2.location') }] : []),
     { label: t('f.green'), align: 'end' },
     { label: t('f.status') },
     { label: t('f.roastDate') },
@@ -64,6 +76,9 @@ export default async function BatchesRecordsPage({
     return [
       b.batchNumber,
       b.origin,
+      ...(inventoryV2Enabled
+        ? [b.location ? (locale === 'ar' ? b.location.nameAr : b.location.nameEn) : '—']
+        : []),
       formatNumber(b.greenInputGrams, locale),
       <Badge key="s" variant={roasted ? 'success' : 'warning'}>
         {roasted ? t('f.roasted') : t('f.pending')}

@@ -30,8 +30,26 @@ import {
 } from './render';
 import { supportedTelegramUpdate, telegramLocale, TelegramUpdateSchema, type SupportedTelegramUpdate } from './schemas';
 
-function currentUser(record: { id: string; email: string; name: string; role: CurrentUser['role']; branchId: string | null; defaultFinanceAccountId?: string | null }): CurrentUser {
-  return record;
+function currentUser(record: {
+  id: string;
+  email: string;
+  name: string;
+  role: CurrentUser['role'];
+  branchId: string | null;
+  defaultStockLocationId?: string | null;
+  defaultFinanceAccountId?: string | null;
+  stockLocationAccesses: Array<{ locationId: string }>;
+}): CurrentUser {
+  return {
+    id: record.id,
+    email: record.email,
+    name: record.name,
+    role: record.role,
+    branchId: record.branchId,
+    defaultStockLocationId: record.defaultStockLocationId,
+    defaultFinanceAccountId: record.defaultFinanceAccountId,
+    locationIds: record.stockLocationAccesses.map((access) => access.locationId),
+  };
 }
 
 function commandName(text: string | undefined): string | null {
@@ -80,7 +98,20 @@ async function updateIdentity(input: SupportedTelegramUpdate) {
     },
     include: {
       user: {
-        select: { id: true, email: true, name: true, role: true, branchId: true, defaultFinanceAccountId: true, isActive: true },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          role: true,
+          branchId: true,
+          defaultStockLocationId: true,
+          defaultFinanceAccountId: true,
+          isActive: true,
+          stockLocationAccesses: {
+            where: { canView: true, location: { isActive: true } },
+            select: { locationId: true },
+          },
+        },
       },
     },
   });

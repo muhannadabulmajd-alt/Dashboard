@@ -6,6 +6,7 @@ import { PageHeader } from '@/components/ui/primitives';
 import { RecordForm } from '@/components/records/form';
 import { BackLink } from '@/components/records/parts';
 import { updateCustomer } from '@/server/records/customers';
+import { canManageExistingCustomer } from '@/server/records/customer-policy';
 import { getListOptions } from '@/server/lists/resolver';
 import { customerFields } from '../../_fields';
 
@@ -16,7 +17,8 @@ export default async function EditCustomerPage({
   params: Promise<{ locale: string; id: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { locale } = await getPageContext(params, searchParams, 'manage:customers');
+  const { locale, user } = await getPageContext(params, searchParams, 'manage:customers');
+  if (!canManageExistingCustomer(user.role)) notFound();
   const { id } = await params;
   const t = await getTranslations('records');
   const tk = (k: string) => t(k);

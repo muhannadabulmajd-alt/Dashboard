@@ -10,6 +10,12 @@ import { createOrder } from '@/server/records/orders';
 import { createCustomerInline } from '@/server/records/customers';
 import { dateInputValue } from '@/lib/dates';
 import { getOrderOperationalDefaults } from '@/server/records/order-defaults';
+import { getInventoryV2Config } from '@/server/inventory-v2/config';
+import { listOrderLocations } from '@/server/inventory-v2/order-stock';
+import {
+  financeAccountWhereForScope,
+  resolveLocationObjectScope,
+} from '@/server/inventory-v2/object-scope';
 
 export default async function NewOrderPage({
   params,
@@ -18,17 +24,23 @@ export default async function NewOrderPage({
   params: Promise<{ locale: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { locale } = await getPageContext(params, searchParams, 'manage:orders');
+  const { locale, user } = await getPageContext(params, searchParams, 'manage:orders');
   const t = await getTranslations('records');
+  const inventoryV2Enabled = getInventoryV2Config().enabled;
+  const objectScope = await resolveLocationObjectScope(user);
   // Dropdowns come from the managed system lists (§9) — relabels, reordering
   // and user-added values all apply here.
-  const [catalog, channels, governorates, fulfillment, statuses, accounts, paymentMethods, customers, providers, statusRoles, defaults] = await Promise.all([
+  const [catalog, channels, governorates, fulfillment, statuses, accounts, paymentMethods, customers, providers, statusRoles, defaults, locations] = await Promise.all([
     getOrderCatalog(locale, t('ungrouped')),
     getListOptions('channel', locale),
     getListOptions('governorate', locale),
     getListOptions('fulfillment', locale),
     getListOptions('orderStatus', locale),
-    prisma.financeAccount.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true, currency: true } }),
+    prisma.financeAccount.findMany({
+      where: { isActive: true, ...financeAccountWhereForScope(objectScope) },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true, currency: true },
+    }),
     getListOptions('paymentMethod', locale),
     prisma.customer.findMany({
       where: { isActive: true, externalId: { not: null } },
@@ -43,6 +55,7 @@ export default async function NewOrderPage({
     }),
     getOrderStatusRoleMap(),
     getOrderOperationalDefaults(),
+    inventoryV2Enabled ? listOrderLocations(user) : Promise.resolve([]),
   ]);
   const saleStatusValues = [...statusRoles]
     .filter(([, role]) => role === 'SALE')
@@ -73,6 +86,7 @@ export default async function NewOrderPage({
     channel: t('f.channel'),
     governorate: t('f.governorate'),
     fulfillment: t('f.fulfillment'),
+    fulfillmentLocation: t('orderForm.fulfillmentLocation'),
     status: t('f.status'),
     deliveryFee: t('f.deliveryFee'),
     deliveryCost: t('f.deliveryCost'),
@@ -147,7 +161,13 @@ export default async function NewOrderPage({
     refund_required: t('err.refund_required'),
     order_update_failed: t('err.order_update_failed'),
     finance_configuration: t('err.finance_configuration'),
+    fulfillment_location_required: t('err.fulfillment_location_required'),
+    location_stale: t('err.location_stale'),
   };
+
+  const defaultLocationId = user.role === 'OWNER' || user.role === 'ADMIN'
+    ? ''
+    : user.defaultStockLocationId ?? locations[0]?.id ?? '';
 
   return (
     <>
@@ -159,6 +179,14 @@ export default async function NewOrderPage({
         channelOptions={channels}
         governorateOptions={governorates}
         fulfillmentOptions={fulfillment}
+        requireLocation={inventoryV2Enabled}
+        locationOptions={locations.map((location) => ({
+          value: location.id,
+          version: location.stockVersion,
+          label: locale === 'ar'
+            ? `${location.nameAr} · ${location.branchNameAr}`
+            : `${location.nameEn} · ${location.branchNameEn}`,
+        }))}
         statusOptions={statuses}
         accountOptions={accounts.map((a) => ({ value: a.id, label: `${a.name} (${a.currency})` }))}
         providerOptions={providers.map((provider) => ({ value: provider.id, label: provider.name }))}
@@ -175,6 +203,7 @@ export default async function NewOrderPage({
             channel: defaults.channel,
             governorate: defaults.governorate,
             fulfillmentMethod: defaults.fulfillmentMethod,
+            fulfillmentLocationId: defaultLocationId,
             deliveryFee: '0',
             deliveryCost: '0',
             orderDiscount: '0',

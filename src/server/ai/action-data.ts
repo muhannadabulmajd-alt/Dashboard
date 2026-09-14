@@ -6,8 +6,10 @@ import {
   EXPENSE_CATEGORY_TYPES,
   FULFILLMENT_METHODS,
   INVENTORY_CATEGORIES,
+  LOCAL_OPEX_CATEGORY_TYPES,
   PARTY_TYPES,
   PAYMENT_METHODS,
+  RETURN_DISPOSITIONS,
 } from '@/lib/enums';
 import { MEASUREMENT_UNITS } from '@/lib/units';
 import { DashboardConfigSchema } from '@/lib/dashboard-builder';
@@ -92,6 +94,9 @@ export const ResolvedOrderActionSchema = z.object({
   channel: z.string().min(1),
   governorate: z.string().min(1),
   fulfillmentMethod: z.enum(FULFILLMENT_METHODS),
+  fulfillmentLocationId: z.string().min(1).optional(),
+  fulfillmentLocationName: z.string().min(1).optional(),
+  expectedLocationVersion: z.number().int().positive().optional(),
   status: z.string().min(1),
   deliveryFee: z.number().int().nonnegative(),
   deliveryCost: z.number().int().nonnegative(),
@@ -112,7 +117,16 @@ export const ResolvedOrderActionSchema = z.object({
     unitGrossPrice: z.number().int().nonnegative(),
     lineDiscount: z.number().int().nonnegative(),
   }).strict()).min(1).max(30),
-}).strict();
+}).strict().superRefine((value, context) => {
+  const locationFields = [
+    value.fulfillmentLocationId,
+    value.fulfillmentLocationName,
+    value.expectedLocationVersion,
+  ];
+  if (locationFields.some((field) => field !== undefined) && locationFields.some((field) => field === undefined)) {
+    context.addIssue({ code: 'custom', path: ['fulfillmentLocationId'], message: 'inventory_v2_location_context_incomplete' });
+  }
+});
 
 export const ResolvedExpenseActionSchema = z.object({
   date: z.string().datetime(),
@@ -233,7 +247,259 @@ export const ResolvedInventoryAdjustmentActionSchema = z.object({
   targetQuantity: z.number().nonnegative().refine((value) => Number.isInteger(value * 1000)),
   occurredAt: z.string().datetime(),
   reason: z.string().trim().min(3),
+  locationId: z.string().min(1).optional(),
+  locationName: z.string().min(1).optional(),
+  expectedLocationVersion: z.number().int().positive().optional(),
+  idempotencyKey: z.string().min(8).max(200).optional(),
+}).strict().superRefine((value, context) => {
+  const locationFields = [
+    value.locationId,
+    value.locationName,
+    value.expectedLocationVersion,
+    value.idempotencyKey,
+  ];
+  if (locationFields.some((field) => field !== undefined) && locationFields.some((field) => field === undefined)) {
+    context.addIssue({ code: 'custom', path: ['locationId'], message: 'inventory_v2_location_context_incomplete' });
+  }
+});
+
+export const ResolvedStockReceiptActionSchema = z.object({
+  inventoryItemId: z.string().min(1),
+  inventoryItemName: z.string().min(1),
+  inventoryUnit: z.string().min(1),
+  locationId: z.string().min(1),
+  locationName: z.string().min(1),
+  expectedLocationVersion: z.number().int().positive(),
+  quantity: z.number().positive().refine((value) => Number.isInteger(value * 1000)),
+  unitCost: z.number().nonnegative().refine((value) => Number.isInteger(value * 1000)),
+  occurredAt: z.string().datetime(),
+  bestBefore: z.string().datetime().nullable(),
+  supplierLot: z.string().trim().nullable(),
+  partyId: z.string().min(1).nullable(),
+  supplierName: z.string().min(1),
+  newSupplier: ResolvedPartyActionSchema.nullable(),
+  paymentMode: z.enum(['CREDIT', 'PAID']),
+  accountId: z.string().min(1).nullable(),
+  accountName: z.string().min(1).nullable(),
+  dueDate: z.string().datetime().nullable(),
+  reference: z.string().trim().nullable(),
+  notes: z.string().trim().nullable(),
+  idempotencyKey: z.string().min(8).max(200),
+}).strict().superRefine((value, context) => {
+  if (Boolean(value.partyId) === Boolean(value.newSupplier)) {
+    context.addIssue({ code: 'custom', path: ['partyId'], message: 'supplier_source_required' });
+  }
+  if (value.newSupplier && value.newSupplier.type !== 'SUPPLIER') {
+    context.addIssue({ code: 'custom', path: ['newSupplier', 'type'], message: 'supplier_type_invalid' });
+  }
+  if (value.paymentMode === 'PAID' && (!value.accountId || !value.accountName)) {
+    context.addIssue({ code: 'custom', path: ['accountId'], message: 'payment_account_required' });
+  }
+  if (value.paymentMode === 'CREDIT' && !value.dueDate) {
+    context.addIssue({ code: 'custom', path: ['dueDate'], message: 'due_date_required' });
+  }
+});
+
+export const ResolvedPackingActionSchema = z.object({
+  locationId: z.string().min(1),
+  locationName: z.string().min(1),
+  expectedLocationVersion: z.number().int().positive(),
+  productId: z.string().min(1),
+  productName: z.string().min(1),
+  outputInventoryItemId: z.string().min(1),
+  outputInventoryItemName: z.string().min(1),
+  outputUnit: z.string().min(1),
+  recipeVersionId: z.string().min(1),
+  recipeVersion: z.number().int().positive(),
+  outputQuantity: z.number().positive().refine((value) => Number.isInteger(value * 1000)),
+  rejectedQuantity: z.number().nonnegative().refine((value) => Number.isInteger(value * 1000)),
+  packedAt: z.string().datetime(),
+  bestBefore: z.string().datetime().nullable(),
+  notes: z.string().trim().nullable(),
+  idempotencyKey: z.string().min(8).max(200),
 }).strict();
+
+const ResolvedStockTransferLineSchema = z.object({
+  inventoryItemId: z.string().min(1),
+  inventoryItemName: z.string().min(1),
+  unit: z.string().min(1),
+  quantity: z.number().positive().refine((value) => Number.isInteger(value * 1000)),
+}).strict();
+
+export const ResolvedDispatchStockTransferActionSchema = z.object({
+  sourceLocationId: z.string().min(1),
+  sourceLocationName: z.string().min(1),
+  destinationLocationId: z.string().min(1),
+  destinationLocationName: z.string().min(1),
+  transitLocationId: z.string().min(1),
+  transitLocationName: z.string().min(1),
+  expectedSourceVersion: z.number().int().positive(),
+  expectedTransitVersion: z.number().int().positive(),
+  lines: z.array(ResolvedStockTransferLineSchema).min(1).max(100),
+  occurredAt: z.string().datetime(),
+  expectedAt: z.string().datetime().nullable(),
+  notes: z.string().trim().nullable(),
+  idempotencyKey: z.string().min(8).max(200),
+}).strict().superRefine((value, context) => {
+  if (value.sourceLocationId === value.destinationLocationId) {
+    context.addIssue({ code: 'custom', path: ['destinationLocationId'], message: 'transfer_same_location' });
+  }
+  const itemIds = value.lines.map((line) => line.inventoryItemId);
+  if (new Set(itemIds).size !== itemIds.length) {
+    context.addIssue({ code: 'custom', path: ['lines'], message: 'transfer_duplicate_item' });
+  }
+});
+
+const ResolvedStockTransferDiscrepancySchema = z.object({
+  inventoryItemId: z.string().min(1),
+  inventoryItemName: z.string().min(1),
+  unit: z.string().min(1),
+  type: z.enum(['SHORTAGE', 'DAMAGE', 'EXCESS']),
+  quantity: z.number().positive().refine((value) => Number.isInteger(value * 1000)),
+  notes: z.string().trim().min(3),
+}).strict();
+
+export const ResolvedReceiveStockTransferActionSchema = z.object({
+  stockDocumentId: z.string().min(1),
+  transferNumber: z.string().min(1),
+  expectedDocumentVersion: z.number().int().positive(),
+  destinationLocationId: z.string().min(1),
+  destinationLocationName: z.string().min(1),
+  transitLocationId: z.string().min(1),
+  transitLocationName: z.string().min(1),
+  expectedDestinationVersion: z.number().int().positive(),
+  expectedTransitVersion: z.number().int().positive(),
+  lines: z.array(ResolvedStockTransferLineSchema).max(100),
+  discrepancies: z.array(ResolvedStockTransferDiscrepancySchema).max(100),
+  occurredAt: z.string().datetime(),
+  notes: z.string().trim().nullable(),
+  idempotencyKey: z.string().min(8).max(200),
+}).strict().superRefine((value, context) => {
+  if (!value.lines.length && !value.discrepancies.length) {
+    context.addIssue({ code: 'custom', path: ['lines'], message: 'transfer_receipt_empty' });
+  }
+  const lineIds = value.lines.map((line) => line.inventoryItemId);
+  if (new Set(lineIds).size !== lineIds.length) {
+    context.addIssue({ code: 'custom', path: ['lines'], message: 'transfer_duplicate_item' });
+  }
+  const discrepancyIds = value.discrepancies.map((row) => row.inventoryItemId);
+  if (new Set(discrepancyIds).size !== discrepancyIds.length) {
+    context.addIssue({ code: 'custom', path: ['discrepancies'], message: 'transfer_discrepancy_duplicate_item' });
+  }
+});
+
+export const ResolvedLocalExpenseActionSchema = z.object({
+  userId: z.string().min(1),
+  locationId: z.string().min(1),
+  locationName: z.string().min(1),
+  expectedLocationVersion: z.number().int().positive(),
+  amount: z.number().int().positive(),
+  categoryType: z.enum(LOCAL_OPEX_CATEGORY_TYPES),
+  description: z.string().trim().min(3),
+  occurredAt: z.string().datetime(),
+  financeAccountId: z.string().min(1),
+  financeAccountName: z.string().min(1),
+  receiptAttachmentId: z.string().min(1).nullable(),
+  receiptFileName: z.string().min(1).nullable(),
+  noReceiptReason: z.string().trim().min(3).nullable(),
+  willRequireReview: z.boolean(),
+  idempotencyKey: z.string().min(8).max(200),
+}).strict().superRefine((value, context) => {
+  if (Boolean(value.receiptAttachmentId) === Boolean(value.noReceiptReason)) {
+    context.addIssue({ code: 'custom', path: ['receiptAttachmentId'], message: 'expense_evidence_required' });
+  }
+  if (Boolean(value.receiptAttachmentId) !== Boolean(value.receiptFileName)) {
+    context.addIssue({ code: 'custom', path: ['receiptFileName'], message: 'expense_attachment_incomplete' });
+  }
+});
+
+export const ResolvedReturnToQuarantineActionSchema = z.object({
+  orderId: z.string().min(1),
+  orderNumber: z.string().min(1),
+  orderLineId: z.string().min(1),
+  productName: z.string().min(1),
+  sku: z.string().min(1),
+  inventoryItemId: z.string().min(1),
+  inventoryItemName: z.string().min(1),
+  unit: z.string().min(1),
+  fulfillmentLocationId: z.string().min(1),
+  fulfillmentLocationName: z.string().min(1),
+  expectedFulfillmentVersion: z.number().int().positive(),
+  quarantineLocationId: z.string().min(1),
+  quarantineLocationName: z.string().min(1),
+  expectedQuarantineVersion: z.number().int().positive(),
+  quantity: z.number().positive().refine((value) => Number.isInteger(value * 1000)),
+  occurredAt: z.string().datetime(),
+  reason: z.string().trim().min(3),
+  idempotencyKey: z.string().min(8).max(200),
+}).strict().superRefine((value, context) => {
+  if (value.fulfillmentLocationId === value.quarantineLocationId) {
+    context.addIssue({ code: 'custom', path: ['quarantineLocationId'], message: 'return_quarantine_same_location' });
+  }
+});
+
+export const ResolvedDisposeReturnedGoodsActionSchema = z.object({
+  returnDocumentId: z.string().min(1),
+  returnDocumentNumber: z.string().min(1),
+  expectedReturnDocumentVersion: z.number().int().positive(),
+  inventoryItemId: z.string().min(1),
+  inventoryItemName: z.string().min(1),
+  unit: z.string().min(1),
+  quarantineLocationId: z.string().min(1),
+  quarantineLocationName: z.string().min(1),
+  expectedQuarantineVersion: z.number().int().positive(),
+  quantity: z.number().positive().refine((value) => Number.isInteger(value * 1000)),
+  disposition: z.enum(RETURN_DISPOSITIONS),
+  destinationLocationId: z.string().min(1).nullable(),
+  destinationLocationName: z.string().min(1).nullable(),
+  expectedDestinationVersion: z.number().int().positive().nullable(),
+  supplierPartyId: z.string().min(1).nullable(),
+  supplierName: z.string().min(1).nullable(),
+  occurredAt: z.string().datetime(),
+  reason: z.string().trim().min(3),
+  idempotencyKey: z.string().min(8).max(200),
+}).strict().superRefine((value, context) => {
+  const needsDestination = value.disposition === 'RESTOCK' || value.disposition === 'REPACK';
+  if (needsDestination !== Boolean(value.destinationLocationId)) {
+    context.addIssue({ code: 'custom', path: ['destinationLocationId'], message: 'return_destination_invalid' });
+  }
+  if (Boolean(value.destinationLocationId) !== Boolean(value.destinationLocationName)) {
+    context.addIssue({ code: 'custom', path: ['destinationLocationName'], message: 'return_destination_incomplete' });
+  }
+  if (Boolean(value.destinationLocationId) !== Boolean(value.expectedDestinationVersion)) {
+    context.addIssue({ code: 'custom', path: ['expectedDestinationVersion'], message: 'return_destination_incomplete' });
+  }
+  const needsSupplier = value.disposition === 'RETURN_TO_SUPPLIER';
+  if (needsSupplier !== Boolean(value.supplierPartyId)) {
+    context.addIssue({ code: 'custom', path: ['supplierPartyId'], message: 'return_supplier_invalid' });
+  }
+  if (Boolean(value.supplierPartyId) !== Boolean(value.supplierName)) {
+    context.addIssue({ code: 'custom', path: ['supplierName'], message: 'return_supplier_incomplete' });
+  }
+  if (value.destinationLocationId === value.quarantineLocationId) {
+    context.addIssue({ code: 'custom', path: ['destinationLocationId'], message: 'return_destination_same_location' });
+  }
+});
+
+export const ResolvedReverseStockDocumentActionSchema = z.object({
+  stockDocumentId: z.string().min(1),
+  documentNumber: z.string().min(1),
+  documentType: z.string().min(1),
+  expectedDocumentVersion: z.number().int().positive(),
+  expectedLocationVersions: z.array(z.object({
+    locationId: z.string().min(1),
+    locationName: z.string().min(1),
+    stockVersion: z.number().int().positive(),
+  }).strict()).min(1).max(10),
+  occurredAt: z.string().datetime(),
+  reason: z.string().trim().min(3),
+  idempotencyKey: z.string().min(8).max(200),
+}).strict().superRefine((value, context) => {
+  const locationIds = value.expectedLocationVersions.map((row) => row.locationId);
+  if (new Set(locationIds).size !== locationIds.length) {
+    context.addIssue({ code: 'custom', path: ['expectedLocationVersions'], message: 'location_version_duplicate' });
+  }
+});
 
 export const ResolvedRoastBatchActionSchema = z.object({
   batchNumber: z.string().trim().min(1),
@@ -242,12 +508,34 @@ export const ResolvedRoastBatchActionSchema = z.object({
   roastLevel: z.string().trim().nullable(),
   greenInputGrams: z.number().int().positive(),
   roastedOutputGrams: z.number().int().positive().nullable(),
+  abnormalLossGrams: z.number().int().nonnegative().optional(),
   qcScore: z.number().nullable(),
   qcNotes: z.string().trim().nullable(),
   greenInventoryItemId: z.string().nullable(),
   roastedInventoryItemId: z.string().nullable(),
   branchId: z.string().nullable(),
-}).strict();
+  locationId: z.string().min(1).optional(),
+  locationName: z.string().min(1).optional(),
+  expectedLocationVersion: z.number().int().positive().optional(),
+  idempotencyKey: z.string().min(8).max(200).optional(),
+}).strict().superRefine((value, context) => {
+  const locationFields = [
+    value.locationId,
+    value.locationName,
+    value.expectedLocationVersion,
+    value.idempotencyKey,
+  ];
+  if (locationFields.some((field) => field !== undefined) && locationFields.some((field) => field === undefined)) {
+    context.addIssue({ code: 'custom', path: ['locationId'], message: 'inventory_v2_location_context_incomplete' });
+  }
+  if (
+    value.abnormalLossGrams !== undefined &&
+    value.roastedOutputGrams !== null &&
+    value.abnormalLossGrams > value.greenInputGrams - value.roastedOutputGrams
+  ) {
+    context.addIssue({ code: 'custom', path: ['abnormalLossGrams'], message: 'abnormal_loss_exceeds_shrinkage' });
+  }
+});
 
 export const ResolvedPaymentActionSchema = z.object({
   targetType: z.enum(['ORDER', 'FINANCE_ENTRY']),
@@ -304,6 +592,14 @@ export const ACTION_DATA_SCHEMAS: Partial<Record<import('@prisma/client').AiPend
   UPDATE_CUSTOMER: ResolvedCustomerUpdateActionSchema,
   UPDATE_PARTY: ResolvedPartyUpdateActionSchema,
   ADJUST_INVENTORY: ResolvedInventoryAdjustmentActionSchema,
+  RECEIVE_STOCK: ResolvedStockReceiptActionSchema,
+  PACK_FINISHED_GOODS: ResolvedPackingActionSchema,
+  DISPATCH_STOCK_TRANSFER: ResolvedDispatchStockTransferActionSchema,
+  RECEIVE_STOCK_TRANSFER: ResolvedReceiveStockTransferActionSchema,
+  RECORD_LOCAL_EXPENSE: ResolvedLocalExpenseActionSchema,
+  RETURN_TO_QUARANTINE: ResolvedReturnToQuarantineActionSchema,
+  DISPOSE_RETURNED_GOODS: ResolvedDisposeReturnedGoodsActionSchema,
+  REVERSE_STOCK_DOCUMENT: ResolvedReverseStockDocumentActionSchema,
   CREATE_ROAST_BATCH: ResolvedRoastBatchActionSchema,
   RECORD_PAYMENT: ResolvedPaymentActionSchema,
   RECORD_REFUND: ResolvedRefundActionSchema,

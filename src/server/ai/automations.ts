@@ -46,7 +46,9 @@ type AutomationPreferenceRecord = {
     name: string;
     role: CurrentUser['role'];
     branchId: string | null;
+    defaultStockLocationId?: string | null;
     defaultFinanceAccountId: string | null;
+    stockLocationAccesses?: Array<{ locationId: string }>;
     isActive: boolean;
     telegramIdentity: { privateChatId: string | null; status: string } | null;
   };
@@ -102,7 +104,9 @@ function currentUser(record: AutomationPreferenceRecord['user']): CurrentUser {
     name: record.name,
     role: record.role,
     branchId: record.branchId,
+    defaultStockLocationId: record.defaultStockLocationId,
     defaultFinanceAccountId: record.defaultFinanceAccountId,
+    locationIds: (record.stockLocationAccesses ?? []).map((access) => access.locationId),
   };
 }
 
@@ -459,8 +463,13 @@ export async function runDueAiAutomations(input: {
           name: true,
           role: true,
           branchId: true,
+          defaultStockLocationId: true,
           defaultFinanceAccountId: true,
           isActive: true,
+          stockLocationAccesses: {
+            where: { canView: true, location: { isActive: true } },
+            select: { locationId: true },
+          },
           telegramIdentity: { select: { privateChatId: true, status: true } },
         },
       },

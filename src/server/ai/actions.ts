@@ -15,6 +15,18 @@ import { reclassifyLedgerLineFromInput } from '@/server/finance/classification';
 import { reverseFinanceEntryFromInput, settleFinanceEntryFromInput } from '@/server/finance/entries';
 import { adjustInventoryFromInput } from '@/server/records/inventory';
 import { createRoastBatchFromInput } from '@/server/records/batches';
+import { getInventoryV2Config } from '@/server/inventory-v2/config';
+import { submitInventoryCount } from '@/server/inventory-v2/counts';
+import { recordLocalExpense } from '@/server/inventory-v2/local-expenses';
+import { packFinishedGoods } from '@/server/inventory-v2/packing';
+import { receivePurchasedStock } from '@/server/inventory-v2/receipts';
+import { reverseStockDocument } from '@/server/inventory-v2/reversals';
+import { roastGreenCoffee } from '@/server/inventory-v2/roasting';
+import {
+  disposeReturnedGoods,
+  returnFinishedGoodsToQuarantine,
+} from '@/server/inventory-v2/returns';
+import { dispatchStockTransfer, receiveStockTransfer } from '@/server/inventory-v2/transfers';
 import {
   bulkUpdateOrdersFromInput,
   createOrderFromInput,
@@ -34,16 +46,24 @@ import {
   ResolvedCustomerActionSchema,
   ResolvedCustomerUpdateActionSchema,
   ResolvedDashboardDraftActionSchema,
+  ResolvedDispatchStockTransferActionSchema,
+  ResolvedDisposeReturnedGoodsActionSchema,
   ResolvedExpenseActionSchema,
   ResolvedInventoryAdjustmentActionSchema,
+  ResolvedLocalExpenseActionSchema,
   ResolvedOrderActionSchema,
   ResolvedOrderStatusActionSchema,
+  ResolvedPackingActionSchema,
   ResolvedPartyUpdateActionSchema,
   ResolvedPaymentActionSchema,
   ResolvedPurchaseActionSchema,
   ResolvedRefundActionSchema,
+  ResolvedReceiveStockTransferActionSchema,
+  ResolvedReturnToQuarantineActionSchema,
   ResolvedReversalActionSchema,
+  ResolvedReverseStockDocumentActionSchema,
   ResolvedRoastBatchActionSchema,
+  ResolvedStockReceiptActionSchema,
   ResolvedSpendReclassificationActionSchema,
   ResolvedTransferActionSchema,
 } from './action-data';
@@ -369,6 +389,8 @@ async function executeOrder(
     channel: input.channel,
     governorate: input.governorate,
     fulfillmentMethod: input.fulfillmentMethod,
+    fulfillmentLocationId: input.fulfillmentLocationId,
+    expectedLocationVersion: input.expectedLocationVersion,
     status: input.status,
     deliveryFee: input.deliveryFee,
     deliveryCost: input.deliveryCost,
@@ -673,6 +695,59 @@ async function executeInventoryAdjustment(
   onCommitted: (tx: Prisma.TransactionClient, record: ExecutionRecord) => Promise<void>,
 ) {
   const input = ResolvedInventoryAdjustmentActionSchema.parse(raw);
+  if (getInventoryV2Config().enabled) {
+    if (
+      !input.locationId ||
+      !input.locationName ||
+      !input.expectedLocationVersion ||
+      !input.idempotencyKey
+    ) {
+      throw new Error('inventory_v2_location_required');
+    }
+    let record: ExecutionRecord | null = null;
+    const result = await submitInventoryCount(
+      user,
+      {
+        locationId: input.locationId,
+        kind: 'ROUTINE',
+        countedAt: new Date(input.occurredAt),
+        reason: input.reason,
+        openingAttestation: false,
+        lines: [{
+          inventoryItemId: input.inventoryItemId,
+          countedQuantity: input.targetQuantity,
+        }],
+        idempotencyKey: input.idempotencyKey,
+        expectedLocationVersion: input.expectedLocationVersion,
+      },
+      {
+        beforeExecute,
+        onCommitted: async (tx, count) => {
+          record = {
+            recordType: 'InventoryCount',
+            recordId: count.inventoryCountId,
+            href: `/admin/records/inventory/counts/${count.inventoryCountId}`,
+            message: localized(
+              locale,
+              `Inventory count ${count.countNumber} for ${input.inventoryItemName} at ${input.locationName} was submitted for approval. Stock has not changed yet.`,
+              `تم إرسال جرد المخزون ${count.countNumber} لمادة ${input.inventoryItemName} في ${input.locationName} للموافقة. لم يتغير المخزون بعد.`,
+            ),
+          };
+          await onCommitted(tx, record);
+        },
+      },
+    );
+    return record ?? {
+      recordType: 'InventoryCount',
+      recordId: result.inventoryCountId,
+      href: `/admin/records/inventory/counts/${result.inventoryCountId}`,
+      message: localized(
+        locale,
+        `Inventory count ${result.countNumber} was submitted for approval. Stock has not changed yet.`,
+        `تم إرسال جرد المخزون ${result.countNumber} للموافقة. لم يتغير المخزون بعد.`,
+      ),
+    };
+  }
   const record: ExecutionRecord = {
     recordType: 'InventoryItem',
     recordId: input.inventoryItemId,
@@ -695,6 +770,467 @@ async function executeInventoryAdjustment(
   return record;
 }
 
+async function executeStockReceipt(
+  raw: unknown,
+  user: CurrentUser,
+  locale: AppLocale,
+  beforeExecute: (tx: Prisma.TransactionClient) => Promise<void>,
+  onCommitted: (tx: Prisma.TransactionClient, record: ExecutionRecord) => Promise<void>,
+) {
+  const input = ResolvedStockReceiptActionSchema.parse(raw);
+  let record: ExecutionRecord | null = null;
+  const result = await receivePurchasedStock(
+    user,
+    {
+      inventoryItemId: input.inventoryItemId,
+      locationId: input.locationId,
+      quantity: input.quantity,
+      unitCost: input.unitCost,
+      occurredAt: new Date(input.occurredAt),
+      bestBefore: input.bestBefore ? new Date(input.bestBefore) : undefined,
+      supplierLot: input.supplierLot ?? undefined,
+      reference: input.reference ?? undefined,
+      notes: input.notes ?? undefined,
+      paymentMode: input.paymentMode,
+      accountId: input.accountId ?? undefined,
+      partyId: input.partyId ?? undefined,
+      newSupplier: input.newSupplier ? {
+        name: input.newSupplier.name,
+        phone: input.newSupplier.phone,
+        email: input.newSupplier.email,
+        address: input.newSupplier.address,
+        notes: input.newSupplier.notes,
+      } : undefined,
+      dueDate: input.dueDate ? new Date(input.dueDate) : undefined,
+      idempotencyKey: input.idempotencyKey,
+      expectedLocationVersion: input.expectedLocationVersion,
+    },
+    {
+      beforeExecute,
+      onCommitted: async (tx, receipt) => {
+        record = {
+          recordType: 'StockDocument',
+          recordId: receipt.stockDocumentId,
+          href: `/admin/records/inventory/documents/${receipt.stockDocumentId}`,
+          message: localized(
+            locale,
+            `Stock receipt ${receipt.documentNumber} for ${input.inventoryItemName} was recorded at ${input.locationName}.`,
+            `تم تسجيل استلام المخزون ${receipt.documentNumber} لمادة ${input.inventoryItemName} في ${input.locationName}.`,
+          ),
+        };
+        await onCommitted(tx, record);
+      },
+    },
+  );
+  return record ?? {
+    recordType: 'StockDocument',
+    recordId: result.stockDocumentId,
+    href: `/admin/records/inventory/documents/${result.stockDocumentId}`,
+    message: localized(
+      locale,
+      `Stock receipt ${result.documentNumber} was recorded.`,
+      `تم تسجيل استلام المخزون ${result.documentNumber}.`,
+    ),
+  };
+}
+
+async function executePackingRun(
+  raw: unknown,
+  user: CurrentUser,
+  locale: AppLocale,
+  beforeExecute: (tx: Prisma.TransactionClient) => Promise<void>,
+  onCommitted: (tx: Prisma.TransactionClient, record: ExecutionRecord) => Promise<void>,
+) {
+  const input = ResolvedPackingActionSchema.parse(raw);
+  let record: ExecutionRecord | null = null;
+  const result = await packFinishedGoods(
+    user,
+    {
+      locationId: input.locationId,
+      productId: input.productId,
+      outputInventoryItemId: input.outputInventoryItemId,
+      recipeVersionId: input.recipeVersionId,
+      outputQuantity: input.outputQuantity,
+      rejectedQuantity: input.rejectedQuantity,
+      packedAt: new Date(input.packedAt),
+      bestBefore: input.bestBefore ? new Date(input.bestBefore) : undefined,
+      notes: input.notes ?? undefined,
+      idempotencyKey: input.idempotencyKey,
+      expectedLocationVersion: input.expectedLocationVersion,
+    },
+    {
+      beforeExecute,
+      onCommitted: async (tx, packing) => {
+        record = {
+          recordType: 'PackingBatch',
+          recordId: packing.packingBatchId,
+          href: `/admin/records/inventory/packing/${packing.packingBatchId}`,
+          message: localized(
+            locale,
+            `Packing batch ${packing.batchNumber} created ${input.outputQuantity} ${input.outputUnit} of ${input.productName} at ${input.locationName}.`,
+            `أنشأت دفعة التعبئة ${packing.batchNumber} عدد ${input.outputQuantity} ${input.outputUnit} من ${input.productName} في ${input.locationName}.`,
+          ),
+        };
+        await onCommitted(tx, record);
+      },
+    },
+  );
+  return record ?? {
+    recordType: 'PackingBatch',
+    recordId: result.packingBatchId,
+    href: `/admin/records/inventory/packing/${result.packingBatchId}`,
+    message: localized(
+      locale,
+      `Packing batch ${result.batchNumber} was created.`,
+      `تم إنشاء دفعة التعبئة ${result.batchNumber}.`,
+    ),
+  };
+}
+
+async function executeStockTransferDispatch(
+  raw: unknown,
+  user: CurrentUser,
+  locale: AppLocale,
+  beforeExecute: (tx: Prisma.TransactionClient) => Promise<void>,
+  onCommitted: (tx: Prisma.TransactionClient, record: ExecutionRecord) => Promise<void>,
+) {
+  const input = ResolvedDispatchStockTransferActionSchema.parse(raw);
+  let record: ExecutionRecord | null = null;
+  const result = await dispatchStockTransfer(
+    user,
+    {
+      sourceLocationId: input.sourceLocationId,
+      destinationLocationId: input.destinationLocationId,
+      lines: input.lines.map((line) => ({
+        inventoryItemId: line.inventoryItemId,
+        quantity: line.quantity,
+      })),
+      occurredAt: new Date(input.occurredAt),
+      expectedAt: input.expectedAt ? new Date(input.expectedAt) : undefined,
+      notes: input.notes ?? undefined,
+      idempotencyKey: input.idempotencyKey,
+      expectedSourceVersion: input.expectedSourceVersion,
+      expectedTransitVersion: input.expectedTransitVersion,
+    },
+    {
+      beforeExecute,
+      onCommitted: async (tx, transfer) => {
+        record = {
+          recordType: 'StockDocument',
+          recordId: transfer.stockDocumentId,
+          href: `/admin/records/inventory/documents/${transfer.stockDocumentId}`,
+          message: localized(
+            locale,
+            `Stock transfer ${transfer.documentNumber} was dispatched from ${input.sourceLocationName} to ${input.destinationLocationName}.`,
+            `تم إرسال تحويل المخزون ${transfer.documentNumber} من ${input.sourceLocationName} إلى ${input.destinationLocationName}.`,
+          ),
+        };
+        await onCommitted(tx, record);
+      },
+    },
+  );
+  return record ?? {
+    recordType: 'StockDocument',
+    recordId: result.stockDocumentId,
+    href: `/admin/records/inventory/documents/${result.stockDocumentId}`,
+    message: localized(
+      locale,
+      `Stock transfer ${result.documentNumber} was dispatched.`,
+      `تم إرسال تحويل المخزون ${result.documentNumber}.`,
+    ),
+  };
+}
+
+async function executeStockTransferReceipt(
+  raw: unknown,
+  user: CurrentUser,
+  locale: AppLocale,
+  beforeExecute: (tx: Prisma.TransactionClient) => Promise<void>,
+  onCommitted: (tx: Prisma.TransactionClient, record: ExecutionRecord) => Promise<void>,
+) {
+  const input = ResolvedReceiveStockTransferActionSchema.parse(raw);
+  let record: ExecutionRecord | null = null;
+  const result = await receiveStockTransfer(
+    user,
+    {
+      stockDocumentId: input.stockDocumentId,
+      destinationLocationId: input.destinationLocationId,
+      lines: input.lines.map((line) => ({
+        inventoryItemId: line.inventoryItemId,
+        quantity: line.quantity,
+      })),
+      discrepancies: input.discrepancies.map((row) => ({
+        inventoryItemId: row.inventoryItemId,
+        type: row.type,
+        quantity: row.quantity,
+        notes: row.notes,
+      })),
+      occurredAt: new Date(input.occurredAt),
+      notes: input.notes ?? undefined,
+      idempotencyKey: input.idempotencyKey,
+      expectedTransitVersion: input.expectedTransitVersion,
+      expectedDestinationVersion: input.expectedDestinationVersion,
+      expectedDocumentVersion: input.expectedDocumentVersion,
+    },
+    {
+      beforeExecute,
+      onCommitted: async (tx, receipt) => {
+        record = {
+          recordType: 'StockDocument',
+          recordId: receipt.receiptDocumentId,
+          href: `/admin/records/inventory/documents/${receipt.receiptDocumentId}`,
+          message: localized(
+            locale,
+            `Stock transfer ${input.transferNumber} was received into ${input.destinationLocationName}. Status: ${receipt.dispatchStatus}.`,
+            `تم استلام تحويل المخزون ${input.transferNumber} في ${input.destinationLocationName}. الحالة: ${receipt.dispatchStatus}.`,
+          ),
+        };
+        await onCommitted(tx, record);
+      },
+    },
+  );
+  return record ?? {
+    recordType: 'StockDocument',
+    recordId: result.receiptDocumentId,
+    href: `/admin/records/inventory/documents/${result.receiptDocumentId}`,
+    message: localized(
+      locale,
+      `Stock transfer receipt ${result.documentNumber} was recorded.`,
+      `تم تسجيل استلام تحويل المخزون ${result.documentNumber}.`,
+    ),
+  };
+}
+
+async function executeLocalExpense(
+  raw: unknown,
+  user: CurrentUser,
+  locale: AppLocale,
+  beforeExecute: (tx: Prisma.TransactionClient) => Promise<void>,
+  onCommitted: (tx: Prisma.TransactionClient, record: ExecutionRecord) => Promise<void>,
+) {
+  const input = ResolvedLocalExpenseActionSchema.parse(raw);
+  if (input.userId !== user.id || input.financeAccountId !== user.defaultFinanceAccountId) {
+    throw new Error('expense_actor_context_changed');
+  }
+  const attachment = input.receiptAttachmentId
+    ? await prisma.aiAttachment.findFirst({
+        where: {
+          id: input.receiptAttachmentId,
+          userId: user.id,
+          status: 'READY',
+          kind: { in: ['RECEIPT_IMAGE', 'DOCUMENT'] },
+          expiresAt: { gt: new Date() },
+        },
+        select: { content: true, fileName: true, mimeType: true },
+      })
+    : null;
+  if (input.receiptAttachmentId && !attachment) throw new Error('expense_receipt_invalid');
+  let record: ExecutionRecord | null = null;
+  const result = await recordLocalExpense(
+    user,
+    {
+      locationId: input.locationId,
+      amount: input.amount,
+      categoryType: input.categoryType,
+      description: input.description,
+      occurredAt: new Date(input.occurredAt),
+      receipt: attachment ? {
+        bytes: Uint8Array.from(attachment.content),
+        fileName: attachment.fileName,
+        declaredMimeType: attachment.mimeType,
+      } : undefined,
+      noReceiptReason: input.noReceiptReason ?? undefined,
+      idempotencyKey: input.idempotencyKey,
+      expectedLocationVersion: input.expectedLocationVersion,
+    },
+    {
+      beforeExecute,
+      onCommitted: async (tx, expense) => {
+        record = {
+          recordType: 'LocalExpenseRequest',
+          recordId: expense.requestId,
+          href: '/finance/local-expenses',
+          message: localized(
+            locale,
+            expense.status === 'POSTED'
+              ? `Local expense ${expense.requestNumber} was recorded at ${input.locationName}.`
+              : `Local expense ${expense.requestNumber} was submitted for central review. No finance entry has been posted yet.`,
+            expense.status === 'POSTED'
+              ? `تم تسجيل المصروف المحلي ${expense.requestNumber} في ${input.locationName}.`
+              : `تم إرسال المصروف المحلي ${expense.requestNumber} للمراجعة المركزية. لم يُرحل قيد مالي بعد.`,
+          ),
+        };
+        await onCommitted(tx, record);
+      },
+    },
+  );
+  return record ?? {
+    recordType: 'LocalExpenseRequest',
+    recordId: result.requestId,
+    href: '/finance/local-expenses',
+    message: localized(
+      locale,
+      `Local expense ${result.requestNumber} was ${result.status === 'POSTED' ? 'recorded' : 'submitted for review'}.`,
+      `تم ${result.status === 'POSTED' ? 'تسجيل' : 'إرسال'} المصروف المحلي ${result.requestNumber}${result.status === 'POSTED' ? '' : ' للمراجعة'}.`,
+    ),
+  };
+}
+
+async function executeReturnToQuarantine(
+  raw: unknown,
+  user: CurrentUser,
+  locale: AppLocale,
+  beforeExecute: (tx: Prisma.TransactionClient) => Promise<void>,
+  onCommitted: (tx: Prisma.TransactionClient, record: ExecutionRecord) => Promise<void>,
+) {
+  const input = ResolvedReturnToQuarantineActionSchema.parse(raw);
+  let record: ExecutionRecord | null = null;
+  const result = await returnFinishedGoodsToQuarantine(
+    user,
+    {
+      orderLineId: input.orderLineId,
+      quantity: input.quantity,
+      occurredAt: new Date(input.occurredAt),
+      reason: input.reason,
+      idempotencyKey: input.idempotencyKey,
+      expectedFulfillmentVersion: input.expectedFulfillmentVersion,
+      expectedQuarantineVersion: input.expectedQuarantineVersion,
+    },
+    {
+      beforeExecute,
+      onCommitted: async (tx, returned) => {
+        record = {
+          recordType: 'StockDocument',
+          recordId: returned.stockDocumentId,
+          href: `/admin/records/inventory/documents/${returned.stockDocumentId}`,
+          message: localized(
+            locale,
+            `Return ${returned.documentNumber} moved ${input.quantity} ${input.unit} of ${input.productName} from order ${input.orderNumber} into ${input.quarantineLocationName}.`,
+            `نقل مستند المرتجع ${returned.documentNumber} كمية ${input.quantity} ${input.unit} من ${input.productName} للطلب ${input.orderNumber} إلى ${input.quarantineLocationName}.`,
+          ),
+        };
+        await onCommitted(tx, record);
+      },
+    },
+  );
+  return record ?? {
+    recordType: 'StockDocument',
+    recordId: result.stockDocumentId,
+    href: `/admin/records/inventory/documents/${result.stockDocumentId}`,
+    message: localized(
+      locale,
+      `Return ${result.documentNumber} was recorded in quarantine.`,
+      `تم تسجيل المرتجع ${result.documentNumber} في الحجر.`,
+    ),
+  };
+}
+
+async function executeReturnedGoodsDisposition(
+  raw: unknown,
+  user: CurrentUser,
+  locale: AppLocale,
+  beforeExecute: (tx: Prisma.TransactionClient) => Promise<void>,
+  onCommitted: (tx: Prisma.TransactionClient, record: ExecutionRecord) => Promise<void>,
+) {
+  const input = ResolvedDisposeReturnedGoodsActionSchema.parse(raw);
+  let record: ExecutionRecord | null = null;
+  const result = await disposeReturnedGoods(
+    user,
+    {
+      returnDocumentId: input.returnDocumentId,
+      inventoryItemId: input.inventoryItemId,
+      quantity: input.quantity,
+      disposition: input.disposition,
+      destinationLocationId: input.destinationLocationId ?? undefined,
+      supplierPartyId: input.supplierPartyId ?? undefined,
+      occurredAt: new Date(input.occurredAt),
+      reason: input.reason,
+      idempotencyKey: input.idempotencyKey,
+      expectedQuarantineVersion: input.expectedQuarantineVersion,
+      expectedDestinationVersion: input.expectedDestinationVersion ?? undefined,
+      expectedReturnDocumentVersion: input.expectedReturnDocumentVersion,
+    },
+    {
+      beforeExecute,
+      onCommitted: async (tx, disposition) => {
+        record = {
+          recordType: 'StockDocument',
+          recordId: disposition.stockDocumentId,
+          href: `/admin/records/inventory/documents/${disposition.stockDocumentId}`,
+          message: localized(
+            locale,
+            `Returned goods document ${disposition.documentNumber} recorded ${input.quantity} ${input.unit} of ${input.inventoryItemName} as ${input.disposition}.`,
+            `سجل مستند معالجة المرتجع ${disposition.documentNumber} كمية ${input.quantity} ${input.unit} من ${input.inventoryItemName} كحالة ${input.disposition}.`,
+          ),
+        };
+        await onCommitted(tx, record);
+      },
+    },
+  );
+  return record ?? {
+    recordType: 'StockDocument',
+    recordId: result.stockDocumentId,
+    href: `/admin/records/inventory/documents/${result.stockDocumentId}`,
+    message: localized(
+      locale,
+      `Returned goods document ${result.documentNumber} was recorded as ${result.disposition}.`,
+      `تم تسجيل مستند معالجة المرتجع ${result.documentNumber} كحالة ${result.disposition}.`,
+    ),
+  };
+}
+
+async function executeStockDocumentReversal(
+  raw: unknown,
+  user: CurrentUser,
+  locale: AppLocale,
+  beforeExecute: (tx: Prisma.TransactionClient) => Promise<void>,
+  onCommitted: (tx: Prisma.TransactionClient, record: ExecutionRecord) => Promise<void>,
+) {
+  const input = ResolvedReverseStockDocumentActionSchema.parse(raw);
+  let record: ExecutionRecord | null = null;
+  const result = await reverseStockDocument(
+    user,
+    {
+      stockDocumentId: input.stockDocumentId,
+      confirmationDocumentNumber: input.documentNumber,
+      reason: input.reason,
+      occurredAt: new Date(input.occurredAt),
+      idempotencyKey: input.idempotencyKey,
+      expectedDocumentVersion: input.expectedDocumentVersion,
+      expectedLocationVersions: input.expectedLocationVersions.map((row) => ({
+        locationId: row.locationId,
+        stockVersion: row.stockVersion,
+      })),
+    },
+    {
+      beforeExecute,
+      onCommitted: async (tx, reversal) => {
+        record = {
+          recordType: 'StockDocument',
+          recordId: reversal.reversalDocumentId,
+          href: `/admin/records/inventory/documents/${reversal.reversalDocumentId}`,
+          message: localized(
+            locale,
+            `Stock document ${input.documentNumber} was reversed by ${reversal.documentNumber}.`,
+            `تم عكس مستند المخزون ${input.documentNumber} بالمستند ${reversal.documentNumber}.`,
+          ),
+        };
+        await onCommitted(tx, record);
+      },
+    },
+  );
+  return record ?? {
+    recordType: 'StockDocument',
+    recordId: result.reversalDocumentId,
+    href: `/admin/records/inventory/documents/${result.reversalDocumentId}`,
+    message: localized(
+      locale,
+      `Stock document ${input.documentNumber} was reversed by ${result.documentNumber}.`,
+      `تم عكس مستند المخزون ${input.documentNumber} بالمستند ${result.documentNumber}.`,
+    ),
+  };
+}
+
 async function executeRoastBatch(
   raw: unknown,
   user: CurrentUser,
@@ -703,12 +1239,70 @@ async function executeRoastBatch(
   onCommitted: (tx: Prisma.TransactionClient, record: ExecutionRecord) => Promise<void>,
 ) {
   const input = ResolvedRoastBatchActionSchema.parse(raw);
+  if (getInventoryV2Config().enabled) {
+    if (
+      !input.locationId ||
+      !input.locationName ||
+      !input.expectedLocationVersion ||
+      !input.idempotencyKey ||
+      !input.greenInventoryItemId ||
+      !input.roastedInventoryItemId ||
+      input.roastedOutputGrams === null ||
+      input.roastDate === null
+    ) {
+      throw new Error('inventory_v2_location_required');
+    }
+    let record: ExecutionRecord | null = null;
+    const result = await roastGreenCoffee(
+      user,
+      {
+        batchNumber: input.batchNumber,
+        locationId: input.locationId,
+        greenInventoryItemId: input.greenInventoryItemId,
+        roastedInventoryItemId: input.roastedInventoryItemId,
+        origin: input.origin,
+        roastLevel: input.roastLevel ?? undefined,
+        greenInputGrams: input.greenInputGrams,
+        roastedOutputGrams: input.roastedOutputGrams,
+        abnormalLossGrams: input.abnormalLossGrams ?? 0,
+        roastDate: new Date(input.roastDate),
+        qcScore: input.qcScore ?? undefined,
+        qcNotes: input.qcNotes ?? undefined,
+        idempotencyKey: input.idempotencyKey,
+        expectedLocationVersion: input.expectedLocationVersion,
+      },
+      {
+        beforeExecute,
+        onCommitted: async (tx, batch) => {
+          record = {
+            recordType: 'RoastBatch',
+            recordId: batch.roastBatchId,
+            href: `/admin/records/batches/${batch.roastBatchId}`,
+            message: localized(
+              locale,
+              `Roast batch ${batch.batchNumber} was created at ${input.locationName}.`,
+              `تم إنشاء دفعة التحميص ${batch.batchNumber} في ${input.locationName}.`,
+            ),
+          };
+          await onCommitted(tx, record);
+        },
+      },
+    );
+    return record ?? {
+      recordType: 'RoastBatch',
+      recordId: result.roastBatchId,
+      href: `/admin/records/batches/${result.roastBatchId}`,
+      message: localized(locale, `Roast batch ${result.batchNumber} was created.`, `تم إنشاء دفعة التحميص ${result.batchNumber}.`),
+    };
+  }
   let record: ExecutionRecord | null = null;
   const result = await createRoastBatchFromInput(
     {
-      ...input,
+      batchNumber: input.batchNumber,
+      origin: input.origin,
       roastDate: input.roastDate ?? undefined,
       roastLevel: input.roastLevel ?? undefined,
+      greenInputGrams: input.greenInputGrams,
       roastedOutputGrams: input.roastedOutputGrams ?? undefined,
       qcScore: input.qcScore ?? undefined,
       qcNotes: input.qcNotes ?? undefined,
@@ -967,6 +1561,22 @@ async function executeByType(
       return executePartyUpdate(raw, user, locale, beforeExecute, onCommitted);
     case 'ADJUST_INVENTORY':
       return executeInventoryAdjustment(raw, user, locale, beforeExecute, onCommitted);
+    case 'RECEIVE_STOCK':
+      return executeStockReceipt(raw, user, locale, beforeExecute, onCommitted);
+    case 'PACK_FINISHED_GOODS':
+      return executePackingRun(raw, user, locale, beforeExecute, onCommitted);
+    case 'DISPATCH_STOCK_TRANSFER':
+      return executeStockTransferDispatch(raw, user, locale, beforeExecute, onCommitted);
+    case 'RECEIVE_STOCK_TRANSFER':
+      return executeStockTransferReceipt(raw, user, locale, beforeExecute, onCommitted);
+    case 'RECORD_LOCAL_EXPENSE':
+      return executeLocalExpense(raw, user, locale, beforeExecute, onCommitted);
+    case 'RETURN_TO_QUARANTINE':
+      return executeReturnToQuarantine(raw, user, locale, beforeExecute, onCommitted);
+    case 'DISPOSE_RETURNED_GOODS':
+      return executeReturnedGoodsDisposition(raw, user, locale, beforeExecute, onCommitted);
+    case 'REVERSE_STOCK_DOCUMENT':
+      return executeStockDocumentReversal(raw, user, locale, beforeExecute, onCommitted);
     case 'CREATE_ROAST_BATCH':
       return executeRoastBatch(raw, user, locale, beforeExecute, onCommitted);
     case 'RECORD_PAYMENT':

@@ -7,7 +7,7 @@ import { getAiAssistantConfig } from './config';
 export async function requireAiApiUser(): Promise<CurrentUser | NextResponse> {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
-  if (!['OWNER', 'ADMIN'].includes(user.role) || !can(user.role, 'use:ai-assistant')) {
+  if (!can(user.role, 'use:ai-assistant')) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 });
   }
   const config = getAiAssistantConfig();

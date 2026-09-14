@@ -13,6 +13,7 @@ const disabledInput = 'cursor-not-allowed bg-muted text-muted-foreground';
 const rowLabel = (first: boolean) => first ? 'text-xs text-muted-foreground' : 'text-xs text-muted-foreground sm:hidden';
 
 type Opt = { value: string; label: string };
+type LocationOpt = Opt & { version: number };
 export type OrderLineInput = { sku: string; quantity: string; unitGrossPrice: string; lineDiscount: string };
 export type OrderInitial = { header: Record<string, string>; lines: OrderLineInput[] };
 /** A selectable variation for the order line picker. */
@@ -379,6 +380,8 @@ export function OrderForm({
   customerOptions = [],
   inlineCustomerAction,
   paymentSummary,
+  locationOptions = [],
+  requireLocation = false,
 }: {
   action: (prev: ActionState, fd: FormData) => Promise<ActionState>;
   locale: string;
@@ -400,12 +403,17 @@ export function OrderForm({
   customerOptions?: CustomerOption[];
   inlineCustomerAction?: (prev: InlineCustomerState, fd: FormData) => Promise<InlineCustomerState>;
   paymentSummary?: OrderPaymentSummary;
+  locationOptions?: LocationOpt[];
+  requireLocation?: boolean;
 }) {
   const [state, formAction, pending] = useActionState<ActionState, FormData>(action, undefined);
   const [lines, setLines] = useState<OrderLineInput[]>(initial?.lines?.length ? initial.lines : [{ ...emptyLine }]);
   const [customers, setCustomers] = useState<CustomerOption[]>(customerOptions);
   const [selectedCustomer, setSelectedCustomer] = useState(initial?.header?.customerExternalId ?? '');
   const [status, setStatus] = useState(initial?.header?.status ?? statusOptions[0]?.value ?? '');
+  const [fulfillmentLocationId, setFulfillmentLocationId] = useState(
+    initial?.header?.fulfillmentLocationId ?? locationOptions[0]?.value ?? '',
+  );
   const [deliveryFee, setDeliveryFee] = useState(initial?.header?.deliveryFee ?? '0');
   const [scanValue, setScanValue] = useState('');
   const [scanMessage, setScanMessage] = useState('');
@@ -478,6 +486,9 @@ export function OrderForm({
     setScanMessage((labels.scanAdded ?? '{name}').replace('{name}', item.name));
   };
   const h = initial?.header ?? {};
+  const selectedLocationVersion = locationOptions.find(
+    (option) => option.value === fulfillmentLocationId,
+  )?.version;
   // Order-level adjustments are controlled so the live total reflects them.
   const [adj, setAdj] = useState({
     orderDiscount: initial?.header?.orderDiscount ?? '0',
@@ -569,6 +580,35 @@ export function OrderForm({
         <HeaderSelect name="channel" label={labels.channel} options={channelOptions} defaultValue={h.channel} required error={errorFor('channel')} />
         <HeaderSelect name="governorate" label={labels.governorate} options={governorateOptions} defaultValue={h.governorate} required error={errorFor('governorate')} />
         <HeaderSelect name="fulfillmentMethod" label={labels.fulfillment} options={fulfillmentOptions} defaultValue={h.fulfillmentMethod} required error={errorFor('fulfillmentMethod')} />
+        {requireLocation || locationOptions.length ? (
+          <div className="flex flex-col gap-1">
+            <label htmlFor="fulfillment-location-field" className="text-xs font-medium text-muted-foreground">
+              {labels.fulfillmentLocation}
+            </label>
+            <select
+              id="fulfillment-location-field"
+              name="fulfillmentLocationId"
+              value={fulfillmentLocationId}
+              onChange={(event) => setFulfillmentLocationId(event.target.value)}
+              className={cn(input, errorFor('fulfillmentLocationId') && inputError)}
+              aria-invalid={Boolean(errorFor('fulfillmentLocationId'))}
+              required
+            >
+              <option value="">—</option>
+              {locationOptions.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+            <input
+              type="hidden"
+              name="expectedLocationVersion"
+              value={selectedLocationVersion ?? ''}
+            />
+            {errorFor('fulfillmentLocationId') ? (
+              <p className="text-xs font-medium text-danger">{errorFor('fulfillmentLocationId')}</p>
+            ) : null}
+          </div>
+        ) : null}
         <HeaderSelect
           name="status"
           label={labels.status}

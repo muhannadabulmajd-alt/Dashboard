@@ -2,11 +2,16 @@ import 'server-only';
 import { prisma } from '@/server/db/client';
 import { monthBucketKey } from '@/lib/dates';
 import { convertToIqd } from '@/lib/money';
-import { buildOrderLineWhere } from '@/server/filters/where-builder';
+import {
+  buildFinanceEntryScopeWhere,
+  buildOrderLineWhere,
+  type DataScope,
+} from '@/server/filters/where-builder';
 import { getOrderStatusRoleMap } from '@/server/lists/resolver';
 import { getUsdToIqd } from '@/server/settings';
 import type { DashboardFilters } from '@/lib/filters';
 import type { ResolvedRange } from '@/lib/dates';
+import { inventoryVarianceOperatingAmount } from '@/server/inventory-v2/inventory-variance';
 
 export type SpendBucket =
   | 'all'
@@ -41,7 +46,7 @@ export interface SpendFilters {
   q?: string;
 }
 
-type Scope = { branchId?: string };
+type Scope = DataScope;
 
 export interface SpendFacts {
   capex: number;
@@ -55,8 +60,8 @@ export interface SpendFacts {
 }
 
 function branchWhere(filters: DashboardFilters, scope: Scope) {
-  return scope.branchId
-    ? { branchId: scope.branchId }
+  return scope.locationIds !== undefined || scope.branchId
+    ? buildFinanceEntryScopeWhere(scope)
     : filters.branchId?.length
       ? { branchId: { in: filters.branchId } }
       : {};
@@ -151,7 +156,7 @@ export async function getSpendRows(
 
   const financeRows = await prisma.financeEntry.findMany({
     where: {
-      type: { in: ['EXPENSE', 'PURCHASE'] },
+      type: { in: ['EXPENSE', 'PURCHASE', 'INVENTORY_GAIN', 'INVENTORY_LOSS'] },
       date: { gte: range.start, lte: range.end },
       archivedAt: null,
       reversedAt: null,
@@ -160,6 +165,8 @@ export async function getSpendRows(
     },
     select: {
       id: true,
+      type: true,
+      isOpeningBalance: true,
       date: true,
       amount: true,
       currency: true,
@@ -189,6 +196,8 @@ export async function getSpendRows(
 
   const rows: SpendRow[] = [];
   for (const entry of financeRows) {
+    if (entry.isOpeningBalance) continue;
+    const isInventoryVariance = entry.type === 'INVENTORY_GAIN' || entry.type === 'INVENTORY_LOSS';
     if (entry.ledgerLines.length) {
       for (const line of entry.ledgerLines) {
         const treatmentBucket: ClassifiedSpendBucket =
@@ -218,7 +227,9 @@ export async function getSpendRows(
           category: line.categoryType ?? entry.categoryType ?? 'OVERHEAD',
           party: entry.party?.name ?? null,
           reference: entry.reference,
-          amount: convertToIqd(line.lineTotal, entry.currency, rate),
+          amount: isInventoryVariance
+            ? inventoryVarianceOperatingAmount(entry.type as 'INVENTORY_GAIN' | 'INVENTORY_LOSS', line.lineTotal, false)
+            : convertToIqd(line.lineTotal, entry.currency, rate),
           sourceHref: `/finance/ledger/${entry.id}`,
         });
       }
@@ -256,7 +267,9 @@ export async function getSpendRows(
               : 'OVERHEAD'),
         party: entry.party?.name ?? null,
         reference: entry.reference,
-        amount: convertToIqd(entry.amount, entry.currency, rate),
+        amount: isInventoryVariance
+          ? inventoryVarianceOperatingAmount(entry.type as 'INVENTORY_GAIN' | 'INVENTORY_LOSS', entry.amount, false)
+          : convertToIqd(entry.amount, entry.currency, rate),
         sourceHref: `/finance/ledger/${entry.id}`,
       });
     }

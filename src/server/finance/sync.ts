@@ -133,6 +133,7 @@ export async function syncOrderProviderCollection(
       deliveryCost: true,
       extraCharges: true,
       branchId: true,
+      fulfillmentLocationId: true,
     },
   });
   if (!order) throw new Error('notfound');
@@ -259,6 +260,7 @@ export async function syncOrderProviderCollection(
       partyId: provider.id,
       paymentMethod: input.paymentMethod ?? 'PROVIDER_COLLECTION',
       branchId: order.branchId,
+      stockLocationId: order.fulfillmentLocationId,
       orderId: order.id,
       reference: order.orderNumber,
       description: `Automatically collected by ${provider.name}: ${order.orderNumber}`,
@@ -308,6 +310,7 @@ export async function syncOrderProviderCollection(
         partyId: provider.id,
         paymentMethod: input.paymentMethod ?? 'PROVIDER_COLLECTION',
         branchId: order.branchId,
+        stockLocationId: order.fulfillmentLocationId,
         orderId: order.id,
         reference: order.orderNumber,
         description: `${provider.name} fee deducted automatically: ${order.orderNumber}`,
@@ -403,6 +406,7 @@ export async function syncOrderProviderCollection(
     partyId: provider.id,
     paymentMethod: input.paymentMethod ?? 'PROVIDER_COLLECTION',
     branchId: order.branchId,
+    stockLocationId: order.fulfillmentLocationId,
     orderId: order.id,
     reference: order.orderNumber,
     description: `Collected by ${provider.name}: ${order.orderNumber}`,
@@ -464,6 +468,7 @@ export async function syncOrderProviderCollection(
       costRole: providerFeeCostRole(provider.providerFeeMode),
       paymentMethod: input.paymentMethod ?? 'PROVIDER_COLLECTION',
       branchId: order.branchId,
+      stockLocationId: order.fulfillmentLocationId,
       orderId: order.id,
       reference: order.orderNumber,
       description: `${provider.name} fee to deduct from remittance: ${order.orderNumber}`,
@@ -481,6 +486,7 @@ export async function syncOrderProviderCollection(
       categoryType: provider.providerFeeMode === 'ORDER_DELIVERY_COST' ? 'SHIPPING' : 'TECH',
       costRole: providerFeeCostRole(provider.providerFeeMode),
       branchId: order.branchId,
+      stockLocationId: order.fulfillmentLocationId,
       reference: order.orderNumber,
       archivedAt: null,
       archiveReason: null,
@@ -545,6 +551,7 @@ export async function syncOrderCustomerBalance(
       deliveryFee: true,
       extraCharges: true,
       branchId: true,
+      fulfillmentLocationId: true,
     },
   });
   if (!order) throw new Error('notfound');
@@ -658,6 +665,7 @@ export async function syncOrderCustomerBalance(
     partyId,
     paymentMethod: null,
     branchId: order.branchId,
+    stockLocationId: order.fulfillmentLocationId,
     orderId: order.id,
     reference: order.orderNumber,
     description: `Order receivable: ${order.orderNumber}`,
@@ -707,6 +715,7 @@ export async function syncOrderFinance(
       deliveryFee: true,
       extraCharges: true,
       branchId: true,
+      fulfillmentLocationId: true,
     },
   });
   if (!order) return;
@@ -832,6 +841,7 @@ export async function syncOrderFinance(
         partyId,
         paymentMethod: input.paymentMethod ?? null,
         branchId: order.branchId,
+        stockLocationId: order.fulfillmentLocationId,
         orderId: order.id,
         reference: order.orderNumber,
         description: existingPrimaryPayment
@@ -853,6 +863,7 @@ export async function syncOrderFinance(
         partyId,
         paymentMethod: input.paymentMethod ?? null,
         branchId: order.branchId,
+        stockLocationId: order.fulfillmentLocationId,
         orderId: order.id,
         reference: order.orderNumber,
         description: existingPrimaryPayment
@@ -883,6 +894,7 @@ export async function syncOrderFinance(
       partyId,
       paymentMethod: null,
       branchId: order.branchId,
+      stockLocationId: order.fulfillmentLocationId,
       orderId: order.id,
       reference: order.orderNumber,
       description: `Order receivable: ${order.orderNumber}`,
@@ -902,6 +914,7 @@ export async function syncOrderFinance(
       partyId,
       paymentMethod: null,
       branchId: order.branchId,
+      stockLocationId: order.fulfillmentLocationId,
       orderId: order.id,
       reference: order.orderNumber,
       description: `Order receivable: ${order.orderNumber}`,
@@ -936,6 +949,7 @@ export async function syncOrderFinance(
       paymentMethod: input.paymentMethod ?? null,
       settlesId: receivable.id,
       branchId: order.branchId,
+      stockLocationId: order.fulfillmentLocationId,
       orderId: order.id,
       reference: order.orderNumber,
       description: `Partial payment: ${order.orderNumber}`,
@@ -956,6 +970,7 @@ export async function syncOrderFinance(
       paymentMethod: input.paymentMethod ?? null,
       settlesId: receivable.id,
       branchId: order.branchId,
+      stockLocationId: order.fulfillmentLocationId,
       orderId: order.id,
       reference: order.orderNumber,
       description: `Partial payment: ${order.orderNumber}`,
@@ -993,6 +1008,7 @@ export async function syncInventoryReceiptFinance(
     dueDate?: Date | null;
     reference?: string | null;
     createdById?: string | null;
+    stockLocationId?: string | null;
   },
 ): Promise<string | null> {
   const amount = roundMoney(input.quantity * input.unitCost);
@@ -1004,6 +1020,14 @@ export async function syncInventoryReceiptFinance(
     select: { nameEn: true, nameAr: true, category: true, branchId: true, unit: true },
   });
   if (!item) return null;
+  const location = input.stockLocationId
+    ? await tx.stockLocation.findUnique({
+        where: { id: input.stockLocationId },
+        select: { branchId: true },
+      })
+    : null;
+  if (input.stockLocationId && !location) return null;
+  const branchId = location?.branchId ?? item.branchId;
 
   const isPaid = input.paymentMode === 'PAID';
   const importKey = RECEIPT_KEY(input.movementId);
@@ -1022,7 +1046,8 @@ export async function syncInventoryReceiptFinance(
       accountId: isPaid ? input.accountId ?? null : null,
       partyId: input.partyId ?? null,
       categoryType: categoryForInventory(item.category),
-      branchId: item.branchId,
+      branchId,
+      stockLocationId: input.stockLocationId ?? null,
       reference: input.reference ?? null,
       description: `Inventory purchase: ${item.nameEn || item.nameAr}`,
       createdById: input.createdById ?? null,
@@ -1039,7 +1064,8 @@ export async function syncInventoryReceiptFinance(
       accountId: isPaid ? input.accountId ?? null : null,
       partyId: input.partyId ?? null,
       categoryType: categoryForInventory(item.category),
-      branchId: item.branchId,
+      branchId,
+      stockLocationId: input.stockLocationId ?? null,
       reference: input.reference ?? null,
       description: `Inventory purchase: ${item.nameEn || item.nameAr}`,
     },
@@ -1059,7 +1085,7 @@ export async function syncInventoryReceiptFinance(
       unitCost: input.unitCost,
       landedUnitCost: input.unitCost,
       lineTotal: amount,
-      branchId: item.branchId,
+      branchId,
       spendTreatment: 'INVENTORY',
       classificationStatus: 'CONFIRMED',
       classificationSource: 'inventory-receipt',
@@ -1073,7 +1099,7 @@ export async function syncInventoryReceiptFinance(
       unitCost: input.unitCost,
       landedUnitCost: input.unitCost,
       lineTotal: amount,
-      branchId: item.branchId,
+      branchId,
       spendTreatment: 'INVENTORY',
       classificationStatus: 'CONFIRMED',
       classificationSource: 'inventory-receipt',
